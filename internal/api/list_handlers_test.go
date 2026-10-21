@@ -1,0 +1,111 @@
+package api
+
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+)
+
+func listItems(t *testing.T, ts *httptest.Server, cookie *http.Cookie, query string) (names []string, total int64) {
+	t.Helper()
+	resp := doJSON(t, ts, "GET", "/api/v1/items"+query, nil, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list %s = %d", query, resp.StatusCode)
+	}
+	var body struct {
+		Data []struct {
+			Name string `json:"name"`
+		} `json:"data"`
+		Total int64 `json:"total"`
+	}
+	decodeBody(t, resp, &body)
+	for _, d := range body.Data {
+		names = append(names, d.Name)
+	}
+	return names, body.Total
+}
+
+func TestItemListSearchAndFilters(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "search@test.dev", "longpassword1")
+
+	// locations: House > Cabinet
+	house := createLocation(t, ts, cookie, "House", nil)
+	cabinet := createLocation(t, ts, cookie, "Cabinet", house)
+
+	mk := func(name, desc string, loc int64, tags ...string) {
+		doJSON(t, ts, "POST", "/api/v1/items", map[string]any{
+			"name": name, "description": desc, "location_id": loc, "tags": tags,
+		}, cookie)
+	}
+	mk("Raspberry Pi 5", "8GB single board computer", cabinet, "electronics", "sbcs")
+	mk("M3 screws", "stainless machine screws", house, "hardware")
+	mk("Filament spool", "PLA 1kg for 3D printing", house, "electronics")
+
+	// full-text: name and description both indexed
+	if names, _ := listItems(t, ts, cookie, "?q=raspberry"); len(names) != 1 || names[0] != "Raspberry Pi 5" {
+		t.Fatalf("q=raspberry -> %v", names)
+	}
+	if names, _ := listItems(t, ts, cookie, "?q=stainless"); len(names) != 1 || names[0] != "M3 screws" {
+		t.Fatalf("q=stainless (description) -> %v", names)
+	}
+	// FTS special characters must not 500 (Review Focus #2). The raw input is
+	// tokenized into quoted phrases, so this yields 200 with 0 matches, not an
+	// error. (Adapted from the plan: the verbatim URL contained unencoded
+	// spaces/quotes/parens, which net/http rejects with 400 before any handler
+	// runs; the q param is percent-encoded here, and 0 matches is the safe
+	// result the plan's Review Focus #2 wording expects.)
+	if _, total := listItems(t, ts, cookie, "?q="+url.QueryEscape(`"quoted" AND* (near)`)); total != 0 {
+		t.Fatal("special-char query errored")
+	}
+	// location filter includes descendants: House matches Cabinet's item too
+	if names, total := listItems(t, ts, cookie, "?location_id="+fmtInt64(house)); total != 3 {
+		t.Fatalf("location with descendants -> %+v", names)
+	}
+	if _, total := listItems(t, ts, cookie, "?location_id="+fmtInt64(cabinet)); total != 1 {
+		t.Fatal("cabinet should match exactly the one item")
+	}
+	// tag filter
+	if _, total := listItems(t, ts, cookie, "?tag=electronics"); total != 2 {
+		t.Fatal("tag=electronics should match 2")
+	}
+	// visibility filter
+	if _, total := listItems(t, ts, cookie, "?visibility=shared"); total != 0 {
+		t.Fatal("nothing shared yet")
+	}
+}
+
+func TestItemListPaginationClamps(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "page@test.dev", "longpassword1")
+	for i := 0; i < 3; i++ {
+		doJSON(t, ts, "POST", "/api/v1/items",
+			map[string]any{"name": fmt.Sprintf("item %d", i)}, cookie)
+	}
+	// page=0 and page_size=99999 clamp to 1 and 200 (Review Focus #4)
+	if _, total := listItems(t, ts, cookie, "?page=0&page_size=99999"); total != 3 {
+		t.Fatal("clamped pagination lost items")
+	}
+	if names, _ := listItems(t, ts, cookie, "?page=2&page_size=2"); len(names) != 1 {
+		t.Fatalf("page 2 of 3 items -> %v", names)
+	}
+	if names, _ := listItems(t, ts, cookie, "?page=9&page_size=2"); names != nil {
+		t.Fatalf("past-the-end page should be empty, got %v", names)
+	}
+	// non-numeric params fall back to defaults
+	if _, total := listItems(t, ts, cookie, "?page=abc&page_size=-1"); total != 3 {
+		t.Fatal("garbage pagination params broke the list")
+	}
+}
+
+func TestItemListIsolated(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	a := registerUser(t, ts, "iso-a@test.dev", "longpassword1")
+	b := registerUser(t, ts, "iso-b@test.dev", "longpassword1")
+	doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "a's thing"}, a)
+	if _, total := listItems(t, ts, b, ""); total != 0 {
+		t.Fatal("b sees a's items")
+	}
+}

@@ -735,6 +735,102 @@ func (q *Queries) ListItemPhotos(ctx context.Context, itemID int64) ([]ItemPhoto
 	return items, nil
 }
 
+const listItems = `-- name: ListItems :many
+SELECT i.id, i.user_id, i.name, i.description, i.qty, i.unit, i.location_id,
+       i.visibility, i.created_at, i.updated_at,
+       (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
+       count(*) OVER () AS total_count
+FROM items i
+WHERE i.user_id = ?1
+  AND (?2 IS NULL OR i.id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?2))
+  AND (?3 IS NULL OR i.location_id IN (
+      SELECT value FROM json_each(?3)))
+  AND (?4 IS NULL OR i.id IN (
+      SELECT it.item_id FROM item_tags it JOIN tags t ON t.id = it.tag_id
+      WHERE t.name = ?4 AND t.user_id = ?1))
+  AND (?5 IS NULL OR i.id IN (
+      SELECT pi.item_id FROM project_items pi WHERE pi.project_id = ?5))
+  AND (?6 IS NULL OR i.visibility = ?6)
+ORDER BY i.updated_at DESC
+LIMIT ?8 OFFSET ?7
+`
+
+type ListItemsParams struct {
+	UserID     int64       `json:"user_id"`
+	Q          interface{} `json:"q"`
+	LocIdsJson interface{} `json:"loc_ids_json"`
+	Tag        interface{} `json:"tag"`
+	ProjectID  interface{} `json:"project_id"`
+	Visibility interface{} `json:"visibility"`
+	Off        int64       `json:"off"`
+	Lim        int64       `json:"lim"`
+}
+
+type ListItemsRow struct {
+	ID          int64         `json:"id"`
+	UserID      int64         `json:"user_id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Qty         float64       `json:"qty"`
+	Unit        string        `json:"unit"`
+	LocationID  sql.NullInt64 `json:"location_id"`
+	Visibility  string        `json:"visibility"`
+	CreatedAt   string        `json:"created_at"`
+	UpdatedAt   string        `json:"updated_at"`
+	PhotoCount  int64         `json:"photo_count"`
+	TotalCount  int64         `json:"total_count"`
+}
+
+// R5 fallback form: sqlc v1.31.1 rejects a recursive CTE embedded in IN()
+// ("relation d does not exist"), so the handler resolves the location subtree
+// via LocationDescendants (Task 11) and passes the id list as a JSON array.
+// Filter semantics identical to the planned CTE form: NULL param = no filter.
+// count(*) OVER() yields the pre-pagination total.
+func (q *Queries) ListItems(ctx context.Context, arg ListItemsParams) ([]ListItemsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listItems,
+		arg.UserID,
+		arg.Q,
+		arg.LocIdsJson,
+		arg.Tag,
+		arg.ProjectID,
+		arg.Visibility,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListItemsRow
+	for rows.Next() {
+		var i ListItemsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Description,
+			&i.Qty,
+			&i.Unit,
+			&i.LocationID,
+			&i.Visibility,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PhotoCount,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLocations = `-- name: ListLocations :many
 SELECT id, user_id, name, parent_id, notes, created_at, updated_at FROM locations WHERE user_id = ? ORDER BY name
 `

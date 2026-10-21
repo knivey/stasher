@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -280,6 +281,74 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
+	u, _ := currentUser(r.Context())
+	q := r.URL.Query()
+	p := parsePage(r)
+
+	params := dbpkg.ListItemsParams{
+		UserID: u.ID, Lim: p.Limit(), Off: p.Offset(),
+	}
+	if raw := q.Get("q"); raw != "" {
+		params.Q = sqlNullString(ftsQuery(raw))
+	}
+	if v := q.Get("location_id"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			// R5 fallback: sqlc can't embed the recursive CTE in IN(), so
+			// resolve the subtree (self + descendants, user-scoped) here and
+			// pass it as a JSON array for json_each().
+			ids, err := s.q.LocationDescendants(r.Context(), dbpkg.LocationDescendantsParams{
+				ID: id, UserID: u.ID, UserID_2: u.ID,
+			})
+			if err != nil {
+				s.internalErr(w, err)
+				return
+			}
+			b, err := json.Marshal(ids)
+			if err != nil {
+				s.internalErr(w, err)
+				return
+			}
+			params.LocIdsJson = sqlNullString(string(b))
+		}
+	}
+	if v := q.Get("tag"); v != "" {
+		params.Tag = sqlNullString(v)
+	}
+	if v := q.Get("project_id"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			params.ProjectID = sqlNullInt64(id)
+		}
+	}
+	if v := q.Get("visibility"); v == "private" || v == "shared" {
+		params.Visibility = sqlNullString(v)
+	}
+
+	rows, err := s.q.ListItems(r.Context(), params)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	total := int64(len(rows))
+	for _, row := range rows {
+		var loc any
+		if row.LocationID.Valid {
+			loc = row.LocationID.Int64
+		}
+		out = append(out, map[string]any{
+			"id": row.ID, "name": row.Name, "description": row.Description,
+			"qty": row.Qty, "unit": row.Unit, "location_id": loc,
+			"visibility": row.Visibility, "photo_count": row.PhotoCount,
+			"created_at": row.CreatedAt, "updated_at": row.UpdatedAt,
+		})
+	}
+	if len(rows) > 0 {
+		total = rows[0].TotalCount
+	}
+	writeJSON(w, http.StatusOK, listEnvelope{Data: out, Total: total})
 }
 
 func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
