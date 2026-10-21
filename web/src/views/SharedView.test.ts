@@ -125,4 +125,19 @@ describe('SharedView', () => {
     expect(cards.find('img').exists()).toBe(false)
     expect(cards.text()).toContain('📷 3')
   })
+
+  it('shows a muted disposed badge on cards for disposed shared items', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [
+        { id: 9, name: 'solder tips', owner_name: 'Alice', qty: 0, disposed: true },
+        { id: 10, name: 'wrench', owner_name: 'Bob', qty: 1 },
+      ],
+      total: 2,
+    }), { status: 200 })))
+    const { w } = await mountView()
+    const cards = w.findAll('[data-cards] > div')
+    expect(cards[0].find('[data-disposed]').exists()).toBe(true)
+    expect(cards[0].text()).toContain('disposed')
+    expect(cards[1].find('[data-disposed]').exists()).toBe(false)
+  })
 })

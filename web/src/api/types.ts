@@ -6,9 +6,15 @@ export interface ItemProject { id: number; name: string; status: string; qty_use
 export interface Item {
   id: number; name: string; description: string; qty: number; unit: string
   location_id: number | null; visibility: 'private' | 'shared'
+  disposed?: boolean
   photo_count?: number; thumb_key?: string | null
   created_at: string; updated_at: string
   tags?: Tag[]; photos?: Photo[]; documents?: Doc[]; projects?: ItemProject[]; owner_name?: string
+}
+export interface LedgerEntry {
+  id: number; delta: number; resulting_qty: number
+  kind: 'used' | 'sold' | 'lost' | 'found' | 'restock' | 'disposed' | 'adjustment'
+  project_id: number | null; note: string; created_at: string
 }
 export interface Location { id: number; name: string; parent_id: number | null; notes: string; created_at: string; updated_at: string }
 export interface Breadcrumb { id: number; name: string }

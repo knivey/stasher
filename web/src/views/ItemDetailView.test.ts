@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import ItemDetailView from './ItemDetailView.vue'
@@ -18,6 +18,8 @@ const item = {
 
 function okItemFetch() {
   return vi.fn(async (url: string) => {
+    if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    if (url.includes('/projects')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
     if (url.includes('/items/9')) return new Response(JSON.stringify(item), { status: 200 })
     if (url.includes('/locations/3')) return new Response(JSON.stringify({
       location: { id: 3, name: 'Bin' },
@@ -188,5 +190,159 @@ describe('ItemDetailView', () => {
     await flushPromises()
     expect(calls.filter(c => c.startsWith('DELETE'))).toHaveLength(0)
     expect(w.find('.fixed.inset-0').exists()).toBe(false)
+  })
+
+  // ---- Usage ledger ----
+
+  const project = { id: 31, name: '3D printer build', status: 'active', notes: '', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }
+
+  // Mock that understands the full detail-view surface (item, usage list,
+  // projects, breadcrumbs); POST /usage bodies land in `posts`.
+  function usageFetch(opts: { postStatus?: number; entries?: unknown[]; total?: number } = {}) {
+    const calls: { method: string; url: string; body?: string }[] = []
+    const stub = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ method: init?.method ?? 'GET', url, body: init?.body as string | undefined })
+      if (url.includes('/items/9/usage') && init?.method === 'POST') {
+        if (opts.postStatus && opts.postStatus !== 201)
+          return new Response(JSON.stringify({ error: { code: 'validation_error', message: 'qty would go below zero' } }), { status: opts.postStatus })
+        return new Response(JSON.stringify({ id: 99, delta: -3, resulting_qty: 247, kind: 'used', project_id: null, note: 'x', created_at: '2026-10-21T00:00:00Z' }), { status: 201 })
+      }
+      if (url.includes('/items/9/usage'))
+        return new Response(JSON.stringify({ data: opts.entries ?? [], total: opts.total ?? 0 }), { status: 200 })
+      if (url.includes('/projects')) return new Response(JSON.stringify({ data: [project], total: 1 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify(item), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    })
+    return { stub, calls }
+  }
+
+  async function openLogForm(w: VueWrapper) {
+    await w.findAll('button').find(b => b.text() === 'Log usage')!.trigger('click')
+    await flushPromises() // projects select loads
+    return w.find('[data-log-form]')
+  }
+
+  it('logs usage: posts exactly {kind, delta, note}, omits project_id when unselected, toasts and refetches', async () => {
+    const { stub, calls } = usageFetch()
+    vi.stubGlobal('fetch', stub)
+    const { w } = await mountView()
+    await openLogForm(w)
+    // kind select defaults to 'used'; set delta and note
+    const delta = w.find('[data-log-delta]')
+    ;(delta.element as HTMLInputElement).value = '-3'
+    await delta.trigger('input')
+    const note = w.find('[data-log-note]')
+    ;(note.element as HTMLInputElement).value = 'x'
+    await note.trigger('input')
+    await w.find('[data-log-form]').trigger('submit')
+    await flushPromises()
+    const post = calls.find(c => c.method === 'POST')
+    expect(post?.url).toBe('/api/v1/items/9/usage')
+    expect(JSON.parse(post!.body!)).toEqual({ kind: 'used', delta: -3, note: 'x' })
+    expect(toasts.some(t => t.message === 'Usage logged' && t.type === 'success')).toBe(true)
+    // form closed, item refetched, history refetched
+    expect(w.find('[data-log-form]').exists()).toBe(false)
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(2)
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9/usage?page=1&page_size=20')).toHaveLength(2)
+  })
+
+  it('includes project_id (and omits note) when a project is selected and the note is empty', async () => {
+    const { stub, calls } = usageFetch()
+    vi.stubGlobal('fetch', stub)
+    const { w } = await mountView()
+    await openLogForm(w)
+    const delta = w.find('[data-log-delta]')
+    ;(delta.element as HTMLInputElement).value = '-3'
+    await delta.trigger('input')
+    const projectSel = w.find('[data-log-project]')
+    ;(projectSel.element as HTMLSelectElement).value = '31'
+    await projectSel.trigger('change')
+    await w.find('[data-log-form]').trigger('submit')
+    await flushPromises()
+    const post = calls.find(c => c.method === 'POST')
+    expect(JSON.parse(post!.body!)).toEqual({ kind: 'used', delta: -3, project_id: 31 })
+  })
+
+  it('hides the delta input for kind=disposed, shows the helper text, and posts {kind:"disposed"} only', async () => {
+    const { stub, calls } = usageFetch()
+    vi.stubGlobal('fetch', stub)
+    const { w } = await mountView()
+    await openLogForm(w)
+    expect(w.find('[data-log-delta]').exists()).toBe(true) // visible for used
+    const kind = w.find('[data-log-kind]')
+    ;(kind.element as HTMLSelectElement).value = 'disposed'
+    await kind.trigger('change')
+    expect(w.find('[data-log-delta]').exists()).toBe(false) // hidden for disposed
+    expect(w.text()).toContain('Sets quantity to 0 and marks the item disposed.')
+    await w.find('[data-log-form]').trigger('submit')
+    await flushPromises()
+    const post = calls.find(c => c.method === 'POST')
+    expect(JSON.parse(post!.body!)).toEqual({ kind: 'disposed' }) // no delta key
+    expect(toasts.some(t => t.message === 'Usage logged' && t.type === 'success')).toBe(true)
+  })
+
+  it('renders history entries newest-first: signed delta, kind badge, quoted note, resulting qty, date, project chip', async () => {
+    const entries = [
+      { id: 2, delta: -3, resulting_qty: 2, kind: 'used', project_id: 31, note: 'for the printer', created_at: '2026-10-02T10:00:00Z' },
+      { id: 1, delta: 5, resulting_qty: 5, kind: 'adjustment', project_id: null, note: 'initial', created_at: '2026-10-01T10:00:00Z' },
+    ]
+    const { stub } = usageFetch({ entries, total: 25 })
+    vi.stubGlobal('fetch', stub)
+    const { w } = await mountView()
+    const section = w.find('[data-usage]')
+    expect(section.exists()).toBe(true)
+    const text = section.text()
+    expect(text).toContain('−3') // U+2212, newest first
+    expect(text).toContain('+5')
+    expect(text.indexOf('−3')).toBeLessThan(text.indexOf('+5'))
+    expect(text).toContain('→ 2 left')
+    expect(text).toContain('“for the printer”')
+    expect(text).toContain('2026-10-02')
+    expect(section.find('[data-kind-badge]').text()).toBe('used')
+    const chip = section.find('a[href="/projects/31"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('3D printer build')
+  })
+
+  it('advances the history page via Pagination and fetches page 2', async () => {
+    const entries = [{ id: 2, delta: -3, resulting_qty: 2, kind: 'used', project_id: null, note: '', created_at: '2026-10-02T10:00:00Z' }]
+    const { stub, calls } = usageFetch({ entries, total: 25 })
+    vi.stubGlobal('fetch', stub)
+    const { w } = await mountView()
+    const section = w.find('[data-usage]')
+    const next = section.findAll('button').find(b => b.text() === 'Next')
+    expect(next).toBeTruthy()
+    await next!.trigger('click')
+    await flushPromises()
+    expect(calls.some(c => c.url === '/api/v1/items/9/usage?page=2&page_size=20')).toBe(true)
+  })
+
+  it('shows a muted disposed badge in the item header when the item is disposed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify({ ...item, disposed: true }), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    const { w } = await mountView()
+    expect(w.find('[data-disposed]').exists()).toBe(true)
+    expect(w.text()).toContain('disposed')
+  })
+
+  it('toasts and keeps the form open when the backend rejects a below-zero delta (400)', async () => {
+    const { stub, calls } = usageFetch({ postStatus: 400 })
+    vi.stubGlobal('fetch', stub)
+    const { w } = await mountView()
+    await openLogForm(w)
+    const delta = w.find('[data-log-delta]')
+    ;(delta.element as HTMLInputElement).value = '-999'
+    await delta.trigger('input')
+    await w.find('[data-log-form]').trigger('submit')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'qty would go below zero' && t.type === 'error')).toBe(true)
+    expect(toasts.some(t => t.message === 'Usage logged')).toBe(false)
+    expect(w.find('[data-log-form]').exists()).toBe(true) // form stays open
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(1) // no refetch
   })
 })

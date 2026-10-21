@@ -95,7 +95,7 @@ async function copy(item: SharedItem) {
       <div v-for="i in items" :key="i.id"
         class="bg-white rounded-xl shadow px-4 py-3 flex items-center justify-between">
         <div>
-          <div class="font-medium">{{ i.name }}</div>
+          <div class="font-medium">{{ i.name }}<span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 text-gray-500 px-1.5 py-0.5 text-xs font-normal align-middle">disposed</span></div>
           <div class="text-xs text-slate-500">from {{ i.owner_name }} · {{ i.qty }}{{ i.unit ? ` ${i.unit}` : '' }}</div>
           <img v-if="i.thumb_key" :src="`/files/${i.thumb_key}`" loading="lazy" alt=""
             class="h-24 w-full object-cover rounded-lg" />

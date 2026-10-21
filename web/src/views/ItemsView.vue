@@ -108,7 +108,7 @@ onMounted(() => {
         </thead>
         <tbody class="divide-y">
           <tr v-for="i in store.items" :key="i.id" @click="router.push(`/items/${i.id}`)" class="cursor-pointer hover:bg-slate-50">
-            <td class="px-3 py-2"><router-link :to="`/items/${i.id}`" class="hover:underline">{{ i.name }}</router-link></td>
+            <td class="px-3 py-2"><router-link :to="`/items/${i.id}`" class="hover:underline">{{ i.name }}</router-link><span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 text-gray-500 px-1.5 py-0.5 text-xs align-middle">disposed</span></td>
             <td class="px-3 py-2">{{ i.qty }}{{ i.unit ? ` ${i.unit}` : '' }}</td>
             <td class="px-3 py-2">{{ i.location_id && locationName.get(i.location_id) || '—' }}</td>
             <td class="px-3 py-2 text-slate-500">{{ i.tags?.length ? i.tags.map(t => t.name).join(', ') : '—' }}</td>
@@ -123,7 +123,7 @@ onMounted(() => {
         <router-link v-for="i in store.items" :key="i.id" :to="`/items/${i.id}`"
           class="block bg-white rounded-xl shadow px-4 py-3 flex items-center justify-between">
           <div>
-            <div class="font-medium">{{ i.name }}</div>
+            <div class="font-medium">{{ i.name }}<span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 text-gray-500 px-1.5 py-0.5 text-xs font-normal align-middle">disposed</span></div>
             <img v-if="i.thumb_key" :src="`/files/${i.thumb_key}`" loading="lazy" alt=""
               class="h-24 w-full object-cover rounded-lg" />
             <div v-else-if="i.photo_count" class="text-xs text-slate-400">📷 {{ i.photo_count }}</div>

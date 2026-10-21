@@ -97,4 +97,28 @@ describe('ItemsView', () => {
     await flushPromises()
     expect(urls.some(u => u.includes('location_id=7'))).toBe(true)
   })
+
+  it('shows a muted disposed badge on disposed items in both the table and the mobile cards', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify({
+        data: [
+          { id: 5, name: 'dead PSU', qty: 0, disposed: true },
+          { id: 6, name: 'live PSU', qty: 1 },
+        ],
+        total: 2,
+      }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    const w = mount(ItemsView)
+    await flushPromises()
+    // table: badge sits in the Name cell
+    expect(w.find('table').find('[data-disposed]').exists()).toBe(true)
+    expect(w.find('table').text()).toContain('disposed')
+    // mobile cards: small gray badge
+    expect(w.find('[data-cards]').find('[data-disposed]').exists()).toBe(true)
+    // exactly one badge per branch (only the disposed row carries it)
+    expect(w.findAll('[data-disposed]')).toHaveLength(2)
+  })
 })
