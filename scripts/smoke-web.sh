@@ -20,6 +20,7 @@ CHROME=$(command -v chromium || command -v chromium-browser || command -v google
   http://127.0.0.1:18097/login 2>/dev/null
 [ -s "$DATA/mobile.png" ] || { echo "FAIL: no mobile screenshot"; exit 1; }
 
-# manifest served
-curl -sf http://127.0.0.1:18097/manifest.webmanifest >/dev/null || { echo "FAIL: manifest"; exit 1; }
+# manifest served with the correct content type (mime.AddExtensionType)
+CT=$(curl -sf -o /dev/null -w '%{content_type}' http://127.0.0.1:18097/manifest.webmanifest)
+[ "$CT" = "application/manifest+json" ] || { echo "FAIL: manifest content-type: $CT"; exit 1; }
 echo "smoke ok"

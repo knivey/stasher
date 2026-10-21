@@ -39,7 +39,8 @@ const options = computed<LocationOption[]>(() => {
 onMounted(async () => {
   if (props.locations) return
   try {
-    // page_size=200 is the backend max; fetched once per mount.
+    // Locations ignore pagination: the full list comes back (the param is
+    // accepted but unused — see docs/api-notes.md); fetched once per mount.
     const res = await api.get<ListResponse<Location>>('/api/v1/locations?page_size=200')
     fetched.value = res.data
   } catch (e) {

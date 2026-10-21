@@ -121,7 +121,7 @@ onMounted(fetchItem)
       </div>
       <ul v-if="item.documents?.length" class="bg-white rounded-xl shadow divide-y text-sm">
         <li v-for="d in item.documents" :key="d.id" class="flex items-center justify-between gap-2 px-4 py-2">
-          <a :href="`/files/${d.storage_key}`" target="_blank" class="hover:underline">📄 {{ d.filename }} ({{ Math.ceil(d.size_bytes / 1024) }} KB)</a>
+          <a :href="`/files/${d.storage_key}`" target="_blank" rel="noopener" class="hover:underline">📄 {{ d.filename }} ({{ Math.ceil(d.size_bytes / 1024) }} KB)</a>
           <button @click="deleteDoc(d)" class="text-red-600">Delete</button>
         </li>
       </ul>

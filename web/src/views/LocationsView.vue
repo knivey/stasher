@@ -13,7 +13,7 @@ const rows = computed<LocationRow[]>(() => locationTreeRows(locations.value))
 
 async function fetchLocations() {
   try {
-    // page_size=200 is the backend max (matches LocationSelect).
+    // Locations ignore pagination — the full list comes back (param unused).
     const res = await api.get<ListResponse<Location>>('/api/v1/locations?page_size=200')
     locations.value = res.data
   } catch (e) {

@@ -13,10 +13,18 @@
         <button class="w-full text-left rounded-lg px-3 py-2 hover:bg-slate-700" @click="logout">Sign out</button>
       </div>
     </aside>
-    <!-- mobile top bar + bottom nav -->
-    <header class="md:hidden sticky top-0 z-10 bg-slate-900 text-white px-4 py-3 flex justify-between">
+    <!-- mobile top bar + bottom nav. Settings/Shared live as compact
+         icon-links in the top bar (Admin too, for admins) so every
+         destination is ≤1 tap on mobile; the bottom nav keeps the five
+         primary destinations. -->
+    <header class="md:hidden sticky top-0 z-10 bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
       <span class="font-bold">Stasher</span>
-      <button @click="logout">Sign out</button>
+      <nav class="flex items-center gap-3 text-sm" aria-label="Secondary">
+        <router-link to="/shared" aria-label="Shared" title="Shared">👥</router-link>
+        <router-link to="/settings" aria-label="Settings" title="Settings">⚙️</router-link>
+        <router-link v-if="auth.user?.is_admin" to="/admin" aria-label="Admin" title="Admin">🛡️</router-link>
+        <button @click="logout">Sign out</button>
+      </nav>
     </header>
     <main class="md:pl-56 pb-20 md:pb-0">
       <div class="p-4 max-w-5xl mx-auto"><router-view /></div>
@@ -31,6 +39,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { toast } from '../utils/toast'
 
 const auth = useAuthStore(), route = useRoute(), router = useRouter()
 const nav = computed(() => {
@@ -42,5 +51,11 @@ const nav = computed(() => {
   return auth.user?.is_admin ? [...base, { to: '/admin', label: 'Admin' }] : base
 })
 const mobileNav = computed(() => nav.value.slice(0, 5).map(n => ({ to: n.to, short: n.label.slice(0, 5) })))
-async function logout() { await auth.logout(); router.push('/login') }
+// The logout POST can fail on a dead network — the store still clears the
+// user (finally), so toast the error and land on /login either way instead
+// of leaving an unhandled rejection stranded on the shell.
+async function logout() {
+  await auth.logout().catch((e: Error) => toast(e.message, 'error'))
+  router.push('/login')
+}
 </script>

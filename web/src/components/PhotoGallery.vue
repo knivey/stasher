@@ -5,7 +5,7 @@
         <img :src="`/files/${p.storage_key}`" :alt="p.caption || 'photo'" class="w-full h-24 object-cover rounded-lg cursor-zoom-in"
           @click="selected = p" />
         <button v-if="canEdit" @click.stop="emit('delete', p)"
-          class="absolute top-1 right-1 bg-red-600 text-white rounded px-1 text-xs opacity-0 group-hover:opacity-100">✕</button>
+          class="absolute top-1 right-1 bg-red-600 text-white rounded px-1 text-xs opacity-100 md:opacity-0 md:group-hover:opacity-100">✕</button>
       </div>
     </div>
     <div v-if="selected" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"

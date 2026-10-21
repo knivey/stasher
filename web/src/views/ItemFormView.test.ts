@@ -137,6 +137,53 @@ describe('ItemFormView create', () => {
     expect(router.currentRoute.value.path).toBe('/items/42')
   })
 
+  it('waits for an in-flight photo downscale before snapshotting the queue (save race)', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST') {
+        calls.push('POST item')
+        return new Response(JSON.stringify({ id: 42 }), { status: 200 })
+      }
+      if (url.includes('/items/42/photos')) { calls.push('POST photo'); return new Response(null, { status: 204 }) }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    await router.push('/items/new')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    const vm = w.vm as any
+    vm.form.name = 'Race'
+
+    // Hold the canvas encode: toBlob's callback fires only on release, so
+    // the pick's downscale promise stays pending past the Save click.
+    let releaseEncode!: (b: Blob) => void
+    const ctx = { drawImage: vi.fn() }
+    const canvas = { width: 0, height: 0, getContext: () => ctx,
+      toBlob: (cb: (b: Blob) => void) => { releaseEncode = cb } }
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 4000, height: 2000, close() {} }))
+    const realCreate = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) =>
+      tag === 'canvas' ? canvas as unknown as HTMLCanvasElement : realCreate(tag as keyof HTMLElementTagNameMap))
+
+    const big = new File(['x'], 'big.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(big, 'size', { value: 9_000_000 })
+    const photoInput = w.find('input[accept="image/*"]')
+    Object.defineProperty(photoInput.element, 'files', { value: [big] })
+    await photoInput.trigger('change')
+    await flushPromises()
+
+    // Save while the encode is still in flight…
+    const saving = vm.save()
+    await flushPromises()
+    expect(calls).toEqual([]) // …nothing POSTed yet: save drains the encode first
+
+    releaseEncode(new Blob(['j'], { type: 'image/jpeg' }))
+    await saving
+    await flushPromises()
+    expect(calls).toEqual(['POST item', 'POST photo']) // the picked photo survived the race
+    expect(router.currentRoute.value.path).toBe('/items/42')
+  })
+
   it('toasts but still navigates when a queued upload fails after create', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
       if (url.endsWith('/api/v1/items') && init?.method === 'POST')

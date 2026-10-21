@@ -178,32 +178,34 @@ function fmtTime(iso: string) {
           @click="revokeAllOthers">Revoke all other devices</button>
       </div>
       <p v-if="!sessions.length" class="text-slate-400 text-sm">No devices found.</p>
-      <table v-else class="w-full text-sm">
-        <thead>
-          <tr class="text-left text-xs text-slate-500 border-b">
-            <th class="py-1.5 pr-2">Device</th>
-            <th class="py-1.5 pr-2">IP</th>
-            <th class="py-1.5 pr-2">Last seen</th>
-            <th class="py-1.5"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="s in sessions" :key="s.id" data-session-row class="border-b last:border-0 align-top">
-            <td class="py-2 pr-2 max-w-48">
-              <span class="break-words">{{ s.user_agent || 'Unknown device' }}</span>
-              <span v-if="s.current" data-current-badge
-                class="ml-2 whitespace-nowrap rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-xs font-medium">This device</span>
-            </td>
-            <td class="py-2 pr-2 text-slate-500">{{ s.last_ip }}</td>
-            <td class="py-2 pr-2 text-slate-500">{{ fmtTime(s.last_seen_at) }}</td>
-            <td class="py-2 text-right">
-              <button v-if="!s.current" data-revoke-session type="button"
-                :disabled="revokingId !== null"
-                class="text-red-600 hover:underline disabled:opacity-50" @click="revokeSession(s)">Revoke</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs text-slate-500 border-b">
+              <th class="py-1.5 pr-2">Device</th>
+              <th class="py-1.5 pr-2">IP</th>
+              <th class="py-1.5 pr-2">Last seen</th>
+              <th class="py-1.5"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in sessions" :key="s.id" data-session-row class="border-b last:border-0 align-top">
+              <td class="py-2 pr-2 max-w-48">
+                <span class="break-words">{{ s.user_agent || 'Unknown device' }}</span>
+                <span v-if="s.current" data-current-badge
+                  class="ml-2 whitespace-nowrap rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-xs font-medium">This device</span>
+              </td>
+              <td class="py-2 pr-2 text-slate-500">{{ s.last_ip }}</td>
+              <td class="py-2 pr-2 text-slate-500">{{ fmtTime(s.last_seen_at) }}</td>
+              <td class="py-2 text-right">
+                <button v-if="!s.current" data-revoke-session type="button"
+                  :disabled="revokingId !== null"
+                  class="text-red-600 hover:underline disabled:opacity-50" @click="revokeSession(s)">Revoke</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 </template>

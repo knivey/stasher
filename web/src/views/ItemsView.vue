@@ -22,7 +22,9 @@ watch(search, v => {
 })
 onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 
-// Locations & tags feed the filter selects (page_size=200 = backend max).
+// Locations & tags feed the filter selects. NOTE: these two endpoints
+// ignore pagination entirely — the page_size param is accepted but unused
+// and the full list always comes back (see docs/api-notes.md).
 const locations = ref<Location[]>([])
 const tags = ref<Tag[]>([])
 const locationOptions = computed(() => locationDepthOptions(locations.value))

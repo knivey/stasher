@@ -74,3 +74,21 @@ check, so:
   rename of a bad id yields `404 not_found`.
 - Name collisions with *other users'* tags are invisible (tags are
   per-user) and never block a rename.
+
+## Frontend notes
+
+Facts discovered by the frontend round, kept here so they survive:
+
+- **Locations, tags and projects lists ignore pagination.** `GET
+  /locations`, `GET /tags` and `GET /projects` return the **full list**
+  every time — `page`/`page_size` params are accepted but unused. Only
+  `GET /items` and `GET /shared` actually paginate (default 50, max 200).
+  Frontend callers of the unpaginated endpoints may pass `page_size` (a
+  harmless no-op) but must not rely on it; the `page_size=200 = backend
+  max` comments that used to sit next to those calls were wrong and are
+  gone.
+- **List responses carry no photo storage keys.** Item lists (own or
+  shared) expose only `photo_count` — no thumbnail/photo keys — so
+  mobile/shared list cards render a 📷 count badge rather than image
+  thumbnails. Thumbnails in lists would need a backend change (embed
+  photo keys or thumbs in list responses).

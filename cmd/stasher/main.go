@@ -6,6 +6,7 @@ import (
 	"flag"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,6 +23,10 @@ import (
 )
 
 func main() {
+	// Go's mime table has no .webmanifest entry — without this the PWA
+	// manifest is served as text/plain and browsers reject the install.
+	mime.AddExtensionType(".webmanifest", "application/manifest+json")
+
 	configPath := flag.String("config", "", "path to YAML config file")
 	flag.Parse()
 	cmd := flag.Arg(0) // "" or "serve" runs the server; "migrate" only migrates

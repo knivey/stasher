@@ -139,41 +139,43 @@ onMounted(async () => {
     <section class="bg-white rounded-xl shadow p-4 space-y-3">
       <h2 class="text-sm font-semibold text-slate-700">Users</h2>
       <p v-if="!users.length" class="text-slate-400 text-sm">No users found.</p>
-      <table v-else class="w-full text-sm">
-        <thead>
-          <tr class="text-left text-xs text-slate-500 border-b">
-            <th class="py-1.5 pr-2">Email</th>
-            <th class="py-1.5 pr-2">Name</th>
-            <th class="py-1.5 pr-2">Admin</th>
-            <th class="py-1.5 pr-2">Disabled</th>
-            <th class="py-1.5">Created</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="u in users" :key="u.id" data-user-row class="border-b last:border-0 align-top"
-            :data-disabled="u.disabled ? 'true' : undefined"
-            :class="{ 'line-through text-slate-400': u.disabled }">
-            <td class="py-2 pr-2">
-              <span class="break-words">{{ u.email }}</span>
-              <span v-if="u.id === auth.user?.id" data-you-badge
-                class="ml-2 whitespace-nowrap rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-xs font-medium">you</span>
-            </td>
-            <td class="py-2 pr-2">{{ u.display_name }}</td>
-            <td class="py-2 pr-2">
-              <input v-model="u.is_admin" data-admin-toggle type="checkbox" class="rounded"
-                :disabled="busyUserId !== null" @change="onAdminToggle(u)" />
-            </td>
-            <td class="py-2 pr-2">
-              <!-- Never render a control that could disable yourself; the
-                   backend would reject it with cannot_disable_self. -->
-              <input v-if="u.id !== auth.user?.id" v-model="u.disabled" data-disable-toggle type="checkbox"
-                class="rounded" :disabled="busyUserId !== null" @change="onDisabledToggle(u)" />
-              <span v-else class="text-slate-300" title="You cannot disable your own account">—</span>
-            </td>
-            <td class="py-2 text-slate-500">{{ fmtTime(u.created_at) }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs text-slate-500 border-b">
+              <th class="py-1.5 pr-2">Email</th>
+              <th class="py-1.5 pr-2">Name</th>
+              <th class="py-1.5 pr-2">Admin</th>
+              <th class="py-1.5 pr-2">Disabled</th>
+              <th class="py-1.5">Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in users" :key="u.id" data-user-row class="border-b last:border-0 align-top"
+              :data-disabled="u.disabled ? 'true' : undefined"
+              :class="{ 'line-through text-slate-400': u.disabled }">
+              <td class="py-2 pr-2">
+                <span class="break-words">{{ u.email }}</span>
+                <span v-if="u.id === auth.user?.id" data-you-badge
+                  class="ml-2 whitespace-nowrap rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-xs font-medium">you</span>
+              </td>
+              <td class="py-2 pr-2">{{ u.display_name }}</td>
+              <td class="py-2 pr-2">
+                <input v-model="u.is_admin" data-admin-toggle type="checkbox" class="rounded"
+                  :disabled="busyUserId !== null" @change="onAdminToggle(u)" />
+              </td>
+              <td class="py-2 pr-2">
+                <!-- Never render a control that could disable yourself; the
+                     backend would reject it with cannot_disable_self. -->
+                <input v-if="u.id !== auth.user?.id" v-model="u.disabled" data-disable-toggle type="checkbox"
+                  class="rounded" :disabled="busyUserId !== null" @change="onDisabledToggle(u)" />
+                <span v-else class="text-slate-300" title="You cannot disable your own account">—</span>
+              </td>
+              <td class="py-2 text-slate-500">{{ fmtTime(u.created_at) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <!-- Invites -->
@@ -193,30 +195,32 @@ onMounted(async () => {
       </div>
 
       <p v-if="!invites.length" class="text-slate-400 text-sm">No invites yet.</p>
-      <table v-else class="w-full text-sm">
-        <thead>
-          <tr class="text-left text-xs text-slate-500 border-b">
-            <th class="py-1.5 pr-2">Code</th>
-            <th class="py-1.5 pr-2">Created</th>
-            <th class="py-1.5 pr-2">Used by</th>
-            <th class="py-1.5 pr-2">Used at</th>
-            <th class="py-1.5"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="i in invites" :key="i.id" data-invite-row class="border-b last:border-0 align-top">
-            <td class="py-2 pr-2 font-mono">{{ i.code }}</td>
-            <td class="py-2 pr-2 text-slate-500">{{ fmtTime(i.created_at) }}</td>
-            <td class="py-2 pr-2">{{ i.used_at ? i.used_by_email : '—' }}</td>
-            <td class="py-2 pr-2 text-slate-500">{{ fmtTime(i.used_at) }}</td>
-            <td class="py-2 text-right">
-              <!-- only unused invites can be deleted -->
-              <button v-if="!i.used_at" data-delete-invite type="button" :disabled="deletingInviteId !== null"
-                class="text-red-600 hover:underline disabled:opacity-50" @click="deleteInvite(i)">Delete</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs text-slate-500 border-b">
+              <th class="py-1.5 pr-2">Code</th>
+              <th class="py-1.5 pr-2">Created</th>
+              <th class="py-1.5 pr-2">Used by</th>
+              <th class="py-1.5 pr-2">Used at</th>
+              <th class="py-1.5"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="i in invites" :key="i.id" data-invite-row class="border-b last:border-0 align-top">
+              <td class="py-2 pr-2 font-mono">{{ i.code }}</td>
+              <td class="py-2 pr-2 text-slate-500">{{ fmtTime(i.created_at) }}</td>
+              <td class="py-2 pr-2">{{ i.used_at ? i.used_by_email : '—' }}</td>
+              <td class="py-2 pr-2 text-slate-500">{{ fmtTime(i.used_at) }}</td>
+              <td class="py-2 text-right">
+                <!-- only unused invites can be deleted -->
+                <button v-if="!i.used_at" data-delete-invite type="button" :disabled="deletingInviteId !== null"
+                  class="text-red-600 hover:underline disabled:opacity-50" @click="deleteInvite(i)">Delete</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 </template>

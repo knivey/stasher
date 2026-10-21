@@ -27,8 +27,9 @@ async function fetchDetail() {
   }
 }
 
-// Items for the add-picker. page_size=200 is the backend max (matches
-// LocationSelect / LocationsView). Loaded once alongside the detail.
+// Items for the add-picker. Unlike locations/tags (which ignore pagination
+// and always return the full list), /items DOES paginate — page_size=200 is
+// the real backend max here. Loaded once alongside the detail.
 const allItems = ref<Item[]>([])
 
 async function loadPickerItems() {

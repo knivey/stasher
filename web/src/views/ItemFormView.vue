@@ -97,6 +97,9 @@ async function save() {
   if (saving.value) return
   saving.value = true
   try {
+    // Drain any in-flight pick encodes first so the item isn't created
+    // while a photo the user just picked is still encoding…
+    await drainPendingEncodes()
     if (editing.value) {
       await api.patch(`/api/v1/items/${itemId.value}`, buildPatch())
       toast('Saved', 'success')
@@ -112,6 +115,9 @@ async function save() {
       if (form.location_id) body.location_id = form.location_id
       if (form.tags.length) body.tags = form.tags
       const created = await api.post<Item>('/api/v1/items', body)
+      // …and drain again before the queue snapshot: a pick that started
+      // during the POST would otherwise miss the upload flush.
+      await drainPendingEncodes()
       await uploadQueued(created.id)
       toast('Saved', 'success')
       router?.push(`/items/${created.id}`)
@@ -129,16 +135,32 @@ async function save() {
 const queuedPhotos = ref<Blob[]>([])
 const queuedDocs = ref<File[]>([])
 
+// In-flight pick encodes (canvas downscale work). save() drains these
+// before it snapshots queuedPhotos, so a Save click inside the encode
+// window can't silently drop a just-picked photo.
+const pendingEncodes: Promise<void>[] = []
+
+// Splice-and-await until no encodes remain. A pick landing while we await
+// re-enters the loop, so the drain can't be outrun by a concurrent pick.
+async function drainPendingEncodes() {
+  while (pendingEncodes.length) await Promise.all(pendingEncodes.splice(0))
+}
+
 async function onPickPhotos(e: Event) {
   const el = e.target as HTMLInputElement
   const files = Array.from(el.files ?? [])
   el.value = '' // allow re-picking the same file
   for (const file of files) {
-    try {
-      queuedPhotos.value.push(await downscaleImage(file))
-    } catch (err) {
-      toast((err as Error).message, 'error')
-    }
+    const enc: Promise<void> = downscaleImage(file).then(
+      b => { queuedPhotos.value.push(b) },
+      err => { toast((err as Error).message, 'error') },
+    )
+    pendingEncodes.push(enc)
+    void enc.finally(() => {
+      const i = pendingEncodes.indexOf(enc)
+      if (i >= 0) pendingEncodes.splice(i, 1)
+    })
+    await enc
   }
 }
 

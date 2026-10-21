@@ -89,38 +89,40 @@ async function deleteTag() {
     <h1 class="text-2xl font-bold">Tags</h1>
 
     <p v-if="!tags.length" class="text-slate-400 text-sm">No tags yet.</p>
-    <table v-else class="w-full bg-white rounded-xl shadow text-sm">
-      <thead>
-        <tr class="text-left text-slate-500">
-          <th class="px-4 py-2 font-medium">Name</th>
-          <th class="px-4 py-2 font-medium">Items</th>
-          <th class="px-4 py-2"></th>
-        </tr>
-      </thead>
-      <tbody class="divide-y">
-        <tr v-for="t in tags" :key="t.id">
-          <td class="px-4 py-2">
-            <button v-if="editingId !== t.id" data-tag-name class="font-medium hover:underline"
-              :title="`Show items tagged '${t.name}'`" @click="filterByTag(t.name)">#{{ t.name }}</button>
-            <input v-else v-model="editName" data-edit-name maxlength="100" aria-label="Tag name"
-              class="border rounded-lg px-2 py-1.5 text-sm font-medium w-full"
-              @keyup.enter="saveRename(t)" @keyup.esc="cancelEdit" />
-          </td>
-          <td class="px-4 py-2 text-slate-600" data-tag-count>{{ t.item_count ?? 0 }}</td>
-          <td class="px-4 py-2 text-right whitespace-nowrap">
-            <span v-if="editingId !== t.id" class="flex gap-2 justify-end">
-              <button data-edit class="text-slate-600 hover:underline" @click="startEdit(t)">Rename</button>
-              <button data-delete class="text-red-600 hover:underline" @click="deleteTarget = t">Delete</button>
-            </span>
-            <span v-else class="flex gap-2 justify-end">
-              <button data-save :disabled="saving" class="text-slate-600 hover:underline disabled:opacity-50"
-                @click="saveRename(t)">Save</button>
-              <button class="text-slate-600 hover:underline" @click="cancelEdit">Cancel</button>
-            </span>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else class="overflow-x-auto">
+      <table class="w-full bg-white rounded-xl shadow text-sm">
+        <thead>
+          <tr class="text-left text-slate-500">
+            <th class="px-4 py-2 font-medium">Name</th>
+            <th class="px-4 py-2 font-medium">Items</th>
+            <th class="px-4 py-2"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y">
+          <tr v-for="t in tags" :key="t.id">
+            <td class="px-4 py-2">
+              <button v-if="editingId !== t.id" data-tag-name class="font-medium hover:underline"
+                :title="`Show items tagged '${t.name}'`" @click="filterByTag(t.name)">#{{ t.name }}</button>
+              <input v-else v-model="editName" data-edit-name maxlength="100" aria-label="Tag name"
+                class="border rounded-lg px-2 py-1.5 text-sm font-medium w-full"
+                @keyup.enter="saveRename(t)" @keyup.esc="cancelEdit" />
+            </td>
+            <td class="px-4 py-2 text-slate-600" data-tag-count>{{ t.item_count ?? 0 }}</td>
+            <td class="px-4 py-2 text-right whitespace-nowrap">
+              <span v-if="editingId !== t.id" class="flex gap-2 justify-end">
+                <button data-edit class="text-slate-600 hover:underline" @click="startEdit(t)">Rename</button>
+                <button data-delete class="text-red-600 hover:underline" @click="deleteTarget = t">Delete</button>
+              </span>
+              <span v-else class="flex gap-2 justify-end">
+                <button data-save :disabled="saving" class="text-slate-600 hover:underline disabled:opacity-50"
+                  @click="saveRename(t)">Save</button>
+                <button class="text-slate-600 hover:underline" @click="cancelEdit">Cancel</button>
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <ConfirmDialog :open="deleteTarget !== null" title="Delete tag"
       :message="deleteTarget
