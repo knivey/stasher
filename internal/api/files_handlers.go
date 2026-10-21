@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"io"
-	"mime"
 	"net/http"
 	"path"
 	"strconv"
@@ -230,13 +229,9 @@ func (s *Server) handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	head = head[:n]
+	// R15: stored mime is always the sniffed type; client Content-Type is
+	// never trusted (it allowed text/html injection on the app origin).
 	ct := http.DetectContentType(head)
-	if strings.HasPrefix(ct, "text/plain") && header.Header.Get("Content-Type") != "" {
-		// keep client hint for text-ish files the sniffer can't distinguish
-		if mt, _, err := mime.ParseMediaType(header.Header.Get("Content-Type")); err == nil {
-			ct = mt
-		}
-	}
 	// re-feed the sniffed head, then the rest of the file from where the
 	// head-read left f positioned (Seek(0) here would duplicate the head)
 	key, size, err := s.st.Save(io.MultiReader(bytes.NewReader(head), f), ext)
@@ -291,6 +286,13 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// isSafeInline reports whether ct may be rendered inline without scripting risk.
+func isSafeInline(ct string) bool {
+	return strings.HasPrefix(ct, "image/") ||
+		ct == "application/pdf" ||
+		strings.HasPrefix(ct, "text/plain")
+}
+
 // handleFileGet serves /files/{key} to the owner, or to any user if the
 // owning item is shared.
 func (s *Server) handleFileGet(w http.ResponseWriter, r *http.Request) {
@@ -325,10 +327,20 @@ func (s *Server) handleFileGet(w http.ResponseWriter, r *http.Request) {
 		ct = http.DetectContentType(head[:n])
 		f.Seek(0, io.SeekStart)
 	}
+	// R15: active content types are never rendered inline on this origin —
+	// unsafe types download as octet-stream instead. Applies to both the
+	// photo (serve-time sniff) and document (stored mime) paths.
+	disposition := "inline"
+	if !isSafeInline(ct) {
+		ct = "application/octet-stream"
+		disposition = "attachment"
+	}
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	if filename != "" {
-		w.Header().Set("Content-Disposition", `inline; filename="`+strings.ReplaceAll(filename, `"`, "")+`"`)
+		w.Header().Set("Content-Disposition", disposition+`; filename="`+strings.ReplaceAll(filename, `"`, "")+`"`)
+	} else if disposition == "attachment" {
+		w.Header().Set("Content-Disposition", "attachment")
 	}
 	io.Copy(w, f)
 }

@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -86,6 +87,13 @@ func TestPhotoUploadAndServe(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		if !bytes.Equal(b, png1x1) {
 			t.Fatal("file content mismatch")
+		}
+		// safe image types keep inline serving (R15)
+		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "image/png") {
+			t.Fatalf("photo content-type = %q, want image/png", ct)
+		}
+		if cd := r.Header.Get("Content-Disposition"); strings.HasPrefix(cd, "attachment") {
+			t.Fatalf("photo disposition = %q, want inline", cd)
 		}
 	}
 	// unauthenticated -> 401
@@ -196,5 +204,54 @@ func TestDocumentUploadAndDelete(t *testing.T) {
 	req.AddCookie(cookie)
 	if r, _ := http.DefaultClient.Do(req); r.StatusCode != 404 {
 		t.Fatalf("deleted doc file get = %d, want 404", r.StatusCode)
+	}
+}
+
+// TestDocumentActiveContentNotInline covers R15: a shared document that
+// sniffs as text/html must be served as a download, never rendered inline
+// on the app origin (stored-XSS guard).
+func TestDocumentActiveContentNotInline(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	owner := registerUser(t, ts, "xsstest@test.dev", "longpassword1")
+	other := registerUser(t, ts, "xssother@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "xss item"}, owner)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	resp := postFile(t, ts, "/api/v1/items/"+fmtInt64(created.ID)+"/documents",
+		"file", "evil.html", []byte("<!doctype html><script>alert(1)</script>"), owner)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("doc upload = %d", resp.StatusCode)
+	}
+	var doc struct {
+		StorageKey string `json:"storage_key"`
+		MimeType   string `json:"mime_type"`
+	}
+	decodeBody(t, resp, &doc)
+	// stored mime is the SNIFFED type; no client Content-Type override (R15)
+	if !strings.HasPrefix(doc.MimeType, "text/html") {
+		t.Fatalf("stored mime = %q, want sniffed text/html", doc.MimeType)
+	}
+
+	// share the item so another user can fetch the file
+	doJSON(t, ts, "PATCH", "/api/v1/items/"+fmtInt64(created.ID),
+		map[string]any{"visibility": "shared"}, owner)
+	req, _ := http.NewRequest("GET", ts.URL+"/files/"+doc.StorageKey, nil)
+	req.AddCookie(other)
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 200 {
+		t.Fatalf("other user shared doc get = %d, want 200", r.StatusCode)
+	}
+	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/octet-stream") {
+		t.Fatalf("content-type = %q, want application/octet-stream", ct)
+	}
+	if cd := r.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment") {
+		t.Fatalf("content-disposition = %q, want attachment", cd)
 	}
 }
