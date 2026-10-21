@@ -6,7 +6,8 @@ export interface ItemProject { id: number; name: string; status: string; qty_use
 export interface Item {
   id: number; name: string; description: string; qty: number; unit: string
   location_id: number | null; visibility: 'private' | 'shared'
-  photo_count?: number; created_at: string; updated_at: string
+  photo_count?: number; thumb_key?: string | null
+  created_at: string; updated_at: string
   tags?: Tag[]; photos?: Photo[]; documents?: Doc[]; projects?: ItemProject[]; owner_name?: string
 }
 export interface Location { id: number; name: string; parent_id: number | null; notes: string; created_at: string; updated_at: string }

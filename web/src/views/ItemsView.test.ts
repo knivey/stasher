@@ -26,6 +26,39 @@ describe('ItemsView', () => {
     expect(w.find('[data-cards]').exists()).toBe(true)
   })
 
+  it('shows a thumbnail image on mobile cards when thumb_key is present', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [{ id: 5, name: 'M3 screws', qty: 250, photo_count: 2, thumb_key: '2026/10/abc.png' }], total: 1 }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    const w = mount(ItemsView)
+    await flushPromises()
+    const cards = w.find('[data-cards]')
+    const img = cards.find('img')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toBe('/files/2026/10/abc.png')
+    // the thumbnail replaces the photo count badge on the card...
+    expect(cards.text()).not.toContain('📷')
+    // ...and the desktop table stays badge-only (no images)
+    expect(w.find('table img').exists()).toBe(false)
+  })
+
+  it('keeps the photo count badge on mobile cards when there is no thumb_key', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [{ id: 5, name: 'M3 screws', qty: 250, photo_count: 2 }], total: 1 }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    const w = mount(ItemsView)
+    await flushPromises()
+    const cards = w.find('[data-cards]')
+    expect(cards.find('img').exists()).toBe(false)
+    expect(cards.text()).toContain('📷 2')
+  })
+
   it('shows the empty state when there are no items', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
     setActivePinia(createPinia())

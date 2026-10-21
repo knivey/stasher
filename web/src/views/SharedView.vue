@@ -97,7 +97,9 @@ async function copy(item: SharedItem) {
         <div>
           <div class="font-medium">{{ i.name }}</div>
           <div class="text-xs text-slate-500">from {{ i.owner_name }} · {{ i.qty }}{{ i.unit ? ` ${i.unit}` : '' }}</div>
-          <div v-if="i.photo_count" class="text-xs text-slate-400">📷 {{ i.photo_count }}</div>
+          <img v-if="i.thumb_key" :src="`/files/${i.thumb_key}`" loading="lazy" alt=""
+            class="h-24 w-full object-cover rounded-lg" />
+          <div v-else-if="i.photo_count" class="text-xs text-slate-400">📷 {{ i.photo_count }}</div>
         </div>
         <button @click="copy(i)" :disabled="copying.has(i.id)"
           class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-40">

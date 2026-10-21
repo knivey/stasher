@@ -101,4 +101,28 @@ describe('SharedView', () => {
     const { w } = await mountView()
     expect(w.text()).toContain('No shared items found.')
   })
+
+  it('shows a thumbnail image on cards when thumb_key is present', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 9, name: 'solder tips', owner_name: 'Alice', qty: 8, photo_count: 1, thumb_key: '2026/10/x.webp' }],
+      total: 1,
+    }), { status: 200 })))
+    const { w } = await mountView()
+    const cards = w.find('[data-cards]')
+    const img = cards.find('img')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toBe('/files/2026/10/x.webp')
+    expect(cards.text()).not.toContain('📷')
+  })
+
+  it('keeps the photo count badge on cards when there is no thumb_key', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 9, name: 'solder tips', owner_name: 'Alice', qty: 8, photo_count: 3 }],
+      total: 1,
+    }), { status: 200 })))
+    const { w } = await mountView()
+    const cards = w.find('[data-cards]')
+    expect(cards.find('img').exists()).toBe(false)
+    expect(cards.text()).toContain('📷 3')
+  })
 })
