@@ -168,6 +168,7 @@ describe('ItemDetailView', () => {
     const overlay = w.find('.fixed.inset-0')
     expect(overlay.exists()).toBe(true)
     expect(overlay.text()).toContain('M3 screws')
+    expect(overlay.text()).toContain('The item will be moved to trash. You can restore it from Trash before it is permanently purged.')
     await overlay.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
     await flushPromises()
     expect(calls).toContain('DELETE /api/v1/items/9')

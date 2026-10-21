@@ -20,6 +20,7 @@ const router = createRouter({
         { path: 'projects', component: () => import('../views/ProjectsView.vue') },
         { path: 'projects/:id', component: () => import('../views/ProjectDetailView.vue') },
         { path: 'shared', component: () => import('../views/SharedView.vue') },
+        { path: 'trash', component: () => import('../views/TrashView.vue') },
         { path: 'settings', component: () => import('../views/SettingsView.vue') },
         { path: 'admin', component: () => import('../views/AdminView.vue') },
       ],

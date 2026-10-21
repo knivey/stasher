@@ -295,7 +295,8 @@ onMounted(async () => {
       </ul>
     </section>
 
-    <ConfirmDialog :open="confirmDelete" title="Delete item" :message="`Delete '${item.name}'? This cannot be undone.`"
+    <ConfirmDialog :open="confirmDelete" :title="`Delete '${item.name}'`"
+      message="The item will be moved to trash. You can restore it from Trash before it is permanently purged."
       confirm-label="Delete" @confirm="deleteItem" @cancel="confirmDelete = false" />
   </div>
   <p v-else class="text-slate-400 text-sm">Loading…</p>

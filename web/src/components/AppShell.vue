@@ -21,6 +21,7 @@
       <span class="font-bold">Stasher</span>
       <nav class="flex items-center gap-3 text-sm" aria-label="Secondary">
         <router-link to="/shared" aria-label="Shared" title="Shared">👥</router-link>
+        <router-link to="/trash" aria-label="Trash" title="Trash">🗑️</router-link>
         <router-link to="/settings" aria-label="Settings" title="Settings">⚙️</router-link>
         <router-link v-if="auth.user?.is_admin" to="/admin" aria-label="Admin" title="Admin">🛡️</router-link>
         <button @click="logout">Sign out</button>
@@ -46,7 +47,7 @@ const nav = computed(() => {
   const base = [
     { to: '/', label: 'Dashboard' }, { to: '/items', label: 'Items' },
     { to: '/locations', label: 'Locations' }, { to: '/projects', label: 'Projects' },
-    { to: '/shared', label: 'Shared' }, { to: '/settings', label: 'Settings' },
+    { to: '/shared', label: 'Shared' }, { to: '/trash', label: 'Trash' }, { to: '/settings', label: 'Settings' },
   ]
   return auth.user?.is_admin ? [...base, { to: '/admin', label: 'Admin' }] : base
 })

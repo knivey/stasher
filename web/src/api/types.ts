@@ -24,3 +24,10 @@ export interface SessionRow { id: number; user_agent: string; last_ip: string; c
 export interface Invite { id: number; code: string; created_at: string; used_by_email: string; used_at: string | null }
 export interface AdminUser extends User { disabled: boolean; created_at: string }
 export interface ListResponse<T> { data: T[]; total: number }
+// thumb_key is returned by /trash but /files/{key} 404s while the item is
+// trashed (photo rows cascade on delete) — never render an <img> from it.
+export interface TrashEntry {
+  id: number; name: string; qty: number
+  photo_count: number; thumb_key: string | null
+  trashed_at: string; purges_at: string | null
+}

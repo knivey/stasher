@@ -14,7 +14,7 @@ const USER: User = {
 function makeRouter(): Router {
   return createRouter({
     history: createMemoryHistory(),
-    routes: ['/', '/items', '/locations', '/projects', '/shared', '/settings', '/admin', '/login']
+    routes: ['/', '/items', '/locations', '/projects', '/shared', '/trash', '/settings', '/admin', '/login']
       .map(path => ({ path, component: { template: `<div>${path}</div>` } })),
   })
 }
@@ -31,23 +31,32 @@ async function mountShell(isAdmin = false): Promise<{ w: ReturnType<typeof mount
 
 beforeEach(() => { setActivePinia(createPinia()); vi.unstubAllGlobals(); vi.restoreAllMocks(); toasts.splice(0) })
 
-describe('AppShell mobile navigation', () => {
+describe('AppShell navigation', () => {
   it('bottom nav shows exactly the five primary destinations', async () => {
     const { w } = await mountShell()
     const links = w.find('nav.bottom-0').findAll('a')
     expect(links.map(l => l.attributes('href'))).toEqual(['/', '/items', '/locations', '/projects', '/shared'])
   })
 
-  it('mobile header links Shared and Settings; Admin only for admins', async () => {
+  it('desktop sidebar lists Trash between Shared and Settings', async () => {
+    const { w } = await mountShell()
+    const links = w.find('aside').findAll('a')
+    expect(links.map(l => l.attributes('href')))
+      .toEqual(['/', '/items', '/locations', '/projects', '/shared', '/trash', '/settings'])
+  })
+
+  it('mobile header links Shared, Trash and Settings; Admin only for admins', async () => {
     const plain = await mountShell(false)
     const header = plain.w.find('header')
     expect(header.find('a[href="/shared"]').exists()).toBe(true)
+    expect(header.find('a[href="/trash"]').exists()).toBe(true)
     expect(header.find('a[href="/settings"]').exists()).toBe(true)
     expect(header.find('a[href="/admin"]').exists()).toBe(false)
 
     const admin = await mountShell(true)
     const adminHeader = admin.w.find('header')
     expect(adminHeader.find('a[href="/shared"]').exists()).toBe(true)
+    expect(adminHeader.find('a[href="/trash"]').exists()).toBe(true)
     expect(adminHeader.find('a[href="/settings"]').exists()).toBe(true)
     expect(adminHeader.find('a[href="/admin"]').exists()).toBe(true)
   })
