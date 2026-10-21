@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"stasher/internal/config"
@@ -145,6 +146,18 @@ func TestLoginRateLimited(t *testing.T) {
 		map[string]any{"email": "rl@test.dev", "password": "wrongpassword"}, nil)
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("6th attempt = %d, want 429", resp.StatusCode)
+	}
+}
+
+func TestClientIPLastXFF(t *testing.T) {
+	r := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	r.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
+	if got := clientIP(r); got != "5.6.7.8" {
+		t.Fatalf("clientIP with XFF = %q, want 5.6.7.8", got)
+	}
+	r2 := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	if got := clientIP(r2); got != r2.RemoteAddr {
+		t.Fatalf("clientIP without XFF = %q, want RemoteAddr %q", got, r2.RemoteAddr)
 	}
 }
 
