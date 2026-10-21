@@ -84,4 +84,9 @@ File references are to the state at commit `60c61fe`.
 - **Negative `qty_used` savable** (backend laxity — client `min=0` advisory).
 - Tap-target size for the mobile header's emoji links; 5-char bottom-nav
   label truncation; `locations.ts` cycle-comment imprecision.
+- **Usage ledger leftovers** (2026-10-21): disposing a 0-qty item logs a
+  delta-0 entry (consider 400 or idempotent no-op); ledger rows carry no
+  project name (frontend falls back to `project #id` — backend could join
+  it); `found`/`restock` badges share a color; history pager has no
+  in-flight guard (matches the app-wide pagination pattern).
 
