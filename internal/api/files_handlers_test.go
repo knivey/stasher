@@ -174,10 +174,31 @@ func TestDocumentUploadAndDelete(t *testing.T) {
 		ID         int64  `json:"id"`
 		StorageKey string `json:"storage_key"`
 		Filename   string `json:"filename"`
+		MimeType   string `json:"mime_type"`
 	}
 	decodeBody(t, resp, &doc)
 	if doc.Filename != "datasheet.pdf" {
 		t.Fatalf("filename = %q", doc.Filename)
+	}
+	// R15 addendum: %PDF magic bytes must store application/pdf (the sniff
+	// alone returns application/octet-stream) so serve-side isSafeInline
+	// renders real PDFs inline instead of forcing a download.
+	if doc.MimeType != "application/pdf" {
+		t.Fatalf("stored mime = %q, want application/pdf", doc.MimeType)
+	}
+	// owner GET: served inline as application/pdf
+	pdfReq, _ := http.NewRequest("GET", ts.URL+"/files/"+doc.StorageKey, nil)
+	pdfReq.AddCookie(cookie)
+	if r, _ := http.DefaultClient.Do(pdfReq); r.StatusCode != 200 {
+		t.Fatalf("owner pdf file get = %d, want 200", r.StatusCode)
+	} else {
+		if ct := r.Header.Get("Content-Type"); ct != "application/pdf" {
+			t.Fatalf("pdf content-type = %q, want application/pdf", ct)
+		}
+		if cd := r.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "inline") {
+			t.Fatalf("pdf disposition = %q, want inline", cd)
+		}
+		r.Body.Close()
 	}
 	// file exists on disk
 	f, err := s.st.Open(doc.StorageKey)

@@ -232,6 +232,14 @@ func (s *Server) handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	// R15: stored mime is always the sniffed type; client Content-Type is
 	// never trusted (it allowed text/html injection on the app origin).
 	ct := http.DetectContentType(head)
+	// R15 addendum: force the stored mime for %PDF magic bytes. Go's sniff
+	// table currently includes "%PDF-", but rely on that implicitly and a
+	// runtime without the signature stores application/octet-stream, which
+	// serve-side isSafeInline downgrades to an attachment download. PDFs
+	// are safe inline (browser viewers sandbox PDF JS).
+	if bytes.HasPrefix(head, []byte("%PDF-")) {
+		ct = "application/pdf"
+	}
 	// re-feed the sniffed head, then the rest of the file from where the
 	// head-read left f positioned (Seek(0) here would duplicate the head)
 	key, size, err := s.st.Save(io.MultiReader(bytes.NewReader(head), f), ext)
