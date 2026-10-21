@@ -48,7 +48,11 @@ func (s *Server) Router() chi.Router {
 			r.Use(s.requireAuth)
 			r.Get("/auth/me", s.handleMe)
 			r.Post("/auth/logout", s.handleLogout)
-			// Protected endpoints from later tasks register here.
+			r.Patch("/auth/me", s.handleProfileUpdate)
+			r.Post("/auth/password", s.handlePasswordChange)
+			r.Get("/auth/sessions", s.handleListSessions)
+			r.Delete("/auth/sessions/{id}", s.handleRevokeSession)
+			r.Post("/auth/sessions/revoke-all", s.handleRevokeAllSessions)
 		})
 	})
 

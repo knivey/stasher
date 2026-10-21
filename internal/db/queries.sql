@@ -39,6 +39,9 @@ SELECT s.id AS session_id, s.token_hash, s.last_seen_at,
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = ?;
 
+-- name: GetSessionByID :one
+SELECT * FROM sessions WHERE id = ? AND user_id = ?;
+
 -- name: ListUserSessions :many
 SELECT * FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC;
 

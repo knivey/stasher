@@ -187,6 +187,30 @@ func (q *Queries) GetInvite(ctx context.Context, code string) (Invite, error) {
 	return i, err
 }
 
+const getSessionByID = `-- name: GetSessionByID :one
+SELECT id, token_hash, user_id, user_agent, last_ip, created_at, last_seen_at FROM sessions WHERE id = ? AND user_id = ?
+`
+
+type GetSessionByIDParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) GetSessionByID(ctx context.Context, arg GetSessionByIDParams) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getSessionByID, arg.ID, arg.UserID)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.UserID,
+		&i.UserAgent,
+		&i.LastIp,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+	)
+	return i, err
+}
+
 const getSessionWithUser = `-- name: GetSessionWithUser :one
 SELECT s.id AS session_id, s.token_hash, s.last_seen_at,
        u.id AS user_id, u.email, u.password_hash, u.display_name,

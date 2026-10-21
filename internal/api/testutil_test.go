@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -112,6 +113,8 @@ func registerUser(t *testing.T, ts *httptest.Server, email, password string) *ht
 	}
 	return sessionCookieFrom(resp)
 }
+
+func fmtInt64(i int64) string { return strconv.FormatInt(i, 10) }
 
 func sessionCookieFrom(resp *http.Response) *http.Cookie {
 	for _, c := range resp.Cookies() {
