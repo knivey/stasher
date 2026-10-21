@@ -1,7 +1,20 @@
 <script setup lang="ts">
-// Temporary scaffold shell — router-view arrives in Task 2.
+import { useRouter } from 'vue-router'
+import Toasts from './components/Toasts.vue'
+import { setUnauthorizedHandler } from './api/client'
+import { useAuthStore } from './stores/auth'
+import { toast } from './utils/toast'
+
+const router = useRouter()
+const auth = useAuthStore()
+setUnauthorizedHandler(() => {
+  if (auth.user) toast('Session ended — please sign in again', 'error')
+  auth.user = null
+  if (router.currentRoute.value.path !== '/login') router.push('/login')
+})
 </script>
 
 <template>
-  <div id="app" class="p-4">stasher</div>
+  <router-view />
+  <Toasts />
 </template>
