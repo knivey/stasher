@@ -61,6 +61,15 @@ func (s *Server) Router() chi.Router {
 			r.Get("/auth/sessions", s.handleListSessions)
 			r.Delete("/auth/sessions/{id}", s.handleRevokeSession)
 			r.Post("/auth/sessions/revoke-all", s.handleRevokeAllSessions)
+
+			r.Route("/admin", func(r chi.Router) {
+				r.Use(s.requireAdmin)
+				r.Get("/users", s.handleAdminListUsers)
+				r.Patch("/users/{id}", s.handleAdminPatchUser)
+				r.Get("/invites", s.handleAdminListInvites)
+				r.Post("/invites", s.handleAdminCreateInvite)
+				r.Delete("/invites/{id}", s.handleAdminDeleteInvite)
+			})
 		})
 	})
 
