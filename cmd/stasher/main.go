@@ -61,7 +61,9 @@ func main() {
 	}
 	fileServer := http.FileServer(http.FS(dist))
 
-	// SPA history-mode fallback: unmatched non-API paths serve index.html.
+	// SPA history-mode fallback: real static files (built assets, manifest,
+	// icons) are served when they exist; any other unmatched non-API path
+	// rewrites to index.html so history-mode routing works.
 	// (chi's Mount would swallow an outer NotFound, so the fallback is
 	// registered inside the api router itself.)
 	srv.SetSPAFallback(func(w http.ResponseWriter, req *http.Request) {
@@ -69,6 +71,10 @@ func main() {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(`{"error":{"code":"not_found","message":"route not found"}}`))
+			return
+		}
+		if st, err := fs.Stat(dist, strings.TrimPrefix(req.URL.Path, "/")); err == nil && !st.IsDir() {
+			fileServer.ServeHTTP(w, req)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-cache")

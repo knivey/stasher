@@ -8,8 +8,9 @@ notes, photos, documents (datasheets), tags; projects link items with qty used.
 Multi-user with separate inventories; per-item sharing (view/copy).
 
 Single Go binary + SQLite (WAL, FTS5) + files on disk, deployed behind Caddy
-for TLS. Vue 3 + Tailwind SPA frontend (plan pending — served from
-`internal/webfs/dist` via go:embed once built).
+for TLS. Vue 3 + Tailwind SPA frontend in `web/`, built to
+`internal/webfs/dist` and served from the binary via go:embed (installable
+PWA).
 
 **Module**: `stasher`
 **Go**: 1.27
@@ -41,10 +42,14 @@ make build      # go build -o stasher ./cmd/stasher
 make test       # go vet ./... && go test ./...
 make generate   # go tool sqlc generate (REQUIRED after editing internal/db/queries.sql)
 make run        # go run ./cmd/stasher
+make web        # cd web && npm ci && npm run build → internal/webfs/dist (commit result)
+make web-dev    # vite dev server on :5173 (pair with `make run` in another terminal)
+make web-test   # cd web && npm ci && npm run test (vitest)
 
 go test ./internal/api/ -v -run TestItem    # focused
 ./stasher migrate                             # apply migrations, exit
 ./stasher -config stasher.yaml                # serve with config
+./scripts/smoke-web.sh                        # headless-chromium smoke (needs ./stasher)
 ```
 
 Config: YAML (`-config path`) + `STASHER_*` env overrides (LISTEN_ADDR,
@@ -62,9 +67,35 @@ internal/auth/        argon2, session tokens, rate limiter
 internal/db/          open.go (pragmas + goose) + queries.sql + sqlc-generated
 internal/migrations/  embedded goose SQL migrations
 internal/files/       sharded upload storage (yyyy/mm keys, ValidKey gate)
-internal/webfs/       go:embed of dist/ (SPA placeholder until frontend lands)
-web/                  frontend sources (when built)
+internal/webfs/       go:embed of the built SPA (dist/ is committed)
+web/                  Vue 3 + Tailwind SPA sources (see Frontend below)
+scripts/              smoke-web.sh: headless-chromium check of the real binary
 ```
+
+### Frontend (`web/`)
+
+```
+web/src/api/        typed fetch client (single place for /api/v1 calls)
+web/src/stores/     Pinia stores (auth, data)
+web/src/views/      route components (+ colocated *.test.ts)
+web/src/components/ shared components (AppShell, ConfirmDialog, …)
+web/src/router/     vue-router with auth guard
+web/public/         static assets copied verbatim (manifest.webmanifest, icons/)
+```
+
+- **npm scripts**: `dev` (vite), `build` (`vue-tsc -b && vite build` →
+  `../internal/webfs/dist`), `test` (`vitest run`), `typecheck` (`vue-tsc -b`).
+  `vue-tsc -b` matches the project-references tsconfig layout — don't switch
+  to `--noEmit`.
+- **dist-commit rule**: the built `internal/webfs/dist` is COMMITTED. After
+  changing anything in `web/`, run `make web` (which uses `npm ci`, not
+  `npm install`, for reproducible output) and commit the rebuilt dist.
+- **Testing**: vitest with happy-dom; stores/views are tested with `fetch`
+  mocked at the client boundary (no MSW, no live backend) per ruling FR3.
+  No `v-html` anywhere; no silent empty `catch` blocks — keep it that way.
+- **Smoke**: `./scripts/smoke-web.sh` boots the real binary on a temp data
+  dir, dumps the DOM of /login in headless chromium, takes a 375x812 mobile
+  screenshot, and curls the manifest. Requires `./stasher` built first.
 
 Key decisions (each has history in docs/superpowers/):
 
@@ -105,6 +136,8 @@ Key decisions (each has history in docs/superpowers/):
 - `TestMain` silences chi's request logger; keep test output pristine.
 - TDD: failing test first, watch it fail, implement, watch it pass.
 - Stdlib testing only (no testify). Table-driven where natural.
+- Frontend: vitest + happy-dom, `*.test.ts` colocated in `web/src`, `fetch`
+  mocked at the client boundary (see Frontend above for conventions).
 - Error shape everywhere: `{"error":{"code":"...","message":"..."}}`.
 
 ## High-Signal Gotchas

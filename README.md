@@ -9,7 +9,7 @@ Self-hosted home inventory: know what you own and where it is.
 - Full-text search (SQLite FTS5)
 - Multi-user with separate inventories; per-item sharing (view/copy)
 - Invite-code registration, admin user management, device session control
-- Mobile-friendly (frontend plan); camera photo upload via the browser
+- Mobile-friendly, installable PWA; camera photo upload via the browser
 
 ## Run
 
@@ -41,5 +41,26 @@ Put Caddy (or any reverse proxy) in front for TLS:
 ## Development
 
     make generate   # regenerate sqlc code after editing queries.sql
-    make test
-    make run        # API on :8080; frontend plan adds `npm run dev` proxy
+    make test       # go vet + go test
+    make web-test   # frontend unit tests (vitest)
+
+Frontend dev — two terminals:
+
+    make web-dev    # vite dev server on :5173, proxies /api and /files to :8080
+    make run        # Go API on :8080
+
+Before deploying, rebuild the embedded SPA and retest:
+
+    make web        # cd web && npm ci && npm run build → internal/webfs/dist
+    make build
+
+The built SPA (`internal/webfs/dist`) is committed; `make web` regenerates it
+via `npm ci` for reproducible output. `./scripts/smoke-web.sh` runs a
+headless-Chromium smoke against the real binary (login render, mobile
+screenshot, manifest served).
+
+## PWA
+
+Stasher is an installable PWA: served over HTTPS (or localhost) and added via
+your browser's Install / Add to Home Screen option, it runs standalone with
+its own icon.
