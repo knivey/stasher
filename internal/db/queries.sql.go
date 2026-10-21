@@ -10,6 +10,29 @@ import (
 	"database/sql"
 )
 
+const attachItemTag = `-- name: AttachItemTag :exec
+INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)
+`
+
+type AttachItemTagParams struct {
+	ItemID int64 `json:"item_id"`
+	TagID  int64 `json:"tag_id"`
+}
+
+func (q *Queries) AttachItemTag(ctx context.Context, arg AttachItemTagParams) error {
+	_, err := q.db.ExecContext(ctx, attachItemTag, arg.ItemID, arg.TagID)
+	return err
+}
+
+const clearItemTags = `-- name: ClearItemTags :exec
+DELETE FROM item_tags WHERE item_id = ?
+`
+
+func (q *Queries) ClearItemTags(ctx context.Context, itemID int64) error {
+	_, err := q.db.ExecContext(ctx, clearItemTags, itemID)
+	return err
+}
+
 const clearItemsLocation = `-- name: ClearItemsLocation :exec
 UPDATE items SET location_id = NULL, updated_at = ? WHERE location_id = ? AND user_id = ?
 `
@@ -56,6 +79,51 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Inv
 		&i.CreatedAt,
 		&i.UsedBy,
 		&i.UsedAt,
+	)
+	return i, err
+}
+
+const createItem = `-- name: CreateItem :one
+INSERT INTO items (user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at
+`
+
+type CreateItemParams struct {
+	UserID      int64         `json:"user_id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Qty         float64       `json:"qty"`
+	Unit        string        `json:"unit"`
+	LocationID  sql.NullInt64 `json:"location_id"`
+	Visibility  string        `json:"visibility"`
+	CreatedAt   string        `json:"created_at"`
+	UpdatedAt   string        `json:"updated_at"`
+}
+
+func (q *Queries) CreateItem(ctx context.Context, arg CreateItemParams) (Item, error) {
+	row := q.db.QueryRowContext(ctx, createItem,
+		arg.UserID,
+		arg.Name,
+		arg.Description,
+		arg.Qty,
+		arg.Unit,
+		arg.LocationID,
+		arg.Visibility,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i Item
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Description,
+		&i.Qty,
+		&i.Unit,
+		&i.LocationID,
+		&i.Visibility,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -208,6 +276,20 @@ func (q *Queries) DeleteInvite(ctx context.Context, id int64) error {
 	return err
 }
 
+const deleteItem = `-- name: DeleteItem :exec
+DELETE FROM items WHERE id = ? AND user_id = ?
+`
+
+type DeleteItemParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) DeleteItem(ctx context.Context, arg DeleteItemParams) error {
+	_, err := q.db.ExecContext(ctx, deleteItem, arg.ID, arg.UserID)
+	return err
+}
+
 const deleteLocation = `-- name: DeleteLocation :exec
 DELETE FROM locations WHERE id = ? AND user_id = ?
 `
@@ -283,6 +365,87 @@ func (q *Queries) GetInvite(ctx context.Context, code string) (Invite, error) {
 		&i.UsedAt,
 	)
 	return i, err
+}
+
+const getItem = `-- name: GetItem :one
+SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at FROM items WHERE id = ? AND user_id = ?
+`
+
+type GetItemParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) GetItem(ctx context.Context, arg GetItemParams) (Item, error) {
+	row := q.db.QueryRowContext(ctx, getItem, arg.ID, arg.UserID)
+	var i Item
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Description,
+		&i.Qty,
+		&i.Unit,
+		&i.LocationID,
+		&i.Visibility,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getItemAnyOwner = `-- name: GetItemAnyOwner :one
+SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at FROM items WHERE id = ?
+`
+
+func (q *Queries) GetItemAnyOwner(ctx context.Context, id int64) (Item, error) {
+	row := q.db.QueryRowContext(ctx, getItemAnyOwner, id)
+	var i Item
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Description,
+		&i.Qty,
+		&i.Unit,
+		&i.LocationID,
+		&i.Visibility,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getItemTags = `-- name: GetItemTags :many
+SELECT t.id, t.name FROM tags t JOIN item_tags it ON it.tag_id = t.id WHERE it.item_id = ?
+`
+
+type GetItemTagsRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func (q *Queries) GetItemTags(ctx context.Context, itemID int64) ([]GetItemTagsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getItemTags, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetItemTagsRow
+	for rows.Next() {
+		var i GetItemTagsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getLocation = `-- name: GetLocation :one
@@ -489,6 +652,75 @@ func (q *Queries) ListInvites(ctx context.Context) ([]ListInvitesRow, error) {
 			&i.UsedBy,
 			&i.UsedAt,
 			&i.UsedByEmail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listItemDocuments = `-- name: ListItemDocuments :many
+SELECT id, item_id, storage_key, filename, mime_type, size_bytes, created_at FROM item_documents WHERE item_id = ? ORDER BY filename
+`
+
+func (q *Queries) ListItemDocuments(ctx context.Context, itemID int64) ([]ItemDocument, error) {
+	rows, err := q.db.QueryContext(ctx, listItemDocuments, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ItemDocument
+	for rows.Next() {
+		var i ItemDocument
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.StorageKey,
+			&i.Filename,
+			&i.MimeType,
+			&i.SizeBytes,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listItemPhotos = `-- name: ListItemPhotos :many
+SELECT id, item_id, storage_key, caption, sort_order, created_at FROM item_photos WHERE item_id = ? ORDER BY sort_order, id
+`
+
+func (q *Queries) ListItemPhotos(ctx context.Context, itemID int64) ([]ItemPhoto, error) {
+	rows, err := q.db.QueryContext(ctx, listItemPhotos, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ItemPhoto
+	for rows.Next() {
+		var i ItemPhoto
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.StorageKey,
+			&i.Caption,
+			&i.SortOrder,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -812,6 +1044,38 @@ type TouchSessionParams struct {
 
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
 	_, err := q.db.ExecContext(ctx, touchSession, arg.LastSeenAt, arg.ID)
+	return err
+}
+
+const updateItem = `-- name: UpdateItem :exec
+UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, updated_at = ?
+WHERE id = ? AND user_id = ?
+`
+
+type UpdateItemParams struct {
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Qty         float64       `json:"qty"`
+	Unit        string        `json:"unit"`
+	LocationID  sql.NullInt64 `json:"location_id"`
+	Visibility  string        `json:"visibility"`
+	UpdatedAt   string        `json:"updated_at"`
+	ID          int64         `json:"id"`
+	UserID      int64         `json:"user_id"`
+}
+
+func (q *Queries) UpdateItem(ctx context.Context, arg UpdateItemParams) error {
+	_, err := q.db.ExecContext(ctx, updateItem,
+		arg.Name,
+		arg.Description,
+		arg.Qty,
+		arg.Unit,
+		arg.LocationID,
+		arg.Visibility,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.UserID,
+	)
 	return err
 }
 

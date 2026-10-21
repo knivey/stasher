@@ -138,3 +138,35 @@ UPDATE tags SET name = ? WHERE id = ? AND user_id = ?;
 
 -- name: DeleteTag :execrows
 DELETE FROM tags WHERE id = ? AND user_id = ?;
+
+-- name: CreateItem :one
+INSERT INTO items (user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *;
+
+-- name: GetItem :one
+SELECT * FROM items WHERE id = ? AND user_id = ?;
+
+-- name: GetItemAnyOwner :one
+SELECT * FROM items WHERE id = ?;
+
+-- name: UpdateItem :exec
+UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, updated_at = ?
+WHERE id = ? AND user_id = ?;
+
+-- name: DeleteItem :exec
+DELETE FROM items WHERE id = ? AND user_id = ?;
+
+-- name: GetItemTags :many
+SELECT t.id, t.name FROM tags t JOIN item_tags it ON it.tag_id = t.id WHERE it.item_id = ?;
+
+-- name: ClearItemTags :exec
+DELETE FROM item_tags WHERE item_id = ?;
+
+-- name: AttachItemTag :exec
+INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?);
+
+-- name: ListItemPhotos :many
+SELECT * FROM item_photos WHERE item_id = ? ORDER BY sort_order, id;
+
+-- name: ListItemDocuments :many
+SELECT * FROM item_documents WHERE item_id = ? ORDER BY filename;
