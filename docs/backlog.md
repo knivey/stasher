@@ -89,4 +89,11 @@ File references are to the state at commit `60c61fe`.
   project name (frontend falls back to `project #id` — backend could join
   it); `found`/`restock` badges share a color; history pager has no
   in-flight guard (matches the app-wide pagination pattern).
+- **Trash leftovers** (2026-10-21): purge-404 path is toast-only (restore
+  404 refetches — symmetric one-liner if wanted); disposed-item restore
+  branch untested; post-commit detail-fetch 500 window on restore;
+  purge deletes files before row (failure order); trash sweep on GET is
+  global not per-user; no snapshot size cap; item timestamps reset on
+  restore (ledger timestamps preserved); weak count pin in empty-trash
+  test.
 

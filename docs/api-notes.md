@@ -94,6 +94,29 @@ Facts discovered by the frontend round, kept here so they survive:
   gate as all files). `photo_count` remains on rows; the SPA renders the
   image when `thumb_key` is present and the 📷 count badge otherwise.
 
+## Trash (2026-10-21)
+
+- `DELETE /api/v1/items/{id}` no longer hard-deletes: it snapshots the item
+  (fields, tags, photos, documents, project links, usage ledger) into a
+  trash table in one transaction and deletes the row. Files stay on disk.
+  **While an item is trashed, `/files/{key}` 404s** (photo/doc rows cascade
+  with the item) — `thumb_key` in trash rows is NOT renderable until
+  restore. The frontend shows a 📷 count badge instead.
+- `GET /api/v1/trash` — paginated, newest-trashed first; sweeps expired
+  entries (and their files) on every call. Rows: `{id, name, qty,
+  photo_count, thumb_key, trashed_at, purges_at}` — `purges_at` null means
+  keep until manually purged (`trash_retention_days` config, default 30;
+  `0` disables auto-purge).
+- `POST /api/v1/trash/{id}/restore` — recreates the item under a NEW id
+  (tags, photos/docs rows with the same storage keys, ledger in original
+  order, project links and location only if still owned — vanished deps
+  are skipped/NULLed). Files serve again immediately.
+- `DELETE /api/v1/trash/{id}` purges one permanently (files + row);
+  `DELETE /api/v1/trash` empties all owned trash. Both irreversible.
+- Trash listings interact with the pagination quirk: removing the last row
+  of the last page yields `{data: [], total: 0}` — clients must clamp
+  `page` down, not treat it as empty (the SPA does).
+
 ## Usage ledger (2026-10-21)
 
 - `POST /api/v1/items/{id}/usage` `{kind, delta?, note?, project_id?}` —
