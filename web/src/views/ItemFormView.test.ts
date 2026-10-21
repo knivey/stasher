@@ -158,6 +158,36 @@ describe('ItemFormView create', () => {
     expect(router.currentRoute.value.path).toBe('/items/42') // item exists: navigate anyway
     expect(toasts.some(t => t.message === 'upload blew up' && t.type === 'error')).toBe(true)
   })
+
+  it('ignores a second save while one is in flight: exactly one item POST', async () => {
+    let releasePost!: (r: Response) => void
+    let posts = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST') {
+        posts++
+        return new Promise<Response>(res => { releasePost = res })
+      }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    await router.push('/items/new')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    const vm = w.vm as any
+    vm.form.name = 'Once only'
+    const first = vm.save()
+    const second = vm.save() // second click while the POST is still pending
+    await flushPromises()
+    expect(posts).toBe(1) // early-returned: no second POST was issued
+    const submit = w.find('button[type="submit"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+    expect(submit.text()).toContain('Saving…')
+    releasePost(new Response(JSON.stringify({ id: 42 }), { status: 200 }))
+    await Promise.all([first, second])
+    await flushPromises()
+    expect(posts).toBe(1) // still exactly one item POST
+    expect(router.currentRoute.value.path).toBe('/items/42')
+  })
 })
 
 describe('ItemFormView widgets', () => {

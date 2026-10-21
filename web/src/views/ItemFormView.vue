@@ -89,7 +89,13 @@ onMounted(async () => {
   }
 })
 
+// Double-submit guard: one POST (+ queued uploads) per Save click. A second
+// click during the run would re-create the item and duplicate its uploads.
+const saving = ref(false)
+
 async function save() {
+  if (saving.value) return
+  saving.value = true
   try {
     if (editing.value) {
       await api.patch(`/api/v1/items/${itemId.value}`, buildPatch())
@@ -112,6 +118,8 @@ async function save() {
     }
   } catch (e) {
     toast((e as Error).message, 'error')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -210,7 +218,9 @@ defineExpose({ form, save, tagsEqual })
       </div>
       <div class="flex justify-end gap-2">
         <button type="button" class="rounded-lg border px-3 py-1.5 text-sm" @click="cancel">Cancel</button>
-        <button type="submit" class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm">Save</button>
+        <button type="submit" :disabled="saving"
+          class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+          {{ saving ? 'Saving…' : 'Save' }}</button>
       </div>
     </form>
   </div>
