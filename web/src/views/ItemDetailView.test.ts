@@ -149,9 +149,8 @@ describe('ItemDetailView', () => {
     expect(calls.filter(c => c === 'GET /api/v1/items/9').length).toBe(2)
   })
 
-  it('deletes the item after confirm, toasts, and returns to /items', async () => {
+  it('deletes the item after ConfirmDialog confirm, toasts, and returns to /items', async () => {
     const calls: string[] = []
-    vi.stubGlobal('confirm', vi.fn(() => true))
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push(`${init?.method ?? 'GET'} ${url}`)
       if (url.includes('/items/9') && init?.method !== 'DELETE') return new Response(JSON.stringify(item), { status: 200 })
@@ -162,9 +161,32 @@ describe('ItemDetailView', () => {
     const headerDelete = w.findAll('button').find(b => b.text() === 'Delete')
     expect(headerDelete).toBeTruthy()
     await headerDelete!.trigger('click')
+    // nothing deleted yet: the ConfirmDialog is open instead of window.confirm
+    expect(calls.filter(c => c.startsWith('DELETE'))).toHaveLength(0)
+    const overlay = w.find('.fixed.inset-0')
+    expect(overlay.exists()).toBe(true)
+    expect(overlay.text()).toContain('M3 screws')
+    await overlay.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
     await flushPromises()
     expect(calls).toContain('DELETE /api/v1/items/9')
     expect(toasts.some(t => t.message === 'Item deleted' && t.type === 'success')).toBe(true)
     expect(router.currentRoute.value.path).toBe('/items')
+  })
+
+  it('cancel in the ConfirmDialog closes it without deleting', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`)
+      if (url.includes('/items/9')) return new Response(JSON.stringify(item), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    const { w } = await mountView()
+    await w.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
+    const overlay = w.find('.fixed.inset-0')
+    await overlay.findAll('button').find(b => b.text() === 'Cancel')!.trigger('click')
+    await flushPromises()
+    expect(calls.filter(c => c.startsWith('DELETE'))).toHaveLength(0)
+    expect(w.find('.fixed.inset-0').exists()).toBe(false)
   })
 })

@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import type { ListResponse, Location, Tag } from '../api/types'
 import { useItemsStore } from '../stores/items'
 import { toast } from '../utils/toast'
+import { locationDepthOptions } from '../utils/locations'
 import Pagination from '../components/Pagination.vue'
 
 const router = useRouter()
@@ -24,25 +25,7 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 // Locations & tags feed the filter selects (page_size=200 = backend max).
 const locations = ref<Location[]>([])
 const tags = ref<Tag[]>([])
-const locationOptions = computed(() => {
-  const byId = new Map(locations.value.map(l => [l.id, l]))
-  const depth = (loc: Location): number => {
-    let d = 0
-    const visited = new Set<number>([loc.id])
-    let cur = loc
-    while (cur.parent_id !== null && !visited.has(cur.parent_id)) {
-      const parent = byId.get(cur.parent_id)
-      if (!parent) break
-      visited.add(cur.parent_id)
-      d++
-      cur = parent
-    }
-    return d
-  }
-  return locations.value
-    .map(l => ({ id: l.id, name: l.name, depth: depth(l) }))
-    .sort((a, b) => a.depth - b.depth || a.name.localeCompare(b.name))
-})
+const locationOptions = computed(() => locationDepthOptions(locations.value))
 const locationName = computed(() => new Map(locations.value.map(l => [l.id, l.name])))
 
 // Deep-watch filters: any change except page resets page to 1 (the reset

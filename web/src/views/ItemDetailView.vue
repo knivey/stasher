@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import type { Breadcrumb, Doc, Item, Location, Photo } from '../api/types'
 import { useItemsStore } from '../stores/items'
 import { toast } from '../utils/toast'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import PhotoGallery from '../components/PhotoGallery.vue'
 
 const route = useRoute()
@@ -13,6 +14,7 @@ const itemsStore = useItemsStore()
 
 const item = ref<Item | null>(null)
 const breadcrumbs = ref<Breadcrumb[]>([])
+const confirmDelete = ref(false)
 
 async function fetchItem() {
   try {
@@ -63,7 +65,8 @@ async function deleteDoc(d: Doc) {
 }
 
 async function deleteItem() {
-  if (!item.value || !window.confirm(`Delete "${item.value.name}"?`)) return
+  if (!item.value) return
+  confirmDelete.value = false
   try {
     await api.del(`/api/v1/items/${route.params.id}`)
     toast('Item deleted', 'success')
@@ -81,7 +84,7 @@ onMounted(fetchItem)
       <h1 class="text-2xl font-bold">{{ item.name }}</h1>
       <div class="flex gap-2">
         <router-link :to="`/items/${item.id}/edit`" class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm">Edit</router-link>
-        <button @click="deleteItem" class="rounded-lg bg-red-600 text-white px-3 py-1.5 text-sm">Delete</button>
+        <button @click="confirmDelete = true" class="rounded-lg bg-red-600 text-white px-3 py-1.5 text-sm">Delete</button>
       </div>
     </div>
 
@@ -126,6 +129,9 @@ onMounted(fetchItem)
         </li>
       </ul>
     </section>
+
+    <ConfirmDialog :open="confirmDelete" title="Delete item" :message="`Delete '${item.name}'? This cannot be undone.`"
+      confirm-label="Delete" @confirm="deleteItem" @cancel="confirmDelete = false" />
   </div>
   <p v-else class="text-slate-400 text-sm">Loading…</p>
 </template>
