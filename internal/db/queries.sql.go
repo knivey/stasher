@@ -1237,6 +1237,81 @@ func (q *Queries) ListProjects(ctx context.Context, userID int64) ([]Project, er
 	return items, nil
 }
 
+const listSharedItemsFromOthers = `-- name: ListSharedItemsFromOthers :many
+SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id, i.visibility,
+       i.created_at, i.updated_at, u.display_name AS owner_name,
+       (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
+       count(*) OVER () AS total_count
+FROM items i JOIN users u ON u.id = i.user_id
+WHERE i.user_id != ?1 AND i.visibility = 'shared'
+  AND (?2 IS NULL OR i.id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?2))
+ORDER BY i.updated_at DESC
+LIMIT ?4 OFFSET ?3
+`
+
+type ListSharedItemsFromOthersParams struct {
+	UserID int64       `json:"user_id"`
+	Q      interface{} `json:"q"`
+	Off    int64       `json:"off"`
+	Lim    int64       `json:"lim"`
+}
+
+type ListSharedItemsFromOthersRow struct {
+	ID          int64         `json:"id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Qty         float64       `json:"qty"`
+	Unit        string        `json:"unit"`
+	LocationID  sql.NullInt64 `json:"location_id"`
+	Visibility  string        `json:"visibility"`
+	CreatedAt   string        `json:"created_at"`
+	UpdatedAt   string        `json:"updated_at"`
+	OwnerName   string        `json:"owner_name"`
+	PhotoCount  int64         `json:"photo_count"`
+	TotalCount  int64         `json:"total_count"`
+}
+
+func (q *Queries) ListSharedItemsFromOthers(ctx context.Context, arg ListSharedItemsFromOthersParams) ([]ListSharedItemsFromOthersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSharedItemsFromOthers,
+		arg.UserID,
+		arg.Q,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSharedItemsFromOthersRow
+	for rows.Next() {
+		var i ListSharedItemsFromOthersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Qty,
+			&i.Unit,
+			&i.LocationID,
+			&i.Visibility,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerName,
+			&i.PhotoCount,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTagsWithCounts = `-- name: ListTagsWithCounts :many
 SELECT t.id, t.name, COUNT(it.item_id) AS item_count
 FROM tags t LEFT JOIN item_tags it ON it.tag_id = t.id

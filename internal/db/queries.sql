@@ -195,6 +195,17 @@ WHERE i.user_id = @user_id
 ORDER BY i.updated_at DESC
 LIMIT @lim OFFSET @off;
 
+-- name: ListSharedItemsFromOthers :many
+SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id, i.visibility,
+       i.created_at, i.updated_at, u.display_name AS owner_name,
+       (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
+       count(*) OVER () AS total_count
+FROM items i JOIN users u ON u.id = i.user_id
+WHERE i.user_id != @user_id AND i.visibility = 'shared'
+  AND (sqlc.narg('q') IS NULL OR i.id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH @q))
+ORDER BY i.updated_at DESC
+LIMIT @lim OFFSET @off;
+
 -- name: AddItemPhoto :one
 INSERT INTO item_photos (item_id, storage_key, caption, sort_order, created_at)
 VALUES (?, ?, ?, ?, ?) RETURNING *;
