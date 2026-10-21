@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { useItemsStore } from '../stores/items'
 import ItemsView from './ItemsView.vue'
 
 beforeEach(() => { setActivePinia(createPinia()); vi.unstubAllGlobals() })
@@ -31,6 +32,19 @@ describe('ItemsView', () => {
     const w = mount(ItemsView)
     await flushPromises()
     expect(w.text()).toContain('No items found.')
+  })
+
+  it('seeds the search box from the persisted filter on mount', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    useItemsStore().filters.q = 'screw'
+    const w = mount(ItemsView)
+    await flushPromises()
+    expect((w.find('input').element as HTMLInputElement).value).toBe('screw')
   })
 
   it('sends location_id after changing the location filter', async () => {

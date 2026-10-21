@@ -13,7 +13,7 @@ const filters = store.filters
 
 // Debounced search: input writes a local ref; after 300ms of quiet it lands in
 // filters.q, which the deep filters watcher below turns into page reset + fetch.
-const search = ref('')
+const search = ref(filters.q)
 let timer: ReturnType<typeof setTimeout> | null = null
 watch(search, v => {
   if (timer) clearTimeout(timer)
