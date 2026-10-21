@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import type { ListResponse, TrashEntry } from '../api/types'
 import { toast } from '../utils/toast'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -19,6 +19,12 @@ async function fetch() {
     const res = await api.get<ListResponse<TrashEntry>>(`/api/v1/trash?page=${page.value}&page_size=${pageSize}`)
     entries.value = res.data
     total.value = res.total
+    // Backend quirk (docs/api-notes.md): a past-the-end page returns
+    // {data: [], total: 0} — clamp back one page instead of showing a lying
+    // "Trash is empty." while earlier pages still hold entries. The page
+    // watcher above refetches; at page 1 this never fires, so a genuinely
+    // empty trash lands in the empty state (no loop).
+    if (!entries.value.length && page.value > 1) { page.value--; return }
   } catch (e) {
     toast((e as Error).message, 'error')
   } finally {
@@ -43,6 +49,9 @@ async function restore(entry: TrashEntry) {
     await fetch()
   } catch (e) {
     toast((e as Error).message, 'error')
+    // 404 = purged meanwhile (GET /trash sweeps expired entries server-side,
+    // so the row is stale) — refetch, like SharedView's copy-404 branch.
+    if (e instanceof ApiError && e.status === 404) fetch()
   } finally {
     restoring.value.delete(entry.id)
   }

@@ -90,6 +90,20 @@ describe('TrashView', () => {
     expect(toasts.some(t => t.message === 'Item restored' && t.type === 'success')).toBe(true)
   })
 
+  it('toasts and refetches when the entry was purged meanwhile (restore 404)', async () => {
+    const { stub, calls } = trashFetch((url, init) => {
+      if (url.includes('/trash/7/restore') && init?.method === 'POST')
+        return new Response(JSON.stringify({ error: { code: 'not_found', message: 'trash entry not found' } }), { status: 404 })
+    })
+    vi.stubGlobal('fetch', stub)
+    const w = await mountView()
+    await w.findAll('[data-cards] > div')[0].findAll('button').find(b => b.text() === 'Restore')!.trigger('click')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'trash entry not found' && t.type === 'error')).toBe(true)
+    // the row is stale (GET /trash sweeps expired entries) — list must refetch
+    expect(calls.filter(c => c === LIST_URL)).toHaveLength(2)
+  })
+
   it('purges via ConfirmDialog: DELETE /trash/{id}, toasts, refetches', async () => {
     const { stub, calls } = trashFetch((_url, init) => {
       if (init?.method === 'DELETE') return new Response(null, { status: 204 })
@@ -126,6 +140,44 @@ describe('TrashView', () => {
     expect(calls.filter(c => c.startsWith('DELETE'))).toHaveLength(1) // bulk, not per-row
     expect(toasts.some(t => t.message === 'Trash emptied' && t.type === 'success')).toBe(true)
     expect(calls.filter(c => c === LIST_URL)).toHaveLength(2)
+  })
+
+  it('clamps to the previous page when the last row of the last page is purged', async () => {
+    // Backend quirk (docs/api-notes.md): a past-the-end page returns
+    // {data: [], total: 0}. Without a clamp the view would show a lying
+    // "Trash is empty." while earlier pages still hold entries.
+    const page2 = { id: 7, name: 'M3 screws', qty: 250, photo_count: 0, thumb_key: null,
+      trashed_at: '2026-10-20T12:00:00Z', purges_at: null }
+    const remaining = { id: 8, name: 'old cable', qty: 1, photo_count: 0, thumb_key: null,
+      trashed_at: '2026-10-18T09:00:00Z', purges_at: null }
+    let purged = false
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`)
+      if (init?.method === 'DELETE') { purged = true; return new Response(null, { status: 204 }) }
+      const p = Number(new URLSearchParams(url.split('?')[1]).get('page'))
+      if (p === 2)
+        return new Response(JSON.stringify(purged ? { data: [], total: 0 } : { data: [page2], total: 21 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [remaining], total: purged ? 20 : 21 }), { status: 200 })
+    }))
+    const w = await mountView()
+    // page 2 holds exactly one entry
+    await w.findAll('button').find(b => b.text() === 'Next')!.trigger('click')
+    await flushPromises()
+    expect(w.findAll('[data-cards] > div')).toHaveLength(1)
+    // purge that only row → page 2 refetches empty → clamps to page 1, refetches
+    await w.findAll('[data-cards] > div')[0].findAll('button').find(b => b.text() === 'Purge')!.trigger('click')
+    await w.find('.fixed.inset-0').findAll('button').find(b => b.text() === 'Purge')!.trigger('click')
+    await flushPromises()
+    expect(calls).toEqual([
+      'GET /api/v1/trash?page=1&page_size=20', // mount
+      'GET /api/v1/trash?page=2&page_size=20', // pagination nav
+      'DELETE /api/v1/trash/7',                // confirmed purge
+      'GET /api/v1/trash?page=2&page_size=20', // post-purge refetch → empty
+      'GET /api/v1/trash?page=1&page_size=20', // clamp refetch — the one that matters
+    ])
+    expect(w.text()).toContain('old cable')
+    expect(w.text()).not.toContain('Trash is empty.')
   })
 
   it('shows the empty state when there is nothing trashed', async () => {

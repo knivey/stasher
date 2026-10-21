@@ -13,7 +13,7 @@
         <button class="w-full text-left rounded-lg px-3 py-2 hover:bg-slate-700" @click="logout">Sign out</button>
       </div>
     </aside>
-    <!-- mobile top bar + bottom nav. Settings/Shared live as compact
+    <!-- mobile top bar + bottom nav. Settings/Shared/Trash live as compact
          icon-links in the top bar (Admin too, for admins) so every
          destination is ≤1 tap on mobile; the bottom nav keeps the five
          primary destinations. -->
