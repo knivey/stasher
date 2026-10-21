@@ -10,6 +10,75 @@ import (
 	"database/sql"
 )
 
+const addItemDocument = `-- name: AddItemDocument :one
+INSERT INTO item_documents (item_id, storage_key, filename, mime_type, size_bytes, created_at)
+VALUES (?, ?, ?, ?, ?, ?) RETURNING id, item_id, storage_key, filename, mime_type, size_bytes, created_at
+`
+
+type AddItemDocumentParams struct {
+	ItemID     int64  `json:"item_id"`
+	StorageKey string `json:"storage_key"`
+	Filename   string `json:"filename"`
+	MimeType   string `json:"mime_type"`
+	SizeBytes  int64  `json:"size_bytes"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func (q *Queries) AddItemDocument(ctx context.Context, arg AddItemDocumentParams) (ItemDocument, error) {
+	row := q.db.QueryRowContext(ctx, addItemDocument,
+		arg.ItemID,
+		arg.StorageKey,
+		arg.Filename,
+		arg.MimeType,
+		arg.SizeBytes,
+		arg.CreatedAt,
+	)
+	var i ItemDocument
+	err := row.Scan(
+		&i.ID,
+		&i.ItemID,
+		&i.StorageKey,
+		&i.Filename,
+		&i.MimeType,
+		&i.SizeBytes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const addItemPhoto = `-- name: AddItemPhoto :one
+INSERT INTO item_photos (item_id, storage_key, caption, sort_order, created_at)
+VALUES (?, ?, ?, ?, ?) RETURNING id, item_id, storage_key, caption, sort_order, created_at
+`
+
+type AddItemPhotoParams struct {
+	ItemID     int64  `json:"item_id"`
+	StorageKey string `json:"storage_key"`
+	Caption    string `json:"caption"`
+	SortOrder  int64  `json:"sort_order"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func (q *Queries) AddItemPhoto(ctx context.Context, arg AddItemPhotoParams) (ItemPhoto, error) {
+	row := q.db.QueryRowContext(ctx, addItemPhoto,
+		arg.ItemID,
+		arg.StorageKey,
+		arg.Caption,
+		arg.SortOrder,
+		arg.CreatedAt,
+	)
+	var i ItemPhoto
+	err := row.Scan(
+		&i.ID,
+		&i.ItemID,
+		&i.StorageKey,
+		&i.Caption,
+		&i.SortOrder,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const attachItemTag = `-- name: AttachItemTag :exec
 INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)
 `
@@ -290,6 +359,34 @@ func (q *Queries) DeleteItem(ctx context.Context, arg DeleteItemParams) error {
 	return err
 }
 
+const deleteItemDocument = `-- name: DeleteItemDocument :exec
+DELETE FROM item_documents WHERE id = ? AND item_id = ?
+`
+
+type DeleteItemDocumentParams struct {
+	ID     int64 `json:"id"`
+	ItemID int64 `json:"item_id"`
+}
+
+func (q *Queries) DeleteItemDocument(ctx context.Context, arg DeleteItemDocumentParams) error {
+	_, err := q.db.ExecContext(ctx, deleteItemDocument, arg.ID, arg.ItemID)
+	return err
+}
+
+const deleteItemPhoto = `-- name: DeleteItemPhoto :exec
+DELETE FROM item_photos WHERE id = ? AND item_id = ?
+`
+
+type DeleteItemPhotoParams struct {
+	ID     int64 `json:"id"`
+	ItemID int64 `json:"item_id"`
+}
+
+func (q *Queries) DeleteItemPhoto(ctx context.Context, arg DeleteItemPhotoParams) error {
+	_, err := q.db.ExecContext(ctx, deleteItemPhoto, arg.ID, arg.ItemID)
+	return err
+}
+
 const deleteLocation = `-- name: DeleteLocation :exec
 DELETE FROM locations WHERE id = ? AND user_id = ?
 `
@@ -347,6 +444,36 @@ func (q *Queries) DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, er
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const getDocumentByKey = `-- name: GetDocumentByKey :one
+SELECT d.id AS document_id, d.storage_key, d.filename, d.mime_type,
+       i.user_id, i.visibility
+FROM item_documents d JOIN items i ON i.id = d.item_id
+WHERE d.storage_key = ?
+`
+
+type GetDocumentByKeyRow struct {
+	DocumentID int64  `json:"document_id"`
+	StorageKey string `json:"storage_key"`
+	Filename   string `json:"filename"`
+	MimeType   string `json:"mime_type"`
+	UserID     int64  `json:"user_id"`
+	Visibility string `json:"visibility"`
+}
+
+func (q *Queries) GetDocumentByKey(ctx context.Context, storageKey string) (GetDocumentByKeyRow, error) {
+	row := q.db.QueryRowContext(ctx, getDocumentByKey, storageKey)
+	var i GetDocumentByKeyRow
+	err := row.Scan(
+		&i.DocumentID,
+		&i.StorageKey,
+		&i.Filename,
+		&i.MimeType,
+		&i.UserID,
+		&i.Visibility,
+	)
+	return i, err
 }
 
 const getInvite = `-- name: GetInvite :one
@@ -497,6 +624,36 @@ func (q *Queries) GetLocationByName(ctx context.Context, arg GetLocationByNamePa
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPhotoByKey = `-- name: GetPhotoByKey :one
+SELECT p.id AS photo_id, p.storage_key, p.caption, p.sort_order,
+       i.user_id, i.visibility
+FROM item_photos p JOIN items i ON i.id = p.item_id
+WHERE p.storage_key = ?
+`
+
+type GetPhotoByKeyRow struct {
+	PhotoID    int64  `json:"photo_id"`
+	StorageKey string `json:"storage_key"`
+	Caption    string `json:"caption"`
+	SortOrder  int64  `json:"sort_order"`
+	UserID     int64  `json:"user_id"`
+	Visibility string `json:"visibility"`
+}
+
+func (q *Queries) GetPhotoByKey(ctx context.Context, storageKey string) (GetPhotoByKeyRow, error) {
+	row := q.db.QueryRowContext(ctx, getPhotoByKey, storageKey)
+	var i GetPhotoByKeyRow
+	err := row.Scan(
+		&i.PhotoID,
+		&i.StorageKey,
+		&i.Caption,
+		&i.SortOrder,
+		&i.UserID,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -1171,6 +1328,27 @@ func (q *Queries) UpdateItem(ctx context.Context, arg UpdateItemParams) error {
 		arg.UpdatedAt,
 		arg.ID,
 		arg.UserID,
+	)
+	return err
+}
+
+const updateItemPhoto = `-- name: UpdateItemPhoto :exec
+UPDATE item_photos SET caption = ?, sort_order = ? WHERE id = ? AND item_id = ?
+`
+
+type UpdateItemPhotoParams struct {
+	Caption   string `json:"caption"`
+	SortOrder int64  `json:"sort_order"`
+	ID        int64  `json:"id"`
+	ItemID    int64  `json:"item_id"`
+}
+
+func (q *Queries) UpdateItemPhoto(ctx context.Context, arg UpdateItemPhotoParams) error {
+	_, err := q.db.ExecContext(ctx, updateItemPhoto,
+		arg.Caption,
+		arg.SortOrder,
+		arg.ID,
+		arg.ItemID,
 	)
 	return err
 }

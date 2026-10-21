@@ -194,3 +194,32 @@ WHERE i.user_id = @user_id
   AND (sqlc.narg('visibility') IS NULL OR i.visibility = @visibility)
 ORDER BY i.updated_at DESC
 LIMIT @lim OFFSET @off;
+
+-- name: AddItemPhoto :one
+INSERT INTO item_photos (item_id, storage_key, caption, sort_order, created_at)
+VALUES (?, ?, ?, ?, ?) RETURNING *;
+
+-- name: UpdateItemPhoto :exec
+UPDATE item_photos SET caption = ?, sort_order = ? WHERE id = ? AND item_id = ?;
+
+-- name: DeleteItemPhoto :exec
+DELETE FROM item_photos WHERE id = ? AND item_id = ?;
+
+-- name: GetPhotoByKey :one
+SELECT p.id AS photo_id, p.storage_key, p.caption, p.sort_order,
+       i.user_id, i.visibility
+FROM item_photos p JOIN items i ON i.id = p.item_id
+WHERE p.storage_key = ?;
+
+-- name: AddItemDocument :one
+INSERT INTO item_documents (item_id, storage_key, filename, mime_type, size_bytes, created_at)
+VALUES (?, ?, ?, ?, ?, ?) RETURNING *;
+
+-- name: DeleteItemDocument :exec
+DELETE FROM item_documents WHERE id = ? AND item_id = ?;
+
+-- name: GetDocumentByKey :one
+SELECT d.id AS document_id, d.storage_key, d.filename, d.mime_type,
+       i.user_id, i.visibility
+FROM item_documents d JOIN items i ON i.id = d.item_id
+WHERE d.storage_key = ?;

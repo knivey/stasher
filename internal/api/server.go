@@ -78,6 +78,11 @@ func (s *Server) Router() chi.Router {
 			r.Get("/items/{id}", s.handleGetItem)
 			r.Patch("/items/{id}", s.handleUpdateItem)
 			r.Delete("/items/{id}", s.handleDeleteItem)
+			r.Post("/items/{id}/photos", s.handleUploadPhoto)
+			r.Patch("/items/{id}/photos/{photoId}", s.handlePatchPhoto)
+			r.Delete("/items/{id}/photos/{photoId}", s.handleDeletePhoto)
+			r.Post("/items/{id}/documents", s.handleUploadDocument)
+			r.Delete("/items/{id}/documents/{docId}", s.handleDeleteDocument)
 
 			r.Route("/admin", func(r chi.Router) {
 				r.Use(s.requireAdmin)
@@ -90,7 +95,8 @@ func (s *Server) Router() chi.Router {
 		})
 	})
 
-	// /files/* route added in Task 15.
+	// Gated file serving (Task 15): root-level, still authed.
+	r.With(s.requireAuth).Get("/files/*", s.handleFileGet)
 
 	if s.spaFallback != nil {
 		r.NotFound(s.spaFallback)
