@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import type { Item } from '../api/types'
 import { useAuthStore } from '../stores/auth'
 import { toast } from '../utils/toast'
+import { downscaleImage } from '../utils/image'
 import TagInput from '../components/TagInput.vue'
 import LocationSelect from '../components/LocationSelect.vue'
 
@@ -105,11 +106,55 @@ async function save() {
       if (form.location_id) body.location_id = form.location_id
       if (form.tags.length) body.tags = form.tags
       const created = await api.post<Item>('/api/v1/items', body)
+      await uploadQueued(created.id)
       toast('Saved', 'success')
       router?.push(`/items/${created.id}`)
     }
   } catch (e) {
     toast((e as Error).message, 'error')
+  }
+}
+
+// Pre-create upload queue: files can't be uploaded until the item exists, so
+// picks are held locally and flushed after the POST returns the new id.
+// Photos are downscaled at PICK time so the expensive work precedes submit.
+const queuedPhotos = ref<Blob[]>([])
+const queuedDocs = ref<File[]>([])
+
+async function onPickPhotos(e: Event) {
+  const el = e.target as HTMLInputElement
+  const files = Array.from(el.files ?? [])
+  el.value = '' // allow re-picking the same file
+  for (const file of files) {
+    try {
+      queuedPhotos.value.push(await downscaleImage(file))
+    } catch (err) {
+      toast((err as Error).message, 'error')
+    }
+  }
+}
+
+function onPickDocs(e: Event) {
+  const el = e.target as HTMLInputElement
+  queuedDocs.value.push(...Array.from(el.files ?? []))
+  el.value = ''
+}
+
+// Upload failures toast but never block navigation — the item already exists.
+async function uploadQueued(id: number) {
+  for (const blob of queuedPhotos.value) {
+    try {
+      await api.upload(`/api/v1/items/${id}/photos`, 'file', blob, 'photo.jpg')
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
+  for (const doc of queuedDocs.value) {
+    try {
+      await api.upload(`/api/v1/items/${id}/documents`, 'file', doc, doc.name)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
   }
 }
 
@@ -148,6 +193,20 @@ defineExpose({ form, save, tagsEqual })
       </div>
       <div class="block text-sm font-medium">Tags
         <TagInput v-model:tags="form.tags" class="mt-1" />
+      </div>
+      <div v-if="!editing" class="block text-sm font-medium">Photos & documents
+        <div class="mt-1 flex gap-2">
+          <label class="rounded-lg border px-3 py-1.5 text-sm font-normal cursor-pointer">Add photo 📷
+            <input type="file" accept="image/*" capture="environment" multiple class="hidden" @change="onPickPhotos" />
+          </label>
+          <label class="rounded-lg border px-3 py-1.5 text-sm font-normal cursor-pointer">Add document
+            <input type="file" multiple class="hidden" @change="onPickDocs" />
+          </label>
+        </div>
+        <p v-if="queuedPhotos.length || queuedDocs.length" class="mt-1 text-xs text-slate-500 font-normal">
+          {{ queuedPhotos.length }} photo{{ queuedPhotos.length === 1 ? '' : 's' }},
+          {{ queuedDocs.length }} document{{ queuedDocs.length === 1 ? '' : 's' }} will be added after saving
+        </p>
       </div>
       <div class="flex justify-end gap-2">
         <button type="button" class="rounded-lg border px-3 py-1.5 text-sm" @click="cancel">Cancel</button>

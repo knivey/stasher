@@ -3,8 +3,9 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import ItemFormView from './ItemFormView.vue'
+import { toasts } from '../utils/toast'
 
-beforeEach(() => { setActivePinia(createPinia()); vi.unstubAllGlobals() })
+beforeEach(() => { setActivePinia(createPinia()); vi.unstubAllGlobals(); vi.restoreAllMocks(); toasts.splice(0) })
 
 describe('ItemFormView PATCH body', () => {
   it('omits untouched fields; sends location_id 0 only when cleared', async () => {
@@ -85,6 +86,77 @@ describe('ItemFormView create', () => {
     vm.form.location_id = 7
     await vm.save()
     expect(bodies.at(-1)).toEqual({ name: 'Binned', description: '', qty: 1, unit: '', visibility: 'private', location_id: 7 })
+  })
+
+  it('uploads queued photos (downscaled at pick time) and docs after create, then navigates', async () => {
+    const calls: string[] = []
+    let uploadedBlob: Blob | undefined
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST')
+        return new Response(JSON.stringify({ id: 42 }), { status: 200 })
+      if (url.includes('/items/42/photos')) {
+        uploadedBlob = (init.body as FormData).get('file') as Blob
+        calls.push('POST photo')
+        return new Response(null, { status: 204 })
+      }
+      if (url.includes('/items/42/documents')) { calls.push('POST doc'); return new Response(null, { status: 204 }) }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    await router.push('/items/new')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    const vm = w.vm as any
+    vm.form.name = 'Snapshotted'
+
+    // canvas stubs AFTER mount; only 'canvas' is faked so Vue's own DOM updates keep working
+    const ctx = { drawImage: vi.fn() }
+    const canvas = { width: 0, height: 0, getContext: () => ctx,
+      toBlob: (cb: (b: Blob) => void) => cb(new Blob(['j'], { type: 'image/jpeg' })) }
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 4000, height: 2000, close() {} }))
+    const realCreate = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) =>
+      tag === 'canvas' ? canvas as unknown as HTMLCanvasElement : realCreate(tag as keyof HTMLElementTagNameMap))
+
+    const big = new File(['x'], 'big.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(big, 'size', { value: 9_000_000 })
+    const photoInput = w.find('input[accept="image/*"]')
+    Object.defineProperty(photoInput.element, 'files', { value: [big] })
+    await photoInput.trigger('change')
+    await flushPromises()
+    const docInput = w.findAll('input[type="file"]').find(i => !i.attributes('accept'))!
+    Object.defineProperty(docInput.element, 'files', { value: [new File(['%PDF'], 'sheet.pdf', { type: 'application/pdf' })] })
+    await docInput.trigger('change')
+    await flushPromises()
+    expect(w.text()).toContain('1 photo, 1 document will be added after saving')
+
+    await vm.save()
+    await flushPromises()
+    expect(calls).toEqual(['POST photo', 'POST doc'])
+    expect(uploadedBlob?.type).toBe('image/jpeg') // downscaled at pick time, uploaded as-is
+    expect(router.currentRoute.value.path).toBe('/items/42')
+  })
+
+  it('toasts but still navigates when a queued upload fails after create', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST')
+        return new Response(JSON.stringify({ id: 42 }), { status: 200 })
+      if (url.includes('/items/42/documents'))
+        return new Response(JSON.stringify({ error: { code: 'internal', message: 'upload blew up' } }), { status: 500 })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    await router.push('/items/new')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    const docInput = w.findAll('input[type="file"]').find(i => !i.attributes('accept'))!
+    Object.defineProperty(docInput.element, 'files', { value: [new File(['x'], 'a.txt', { type: 'text/plain' })] })
+    await docInput.trigger('change')
+    await flushPromises()
+    await (w.vm as any).save()
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/items/42') // item exists: navigate anyway
+    expect(toasts.some(t => t.message === 'upload blew up' && t.type === 'error')).toBe(true)
   })
 })
 

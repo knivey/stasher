@@ -7,6 +7,7 @@ import { useItemsStore } from '../stores/items'
 import { toast } from '../utils/toast'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import PhotoGallery from '../components/PhotoGallery.vue'
+import FileUpload from '../components/FileUpload.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -105,14 +106,20 @@ onMounted(fetchItem)
       </div>
     </section>
 
-    <section v-if="item.photos?.length">
-      <h2 class="font-semibold mb-2">Photos</h2>
-      <PhotoGallery :photos="item.photos" :can-edit="true" @delete="deletePhoto" />
+    <section>
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold">Photos</h2>
+        <FileUpload kind="photo" :item-id="item.id" @uploaded="fetchItem" />
+      </div>
+      <PhotoGallery v-if="item.photos?.length" :photos="item.photos" :can-edit="true" @delete="deletePhoto" />
     </section>
 
-    <section v-if="item.documents?.length">
-      <h2 class="font-semibold mb-2">Documents</h2>
-      <ul class="bg-white rounded-xl shadow divide-y text-sm">
+    <section>
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold">Documents</h2>
+        <FileUpload kind="doc" :item-id="item.id" @uploaded="fetchItem" />
+      </div>
+      <ul v-if="item.documents?.length" class="bg-white rounded-xl shadow divide-y text-sm">
         <li v-for="d in item.documents" :key="d.id" class="flex items-center justify-between gap-2 px-4 py-2">
           <a :href="`/files/${d.storage_key}`" target="_blank" class="hover:underline">📄 {{ d.filename }} ({{ Math.ceil(d.size_bytes / 1024) }} KB)</a>
           <button @click="deleteDoc(d)" class="text-red-600">Delete</button>
