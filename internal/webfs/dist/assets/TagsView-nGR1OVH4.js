@@ -1,1 +1,0 @@
-import{f as e,g as t,w as n}from"./index-CA5mhDIQ.js";import{t as r}from"./_plugin-vue_export-helper-BDNMzG2s.js";var i={};function a(r,i){return t(),e(`div`,null,n(`Tags`))}var o=r(i,[[`render`,a]]);export{o as default};
