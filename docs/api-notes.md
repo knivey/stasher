@@ -93,3 +93,24 @@ Facts discovered by the frontend round, kept here so they survive:
   photos. Fetch thumbnails via `/files/{thumb_key}` (same owner-or-shared
   gate as all files). `photo_count` remains on rows; the SPA renders the
   image when `thumb_key` is present and the 📷 count badge otherwise.
+
+## Usage ledger (2026-10-21)
+
+- `POST /api/v1/items/{id}/usage` `{kind, delta?, note?, project_id?}` —
+  applies a qty change and writes a ledger entry in one transaction.
+  Kinds: `used`, `sold`, `lost`, `found`, `restock`, `disposed`,
+  `adjustment`. `delta` is required and non-zero for all kinds except
+  `disposed`, which forces delta = −current qty, sets qty 0, and marks the
+  item `disposed`. Resulting qty can never go below 0 (400). `project_id`
+  is optional and must be owned. 201 returns the entry.
+- `GET /api/v1/items/{id}/usage` — paginated ledger, newest first; rows
+  `{id, delta, resulting_qty, kind, project_id, note, created_at}`.
+- **Auto-logging**: item create and copy write an initial `adjustment`
+  entry (note `initial`); any PATCH that *changes* qty writes an
+  `adjustment` entry (delta = new − old) in the same transaction. No-op
+  qty PATCHes write nothing.
+- **Flag rule**: `disposed` appears on item detail and both list queries.
+  ANY change resulting in qty > 0 clears it (usage POST and PATCH alike);
+  landing on 0 via a non-disposed kind leaves the flag unchanged.
+- **Delete stays for mistakes only** — it removes the item (and its
+  ledger, via FK cascade) entirely; disposal is the qty-0 ledger path.
