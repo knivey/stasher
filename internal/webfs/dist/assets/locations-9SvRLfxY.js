@@ -1,1 +1,0 @@
-function e(e){let t=new Map(e.map(e=>[e.id,e])),n=e=>{let n=0,r=new Set([e.id]),i=e;for(;i.parent_id!==null&&!r.has(i.parent_id);){let e=t.get(i.parent_id);if(!e)break;r.add(i.parent_id),n++,i=e}return n};return e.map(e=>({id:e.id,name:e.name,depth:n(e)})).sort((e,t)=>e.depth-t.depth||e.name.localeCompare(t.name))}export{e as t};

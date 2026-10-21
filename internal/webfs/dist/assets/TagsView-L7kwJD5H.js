@@ -1,0 +1,1 @@
+import{at as e,s as t,v as n}from"./runtime-core.esm-bundler-rWRwBPlL.js";import{t as r}from"./_plugin-vue_export-helper-BDNMzG2s.js";var i={};function a(r,i){return n(),t(`div`,null,e(`Tags`))}var o=r(i,[[`render`,a]]);export{o as default};

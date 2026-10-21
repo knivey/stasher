@@ -1,1 +1,0 @@
-import{it as e,s as t,v as n}from"./runtime-core.esm-bundler-BGJ6elZU.js";import{t as r}from"./_plugin-vue_export-helper-BDNMzG2s.js";var i={};function a(r,i){return n(),t(`div`,null,e(`Settings`))}var o=r(i,[[`render`,a]]);export{o as default};
