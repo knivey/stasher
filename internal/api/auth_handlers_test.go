@@ -133,6 +133,21 @@ func TestLoginLogout(t *testing.T) {
 	}
 }
 
+func TestLoginRateLimited(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	registerUser(t, ts, "rl@test.dev", "longpassword1")
+	// account limiter is 5/min: 5 attempts (any result), 6th is 429
+	for i := 0; i < 5; i++ {
+		doJSON(t, ts, "POST", "/api/v1/auth/login",
+			map[string]any{"email": "rl@test.dev", "password": "wrongpassword"}, nil)
+	}
+	resp := doJSON(t, ts, "POST", "/api/v1/auth/login",
+		map[string]any{"email": "rl@test.dev", "password": "wrongpassword"}, nil)
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("6th attempt = %d, want 429", resp.StatusCode)
+	}
+}
+
 func TestLoginDisabledUser(t *testing.T) {
 	s, ts := newTestServer(t, nil)
 	registerUser(t, ts, "dis@test.dev", "longpassword1")

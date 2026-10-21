@@ -94,6 +94,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	if !s.loginIP.Allow("ip:" + clientIP(r)) {
+		writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many attempts; try again later")
+		return
+	}
+	if req.Email != "" && !s.loginAcct.Allow("acct:"+req.Email) {
+		writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many attempts; try again later")
+		return
+	}
 	u, err := s.q.GetUserByEmail(r.Context(), req.Email)
 	if err != nil || !auth.VerifyPassword(u.PasswordHash, req.Password) {
 		// Same error for unknown email and bad password (no account probing).

@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"stasher/internal/auth"
 	"stasher/internal/config"
 	dbpkg "stasher/internal/db"
 	"stasher/internal/files"
@@ -18,11 +19,18 @@ type Server struct {
 	st          *files.Storage
 	raw         *sql.DB // for transactions and test queries; same pool as q
 	spaFallback http.HandlerFunc
+
+	loginIP   *auth.Limiter // 10 attempts/min per IP
+	loginAcct *auth.Limiter // 5 attempts/min per account
 }
 
 // New wires the server. This signature is final for the whole plan.
 func New(cfg *config.Config, raw *sql.DB, st *files.Storage) *Server {
-	return &Server{cfg: cfg, q: dbpkg.New(raw), st: st, raw: raw}
+	return &Server{
+		cfg: cfg, q: dbpkg.New(raw), st: st, raw: raw,
+		loginIP:   auth.NewLimiter(10, 10),
+		loginAcct: auth.NewLimiter(5, 5),
+	}
 }
 
 // SetSPAFallback installs the handler used for unmatched non-API routes
