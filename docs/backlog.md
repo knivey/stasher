@@ -75,9 +75,6 @@ File references are to the state at commit `60c61fe`.
 
 - **Project delete UI** — backend `DELETE /projects/{id}` exists; every sibling
   resource has delete-with-confirm but projects don't. Plan gap vs spec §7.
-- **Thumbnails in list views** — mobile/shared cards show a 📷 count badge
-  because list endpoints carry no storage keys; would need a backend change
-  (e.g. include first-photo key in list rows).
 - **Extended smoke** — log in against the real binary and dump one authed
   view's DOM at 375px (would guard table-overflow + nav reachability).
 - **`make check`** — single target running go + web (vue-tsc, vitest).
