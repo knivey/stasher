@@ -291,8 +291,12 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 	params := dbpkg.ListItemsParams{
 		UserID: u.ID, Lim: p.Limit(), Off: p.Offset(),
 	}
+	// guard the TRANSFORMED value: whitespace-only input tokenizes to zero
+	// phrases ("" would make items_fts MATCH '' an fts5 syntax error -> 500)
 	if raw := q.Get("q"); raw != "" {
-		params.Q = sqlNullString(ftsQuery(raw))
+		if fq := ftsQuery(raw); fq != "" {
+			params.Q = sqlNullString(fq)
+		}
 	}
 	if v := q.Get("location_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {

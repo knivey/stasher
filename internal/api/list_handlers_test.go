@@ -60,6 +60,16 @@ func TestItemListSearchAndFilters(t *testing.T) {
 	if _, total := listItems(t, ts, cookie, "?q="+url.QueryEscape(`"quoted" AND* (near)`)); total != 0 {
 		t.Fatal("special-char query errored")
 	}
+	// whitespace-only q must be skipped rather than sent to FTS MATCH ''
+	// (an fts5 syntax error -> 500): the full unfiltered list comes back
+	// (Review Focus #2)
+	if _, total := listItems(t, ts, cookie, "?q=%20%20"); total != 3 {
+		t.Fatal("whitespace-only q should be skipped, not error")
+	}
+	// a bare "+" URL-decodes to a single space: same skip path
+	if _, total := listItems(t, ts, cookie, "?q=+"); total != 3 {
+		t.Fatal("q=+ (decodes to space) should be skipped, not error")
+	}
 	// location filter includes descendants: House matches Cabinet's item too
 	if names, total := listItems(t, ts, cookie, "?location_id="+fmtInt64(house)); total != 3 {
 		t.Fatalf("location with descendants -> %+v", names)
