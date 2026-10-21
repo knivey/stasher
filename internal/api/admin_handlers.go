@@ -22,7 +22,7 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": u.ID, "email": u.Email, "display_name": u.DisplayName,
 			"default_item_visibility": u.DefaultItemVisibility,
-			"is_admin":                u.IsAdmin, "disabled": u.Disabled,
+			"is_admin":                u.IsAdmin != 0, "disabled": u.Disabled != 0,
 			"created_at": u.CreatedAt,
 		})
 	}
@@ -80,7 +80,7 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 	target, _ = s.q.GetUserByID(r.Context(), id)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": target.ID, "email": target.Email, "display_name": target.DisplayName,
-		"is_admin": target.IsAdmin, "disabled": target.Disabled,
+		"is_admin": target.IsAdmin != 0, "disabled": target.Disabled != 0,
 	})
 }
 

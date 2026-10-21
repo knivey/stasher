@@ -60,8 +60,10 @@ func TestAdminDisableUserRevokesSessions(t *testing.T) {
 	list := doJSON(t, ts, "GET", "/api/v1/admin/users", nil, admin)
 	var users struct {
 		Data []struct {
-			ID    int64  `json:"id"`
-			Email string `json:"email"`
+			ID       int64  `json:"id"`
+			Email    string `json:"email"`
+			IsAdmin  bool   `json:"is_admin"`
+			Disabled bool   `json:"disabled"`
 		} `json:"data"`
 	}
 	decodeBody(t, list, &users)
@@ -69,6 +71,12 @@ func TestAdminDisableUserRevokesSessions(t *testing.T) {
 	for _, u := range users.Data {
 		if u.Email == "pleb@test.dev" {
 			plebID = u.ID
+			if u.IsAdmin {
+				t.Fatal("pleb decoded as admin")
+			}
+			if u.Disabled {
+				t.Fatal("pleb decoded as already disabled")
+			}
 		}
 	}
 	if plebID == 0 {
@@ -78,6 +86,13 @@ func TestAdminDisableUserRevokesSessions(t *testing.T) {
 		map[string]any{"disabled": true}, admin)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("disable = %d", resp.StatusCode)
+	}
+	var patched struct {
+		Disabled bool `json:"disabled"`
+	}
+	decodeBody(t, resp, &patched)
+	if !patched.Disabled {
+		t.Fatal("patched user not disabled")
 	}
 	if r := doJSON(t, ts, "GET", "/api/v1/auth/me", nil, pleb); r.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("disabled user session = %d, want 401", r.StatusCode)
