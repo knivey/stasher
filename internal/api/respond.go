@@ -1,8 +1,10 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 )
@@ -61,3 +63,9 @@ func parsePage(r *http.Request) pageParams {
 
 func (p pageParams) Limit() int64  { return p.PageSize }
 func (p pageParams) Offset() int64 { return (p.Page - 1) * p.PageSize }
+
+func slogError(msg string, err error) { slog.Error(msg, "err", err) }
+
+func sqlNullInt64(i int64) sql.NullInt64 { return sql.NullInt64{Int64: i, Valid: true} }
+
+func sqlNullString(s string) sql.NullString { return sql.NullString{String: s, Valid: true} }

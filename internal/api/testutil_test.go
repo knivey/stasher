@@ -6,13 +6,40 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
+
+	"stasher/internal/auth"
 	"stasher/internal/config"
 	"stasher/internal/db"
 	"stasher/internal/files"
 )
+
+// TestMain silences chi's request logging so test output stays clean.
+// (chi v5 has no DefaultLogWriter; DefaultLogger is the equivalent knob.)
+func TestMain(m *testing.M) {
+	middleware.DefaultLogger = func(next http.Handler) http.Handler { return next }
+	os.Exit(m.Run())
+}
+
+func timeNow(t *testing.T) string {
+	t.Helper()
+	return time.Now().UTC().Format(time.RFC3339)
+}
+
+// lastUserID returns the highest user id (test convenience).
+func (s *Server) lastUserID(t *testing.T) int64 {
+	t.Helper()
+	var id int64
+	if err := s.raw.QueryRow("SELECT MAX(id) FROM users").Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
 
 // newTestServer returns a Server backed by a fresh temp SQLite DB and a test
 // HTTP server running the real router. mutate (optional) adjusts config before
@@ -88,7 +115,7 @@ func registerUser(t *testing.T, ts *httptest.Server, email, password string) *ht
 
 func sessionCookieFrom(resp *http.Response) *http.Cookie {
 	for _, c := range resp.Cookies() {
-		if c.Name == "stasher_session" {
+		if c.Name == auth.CookieName {
 			return c
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"stasher/internal/auth"
+	"stasher/internal/db"
 )
 
 func TestHealthz(t *testing.T) {
@@ -58,5 +59,33 @@ func TestRequireAuthAndMe(t *testing.T) {
 	decodeBody(t, resp, &me)
 	if me.Email != "me@test.dev" || me.IsAdmin {
 		t.Fatalf("me = %+v", me)
+	}
+}
+
+func TestRequireAuthDisabledUser(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	ctx := context.Background()
+	now := time.Now().UTC().Format(time.RFC3339)
+	u, err := s.q.CreateUser(ctx, createUserParams("off@test.dev", "display", now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, hash := auth.NewSessionToken()
+	if _, err := s.q.CreateSession(ctx, sessionParams(hash, u.ID, now)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.q.SetUserDisabled(ctx, db.SetUserDisabledParams{Disabled: 1, UpdatedAt: now, ID: u.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	// valid session, but the account got disabled afterwards -> 401
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/auth/me", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: raw})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("me with disabled account = %d, want 401", resp.StatusCode)
 	}
 }

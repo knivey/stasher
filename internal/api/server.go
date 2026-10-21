@@ -41,10 +41,13 @@ func (s *Server) Router() chi.Router {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public auth endpoints (added in Task 7): register, login.
+		r.Post("/auth/register", s.handleRegister)
+		r.Post("/auth/login", s.handleLogin)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/auth/me", s.handleMe)
+			r.Post("/auth/logout", s.handleLogout)
 			// Protected endpoints from later tasks register here.
 		})
 	})
