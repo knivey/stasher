@@ -24,7 +24,12 @@ func TestHashFormat(t *testing.T) {
 }
 
 func TestVerifyMalformedHash(t *testing.T) {
-	for _, h := range []string{"", "plaintext", "$argon2id$v=19$", "$argon2id$v=19$m=65536,t=3,p=4$notb64$notb64"} {
+	for _, h := range []string{
+		"", "plaintext", "$argon2id$v=19$", "$argon2id$v=19$m=65536,t=3,p=4$notb64$notb64",
+		"$argon2id$v=19$m=65536,t=0,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"$argon2id$v=19$m=65536,t=3,p=0$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$",
+	} {
 		if VerifyPassword(h, "x") {
 			t.Errorf("malformed hash %q verified", h)
 		}

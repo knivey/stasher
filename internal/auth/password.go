@@ -57,6 +57,9 @@ func VerifyPassword(hash, password string) bool {
 	if err != nil {
 		return false
 	}
+	if len(want) == 0 {
+		return false // argon2.IDKey panics with a zero-length key
+	}
 	got := argon2.IDKey([]byte(password), salt, t, m, p, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
