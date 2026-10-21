@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -84,6 +85,57 @@ func TestItemListSearchAndFilters(t *testing.T) {
 	// visibility filter
 	if _, total := listItems(t, ts, cookie, "?visibility=shared"); total != 0 {
 		t.Fatal("nothing shared yet")
+	}
+
+	// sort/order round-trip (final-review Finding 1). The three extra items
+	// are created in an order (Cherries, Apples, Bananas) whose insertion
+	// order - ascending OR descending - matches neither name asc nor qty
+	// desc, so passes below cannot be an artifact of timestamp luck.
+	attic := createLocation(t, ts, cookie, "Attic", nil)
+	mkQ := func(name string, qty float64) {
+		doJSON(t, ts, "POST", "/api/v1/items", map[string]any{
+			"name": name, "qty": qty, "location_id": attic,
+		}, cookie)
+	}
+	mkQ("Cherries", 2)
+	mkQ("Apples", 99)
+	mkQ("Bananas", 7)
+
+	// name asc: deterministic full order
+	if names, _ := listItems(t, ts, cookie, "?sort=name&order=asc"); strings.Join(names, ",") !=
+		"Apples,Bananas,Cherries,Filament spool,M3 screws,Raspberry Pi 5" {
+		t.Fatalf("sort=name&order=asc -> %v", names)
+	}
+	// qty desc: highest qty first (the three default-qty items tie on 1)
+	if names, _ := listItems(t, ts, cookie, "?sort=qty&order=desc"); len(names) != 6 ||
+		names[0] != "Apples" || names[1] != "Bananas" || names[2] != "Cherries" {
+		t.Fatalf("sort=qty&order=desc -> %v", names)
+	}
+	// created_at asc: same-second ties make positional name assertions
+	// nondeterministic, so assert the returned created_at values ascend
+	// (they are RFC3339/UTC strings, so lexical order = chronological)
+	resp := doJSON(t, ts, "GET", "/api/v1/items?sort=created_at&order=asc", nil, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("created_at sort = %d", resp.StatusCode)
+	}
+	var asc struct {
+		Data []struct {
+			CreatedAt string `json:"created_at"`
+		} `json:"data"`
+	}
+	decodeBody(t, resp, &asc)
+	if len(asc.Data) != 6 {
+		t.Fatalf("created_at sort returned %d items", len(asc.Data))
+	}
+	for i := 1; i < len(asc.Data); i++ {
+		if asc.Data[i-1].CreatedAt > asc.Data[i].CreatedAt {
+			t.Fatalf("sort=created_at&order=asc not ascending: %v", asc.Data)
+		}
+	}
+	// unknown sort/order values (including injection attempts) fall back to
+	// the whitelisted defaults: 200 with the full list, SQL unaltered
+	if _, total := listItems(t, ts, cookie, "?sort=updated_at;--&order=SLEEP(1)"); total != 6 {
+		t.Fatal("bogus sort/order should fall back to defaults, not error")
 	}
 }
 

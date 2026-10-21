@@ -120,3 +120,58 @@ func TestItemIsolation(t *testing.T) {
 		}
 	}
 }
+
+// TestItemInvalidTagsLeaveNoGhostRow pins final-review Finding 2: tag
+// validation must run BEFORE the item row is written, so a 400 for an
+// invalid tag list leaves no ghost item behind.
+func TestItemInvalidTagsLeaveNoGhostRow(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "ghost@test.dev", "longpassword1")
+
+	if _, total := listItems(t, ts, cookie, ""); total != 0 {
+		t.Fatalf("fresh user should have 0 items, got %d", total)
+	}
+	// empty tag name -> 400, and the item row must NOT persist
+	resp := doJSON(t, ts, "POST", "/api/v1/items",
+		map[string]any{"name": "ghost test", "tags": []string{""}}, cookie)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("create with bad tag = %d, want 400", resp.StatusCode)
+	}
+	if _, total := listItems(t, ts, cookie, ""); total != 0 {
+		t.Fatalf("ghost row persisted after 400: total = %d, want 0", total)
+	}
+}
+
+// TestItemPatchInvalidTagsDoesNotPartiallyApply pins the PATCH sibling of
+// Finding 2: when the tag list is invalid, no other field in the same
+// request may be written either.
+func TestItemPatchInvalidTagsDoesNotPartiallyApply(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "partial@test.dev", "longpassword1")
+
+	resp := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "real item"}, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create = %d", resp.StatusCode)
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &created)
+
+	resp = doJSON(t, ts, "PATCH", "/api/v1/items/"+fmtInt64(created.ID),
+		map[string]any{"name": "renamed", "tags": []string{"ok", ""}}, cookie)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("patch with bad tag = %d, want 400", resp.StatusCode)
+	}
+	var got struct {
+		Name string `json:"name"`
+		Tags []any  `json:"tags"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(created.ID), nil, cookie), &got)
+	if got.Name != "real item" {
+		t.Fatalf("patch partially applied name: %q", got.Name)
+	}
+	if len(got.Tags) != 0 {
+		t.Fatalf("patch partially applied tags: %+v", got.Tags)
+	}
+}

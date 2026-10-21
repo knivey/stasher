@@ -23,9 +23,12 @@ func locationJSON(l dbpkg.Location) map[string]any {
 }
 
 type locationReq struct {
-	Name     string `json:"name"`
-	Notes    string `json:"notes"`
-	ParentID *int64 `json:"parent_id"`
+	Name string `json:"name"`
+	// Notes is a pointer so PATCH can distinguish absent/null (keep current
+	// notes) from an explicit string - even empty - (replace). On create,
+	// absent simply means "" (final-review Finding 3).
+	Notes    *string `json:"notes"`
+	ParentID *int64  `json:"parent_id"`
 }
 
 // checkParent verifies parent is owned by u (or nil). Returns param for SQL.
@@ -62,9 +65,13 @@ func (s *Server) handleCreateLocation(w http.ResponseWriter, r *http.Request) {
 			"a location with this name already exists under this parent")
 		return
 	}
+	notes := "" // absent notes on create = empty string
+	if req.Notes != nil {
+		notes = *req.Notes
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	loc, err := s.q.CreateLocation(r.Context(), dbpkg.CreateLocationParams{
-		UserID: u.ID, Name: req.Name, ParentID: parent, Notes: req.Notes,
+		UserID: u.ID, Name: req.Name, ParentID: parent, Notes: notes,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
@@ -137,10 +144,12 @@ func (s *Server) handleUpdateLocation(w http.ResponseWriter, r *http.Request) {
 		}
 		loc.Name = req.Name
 	}
-	loc.Notes = req.Notes
+	if req.Notes != nil { // absent/null keeps current notes; a provided string replaces
+		loc.Notes = *req.Notes
+	}
 
 	var parent sql.NullInt64
-	if req.ParentID != nil { // null explicitly clears the parent
+	if req.ParentID != nil { // provided parent is validated + cycle-checked; absent/null keeps the current parent
 		if *req.ParentID == id {
 			writeErr(w, http.StatusBadRequest, "cycle", "a location cannot be its own parent")
 			return

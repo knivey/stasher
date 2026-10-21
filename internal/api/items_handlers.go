@@ -89,7 +89,9 @@ func (s *Server) itemDetailJSON(r *http.Request, i dbpkg.Item) (map[string]any, 
 	return out, nil
 }
 
-// setItemTags replaces the item's tags with the given names (creating tags as needed).
+// setItemTags replaces the item's tags with the given names (creating tags
+// as needed). Handlers validate via validateTagNames BEFORE any write; the
+// checks below stay as a defensive backstop for other callers.
 func (s *Server) setItemTags(r *http.Request, u dbpkg.User, itemID int64, names []string) error {
 	if len(names) > 50 {
 		return errTooManyTags
@@ -124,6 +126,21 @@ func (s *Server) setItemTags(r *http.Request, u dbpkg.User, itemID int64, names 
 var errTooManyTags = errors.New("too many tags")
 var errBadTagName = errors.New("bad tag name")
 
+// validateTagNames enforces the tag limits BEFORE any DB write so an
+// invalid list can never leave a half-applied change behind (a ghost item
+// row on create, or sibling fields already written on update).
+func validateTagNames(names []string) error {
+	if len(names) > 50 {
+		return errTooManyTags
+	}
+	for _, n := range names {
+		if n == "" || len(n) > 100 {
+			return errBadTagName
+		}
+	}
+	return nil
+}
+
 func (s *Server) handleCreateItem(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
 	var req itemReq
@@ -149,6 +166,14 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		visibility = *req.Visibility
+	}
+	// validate tags before ANY write (final-review Finding 2): otherwise a
+	// bad list 400s only after the item row exists -> ghost item
+	if req.Tags != nil {
+		if err := validateTagNames(req.Tags); err != nil {
+			s.tagErr(w, err)
+			return
+		}
 	}
 	var loc sql.NullInt64
 	if req.LocationID != nil {
@@ -274,6 +299,14 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 			item.LocationID = sqlNullInt64(*req.LocationID)
 		}
 	}
+	// validate tags before ANY write (final-review Finding 2): otherwise
+	// UpdateItem applies the sibling fields and the 400 arrives too late
+	if req.Tags != nil {
+		if err := validateTagNames(req.Tags); err != nil {
+			s.tagErr(w, err)
+			return
+		}
+	}
 	if err := s.q.UpdateItem(r.Context(), dbpkg.UpdateItemParams{
 		Name: item.Name, Description: item.Description, Qty: item.Qty, Unit: item.Unit,
 		LocationID: item.LocationID, Visibility: item.Visibility,
@@ -297,19 +330,131 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
+// itemSortColumns is the STRICT whitelist of ?sort= values to ORDER BY
+// column expressions. The map values are the only strings that ever reach
+// the SQL text as identifiers - raw request input is used solely as a map
+// key, and an unknown key falls back to the default - so a request can
+// never alter the statement structure, only pick one of four fixed
+// columns. That is what makes the string interpolation in
+// buildItemListSQL safe.
+var itemSortColumns = map[string]string{
+	"updated_at": "i.updated_at",
+	"created_at": "i.created_at",
+	"name":       "i.name",
+	"qty":        "i.qty",
+}
+
+// itemOrderDirs is the direction whitelist: the only two fixed literals
+// that may follow ORDER BY <column>.
+var itemOrderDirs = map[string]string{
+	"asc":  "ASC",
+	"desc": "DESC",
+}
+
+// itemListRow mirrors the columns selected by buildItemListSQL (the shape
+// of the former sqlc-generated ListItemsRow, now that the query is
+// hand-built per-sort; i.user_id was never used and is not selected).
+type itemListRow struct {
+	ID          int64
+	Name        string
+	Description string
+	Qty         float64
+	Unit        string
+	LocationID  sql.NullInt64
+	Visibility  string
+	CreatedAt   string
+	UpdatedAt   string
+	PhotoCount  int64
+	TotalCount  int64
+}
+
+// itemFilters carries the GET /items filters. A nil optional field omits
+// the predicate entirely - semantics identical to the old sqlc.narg
+// "? IS NULL OR ..." form (NULL param = no filter).
+type itemFilters struct {
+	userID     int64
+	q          *string // FTS match phrase (already transformed via ftsQuery)
+	locIDsJSON *string // JSON array of location ids (self + descendants)
+	tag        *string
+	projectID  *int64
+	visibility *string
+	lim, off   int64
+}
+
+// buildItemListSQL assembles the GET /items statement and its bound args.
+// Only the ORDER BY column and direction are interpolated (from the
+// itemSortColumns/itemOrderDirs whitelists - see those for why that is
+// injection-proof); EVERY value (user_id, q, loc_ids_json, tag,
+// project_id, visibility, limit, offset) is a ? placeholder arg. WHERE
+// semantics match the previous sqlc query exactly: FTS via items_fts
+// MATCH, location subtree via json_each of the pre-resolved id array (R5
+// fallback), tag/project/visibility filters, photo_count subquery, and
+// count(*) OVER() AS total_count for the pre-pagination total.
+func buildItemListSQL(f itemFilters, sortCol, dir string) (string, []any) {
+	stmt := `SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id,
+       i.visibility, i.created_at, i.updated_at,
+       (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
+       count(*) OVER () AS total_count
+FROM items i
+WHERE i.user_id = ?`
+	args := []any{f.userID}
+	if f.q != nil {
+		stmt += `
+  AND i.id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)`
+		args = append(args, *f.q)
+	}
+	if f.locIDsJSON != nil {
+		stmt += `
+  AND i.location_id IN (SELECT value FROM json_each(?))`
+		args = append(args, *f.locIDsJSON)
+	}
+	if f.tag != nil {
+		stmt += `
+  AND i.id IN (
+      SELECT it.item_id FROM item_tags it JOIN tags t ON t.id = it.tag_id
+      WHERE t.name = ? AND t.user_id = ?)`
+		args = append(args, *f.tag, f.userID)
+	}
+	if f.projectID != nil {
+		stmt += `
+  AND i.id IN (
+      SELECT pi.item_id FROM project_items pi WHERE pi.project_id = ?)`
+		args = append(args, *f.projectID)
+	}
+	if f.visibility != nil {
+		stmt += `
+  AND i.visibility = ?`
+		args = append(args, *f.visibility)
+	}
+	stmt += `
+ORDER BY ` + sortCol + ` ` + dir + `
+LIMIT ? OFFSET ?`
+	args = append(args, f.lim, f.off)
+	return stmt, args
+}
+
 func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
 	q := r.URL.Query()
 	p := parsePage(r)
 
-	params := dbpkg.ListItemsParams{
-		UserID: u.ID, Lim: p.Limit(), Off: p.Offset(),
+	// ORDER BY identifiers can't be placeholder args, so they come from the
+	// fixed whitelists only; unknown request values fall back to defaults.
+	sortCol, ok := itemSortColumns[q.Get("sort")]
+	if !ok {
+		sortCol = itemSortColumns["updated_at"]
 	}
+	dir, ok := itemOrderDirs[q.Get("order")]
+	if !ok {
+		dir = itemOrderDirs["desc"]
+	}
+
+	f := itemFilters{userID: u.ID, lim: p.Limit(), off: p.Offset()}
 	// guard the TRANSFORMED value: whitespace-only input tokenizes to zero
 	// phrases ("" would make items_fts MATCH '' an fts5 syntax error -> 500)
 	if raw := q.Get("q"); raw != "" {
 		if fq := ftsQuery(raw); fq != "" {
-			params.Q = sqlNullString(fq)
+			f.q = &fq
 		}
 	}
 	if v := q.Get("location_id"); v != "" {
@@ -329,29 +474,49 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 				s.internalErr(w, err)
 				return
 			}
-			params.LocIdsJson = sqlNullString(string(b))
+			js := string(b)
+			f.locIDsJSON = &js
 		}
 	}
 	if v := q.Get("tag"); v != "" {
-		params.Tag = sqlNullString(v)
+		f.tag = &v
 	}
 	if v := q.Get("project_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
-			params.ProjectID = sqlNullInt64(id)
+			f.projectID = &id
 		}
 	}
 	if v := q.Get("visibility"); v == "private" || v == "shared" {
-		params.Visibility = sqlNullString(v)
+		f.visibility = &v
 	}
 
-	rows, err := s.q.ListItems(r.Context(), params)
+	stmt, args := buildItemListSQL(f, sortCol, dir)
+	rows, err := s.raw.QueryContext(r.Context(), stmt, args...)
 	if err != nil {
 		s.internalErr(w, err)
 		return
 	}
-	out := make([]map[string]any, 0, len(rows))
-	total := int64(len(rows))
-	for _, row := range rows {
+	defer rows.Close()
+	var list []itemListRow
+	for rows.Next() {
+		var row itemListRow
+		if err := rows.Scan(
+			&row.ID, &row.Name, &row.Description, &row.Qty, &row.Unit,
+			&row.LocationID, &row.Visibility, &row.CreatedAt, &row.UpdatedAt,
+			&row.PhotoCount, &row.TotalCount,
+		); err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		list = append(list, row)
+	}
+	if err := rows.Err(); err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(list))
+	total := int64(len(list))
+	for _, row := range list {
 		var loc any
 		if row.LocationID.Valid {
 			loc = row.LocationID.Int64
@@ -363,8 +528,8 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 			"created_at": row.CreatedAt, "updated_at": row.UpdatedAt,
 		})
 	}
-	if len(rows) > 0 {
-		total = rows[0].TotalCount
+	if len(list) > 0 {
+		total = list[0].TotalCount
 	}
 	writeJSON(w, http.StatusOK, listEnvelope{Data: out, Total: total})
 }

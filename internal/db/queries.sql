@@ -171,29 +171,11 @@ SELECT * FROM item_photos WHERE item_id = ? ORDER BY sort_order, id;
 -- name: ListItemDocuments :many
 SELECT * FROM item_documents WHERE item_id = ? ORDER BY filename;
 
--- name: ListItems :many
--- R5 fallback form: sqlc v1.31.1 rejects a recursive CTE embedded in IN()
--- ("relation d does not exist"), so the handler resolves the location subtree
--- via LocationDescendants (Task 11) and passes the id list as a JSON array.
--- Filter semantics identical to the planned CTE form: NULL param = no filter.
--- count(*) OVER() yields the pre-pagination total.
-SELECT i.id, i.user_id, i.name, i.description, i.qty, i.unit, i.location_id,
-       i.visibility, i.created_at, i.updated_at,
-       (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
-       count(*) OVER () AS total_count
-FROM items i
-WHERE i.user_id = @user_id
-  AND (sqlc.narg('q') IS NULL OR i.id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH @q))
-  AND (sqlc.narg('loc_ids_json') IS NULL OR i.location_id IN (
-      SELECT value FROM json_each(@loc_ids_json)))
-  AND (sqlc.narg('tag') IS NULL OR i.id IN (
-      SELECT it.item_id FROM item_tags it JOIN tags t ON t.id = it.tag_id
-      WHERE t.name = @tag AND t.user_id = @user_id))
-  AND (sqlc.narg('project_id') IS NULL OR i.id IN (
-      SELECT pi.item_id FROM project_items pi WHERE pi.project_id = @project_id))
-  AND (sqlc.narg('visibility') IS NULL OR i.visibility = @visibility)
-ORDER BY i.updated_at DESC
-LIMIT @lim OFFSET @off;
+-- ListItems is intentionally NOT a sqlc query: ORDER BY must support the
+-- ?sort=/?order= request params (final-review Finding 1), and identifiers
+-- cannot be bound as placeholder args. The handler (handleListItems) builds
+-- the statement via buildItemListSQL with a strict identifier whitelist;
+-- all values remain bound args. Filter semantics live there.
 
 -- name: ListSharedItemsFromOthers :many
 SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id, i.visibility,

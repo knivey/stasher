@@ -30,6 +30,14 @@ Put Caddy (or any reverse proxy) in front for TLS:
         reverse_proxy 127.0.0.1:8080
     }
 
+## First-run security
+
+- Register the admin account immediately after first start: the **first
+  registration becomes admin**, so on an internet-facing host an unclaimed
+  instance hands admin to whoever signs up first.
+- Prefer keeping `registration: invite` (the default) for internet-facing
+  deployments; use `open` only on trusted networks.
+
 ## Development
 
     make generate   # regenerate sqlc code after editing queries.sql

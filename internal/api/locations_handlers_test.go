@@ -149,3 +149,72 @@ func TestDeleteLocationReparentsAndClearsItems(t *testing.T) {
 		t.Fatalf("item not detached from deleted location: n=%d", n)
 	}
 }
+
+// TestLocationPatchKeepsNotes pins final-review Finding 3: PATCH without a
+// notes field keeps the stored notes (provide a string - even empty - to
+// replace; omit or send null to keep). Creation without notes yields "".
+func TestLocationPatchKeepsNotes(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "notes@test.dev", "longpassword1")
+
+	resp := doJSON(t, ts, "POST", "/api/v1/locations",
+		map[string]any{"name": "Attic", "notes": "keep me"}, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create = %d", resp.StatusCode)
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &created)
+
+	getLoc := func() (name, notes string) {
+		t.Helper()
+		var body struct {
+			Location struct {
+				Name  string `json:"name"`
+				Notes string `json:"notes"`
+			} `json:"location"`
+		}
+		decodeBody(t, doJSON(t, ts, "GET", "/api/v1/locations/"+fmtInt64(created.ID), nil, cookie), &body)
+		return body.Location.Name, body.Location.Notes
+	}
+
+	// rename without sending notes -> notes survive
+	if resp := doJSON(t, ts, "PATCH", "/api/v1/locations/"+fmtInt64(created.ID),
+		map[string]any{"name": "Renamed Attic"}, cookie); resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch = %d", resp.StatusCode)
+	}
+	if name, notes := getLoc(); name != "Renamed Attic" || notes != "keep me" {
+		t.Fatalf("patch wiped notes: name=%q notes=%q", name, notes)
+	}
+
+	// explicit notes replace
+	if resp := doJSON(t, ts, "PATCH", "/api/v1/locations/"+fmtInt64(created.ID),
+		map[string]any{"notes": "replaced"}, cookie); resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch notes = %d", resp.StatusCode)
+	}
+	if _, notes := getLoc(); notes != "replaced" {
+		t.Fatalf("explicit notes should replace: %q", notes)
+	}
+
+	// explicit null keeps the current notes
+	if resp := doJSON(t, ts, "PATCH", "/api/v1/locations/"+fmtInt64(created.ID),
+		map[string]any{"notes": nil}, cookie); resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch null notes = %d", resp.StatusCode)
+	}
+	if _, notes := getLoc(); notes != "replaced" {
+		t.Fatalf("null notes should keep current: %q", notes)
+	}
+
+	// create without notes defaults to ""
+	bare := createLocation(t, ts, cookie, "Bare", nil)
+	var bareBody struct {
+		Location struct {
+			Notes string `json:"notes"`
+		} `json:"location"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/locations/"+fmtInt64(bare), nil, cookie), &bareBody)
+	if bareBody.Location.Notes != "" {
+		t.Fatalf("absent notes on create should be empty: %q", bareBody.Location.Notes)
+	}
+}
