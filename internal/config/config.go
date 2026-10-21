@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,17 +15,21 @@ type Config struct {
 	DataDir      string `yaml:"data_dir"`
 	Registration string `yaml:"registration"` // "invite" | "open"
 	LogLevel     string `yaml:"log_level"`
+	// TrashRetentionDays is how long trash entries (and their files)
+	// survive before auto-purge. 0 or negative = keep forever.
+	TrashRetentionDays int `yaml:"trash_retention_days"`
 }
 
 // Load reads the YAML file at path (optional), then applies env overrides.
 // Empty path or missing file falls back to defaults.
 func Load(path string) (Config, error) {
 	cfg := Config{
-		ListenAddr:   "127.0.0.1:8080",
-		BaseURL:      "http://localhost:8080",
-		DataDir:      "./data",
-		Registration: "invite",
-		LogLevel:     "info",
+		ListenAddr:         "127.0.0.1:8080",
+		BaseURL:            "http://localhost:8080",
+		DataDir:            "./data",
+		Registration:       "invite",
+		LogLevel:           "info",
+		TrashRetentionDays: 30,
 	}
 	if path != "" {
 		b, err := os.ReadFile(path)
@@ -48,8 +54,29 @@ func Load(path string) (Config, error) {
 			*dst = v
 		}
 	}
+	if v, ok := os.LookupEnv("STASHER_TRASH_RETENTION_DAYS"); ok && v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return cfg, fmt.Errorf("trash_retention_days must be an integer, got %q", v)
+		}
+		cfg.TrashRetentionDays = n
+	}
 	if cfg.Registration != "invite" && cfg.Registration != "open" {
 		return cfg, fmt.Errorf("registration must be invite or open, got %q", cfg.Registration)
 	}
+	if cfg.TrashRetentionDays < 0 {
+		return cfg, fmt.Errorf("trash_retention_days must be >= 0, got %d", cfg.TrashRetentionDays)
+	}
 	return cfg, nil
+}
+
+// PurgeAfter returns the trash purges_at timestamp for an entry trashed at
+// trashedAt: trashedAt plus the retention window, or "" (never auto-purge)
+// when retention is disabled. Like every timestamp in Stasher it is
+// RFC3339 UTC text.
+func (c Config) PurgeAfter(trashedAt time.Time) string {
+	if c.TrashRetentionDays <= 0 {
+		return ""
+	}
+	return trashedAt.AddDate(0, 0, c.TrashRetentionDays).UTC().Format(time.RFC3339)
 }

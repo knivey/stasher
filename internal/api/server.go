@@ -89,6 +89,11 @@ func (s *Server) Router() chi.Router {
 
 			r.Get("/shared", s.handleListShared)
 
+			r.Get("/trash", s.handleListTrash)
+			r.Delete("/trash", s.handleEmptyTrash)
+			r.Delete("/trash/{id}", s.handlePurgeTrashEntry)
+			r.Post("/trash/{id}/restore", s.handleRestoreTrashEntry)
+
 			r.Get("/projects", s.handleListProjects)
 			r.Post("/projects", s.handleCreateProject)
 			r.Get("/projects/{id}", s.handleGetProject)

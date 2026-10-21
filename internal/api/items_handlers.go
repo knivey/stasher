@@ -600,22 +600,50 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid item id")
 		return
 	}
-	if _, err := s.q.GetItem(r.Context(), dbpkg.GetItemParams{ID: id, UserID: u.ID}); err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", "item not found")
-		return
-	}
-	// collect file keys BEFORE the row delete (FK cascade removes them)
-	photos, _ := s.q.ListItemPhotos(r.Context(), id)
-	docs, _ := s.q.ListItemDocuments(r.Context(), id)
-	if err := s.q.DeleteItem(r.Context(), dbpkg.DeleteItemParams{ID: id, UserID: u.ID}); err != nil {
+	// Snapshot + delete in ONE transaction: the snapshot (item fields,
+	// tags, photos, documents, project links, ledger - storage keys
+	// included) goes to trash, then the item row goes away and the FK
+	// cascade takes its children. Files are NOT deleted here: they belong
+	// to the trash entry now (restore reuses the same keys) and are
+	// removed only when the entry is purged or the trash emptied.
+	trashedAt := time.Now().UTC()
+	tx, err := s.raw.BeginTx(r.Context(), nil)
+	if err != nil {
 		s.internalErr(w, err)
 		return
 	}
-	for _, p := range photos {
-		s.st.Delete(p.StorageKey)
+	defer tx.Rollback()
+	qtx := dbpkg.New(tx)
+	item, err := qtx.GetItem(r.Context(), dbpkg.GetItemParams{ID: id, UserID: u.ID})
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "item not found")
+		return
 	}
-	for _, d := range docs {
-		s.st.Delete(d.StorageKey)
+	snap, err := buildTrashSnapshot(r.Context(), qtx, item)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	blob, err := json.Marshal(snap)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	if _, err := qtx.CreateTrashEntry(r.Context(), dbpkg.CreateTrashEntryParams{
+		UserID: u.ID, Snapshot: string(blob),
+		TrashedAt: trashedAt.Format(time.RFC3339),
+		PurgesAt:  s.cfg.PurgeAfter(trashedAt),
+	}); err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	if err := qtx.DeleteItem(r.Context(), dbpkg.DeleteItemParams{ID: id, UserID: u.ID}); err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		s.internalErr(w, err)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -60,6 +60,12 @@ func main() {
 	}
 	srv := api.New(&cfg, sqlDB, storage)
 
+	// sweep trash whose retention window closed while the server was down
+	// (entries trashed while running are swept on GET /trash)
+	if err := srv.PurgeExpiredTrash(context.Background()); err != nil {
+		slog.Error("startup trash purge failed", "err", err)
+	}
+
 	dist, err := fs.Sub(webfs.FS, "dist")
 	if err != nil {
 		fatal(err)

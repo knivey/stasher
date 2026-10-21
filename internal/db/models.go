@@ -116,6 +116,14 @@ type Tag struct {
 	Name   string `json:"name"`
 }
 
+type Trash struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	Snapshot  string `json:"snapshot"`
+	TrashedAt string `json:"trashed_at"`
+	PurgesAt  string `json:"purges_at"`
+}
+
 type User struct {
 	ID                    int64  `json:"id"`
 	Email                 string `json:"email"`

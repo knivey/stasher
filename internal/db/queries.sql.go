@@ -241,6 +241,56 @@ func (q *Queries) CreateItemLedger(ctx context.Context, arg CreateItemLedgerPara
 	return i, err
 }
 
+const createItemWithID = `-- name: CreateItemWithID :one
+INSERT INTO items (id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed
+`
+
+type CreateItemWithIDParams struct {
+	ID          int64         `json:"id"`
+	UserID      int64         `json:"user_id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Qty         float64       `json:"qty"`
+	Unit        string        `json:"unit"`
+	LocationID  sql.NullInt64 `json:"location_id"`
+	Visibility  string        `json:"visibility"`
+	CreatedAt   string        `json:"created_at"`
+	UpdatedAt   string        `json:"updated_at"`
+}
+
+// restore path: an explicit id guarantees the restored item never reuses
+// the trashed item's id (SQLite recycles the max rowid after a delete)
+func (q *Queries) CreateItemWithID(ctx context.Context, arg CreateItemWithIDParams) (Item, error) {
+	row := q.db.QueryRowContext(ctx, createItemWithID,
+		arg.ID,
+		arg.UserID,
+		arg.Name,
+		arg.Description,
+		arg.Qty,
+		arg.Unit,
+		arg.LocationID,
+		arg.Visibility,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i Item
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Description,
+		&i.Qty,
+		&i.Unit,
+		&i.LocationID,
+		&i.Visibility,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Disposed,
+	)
+	return i, err
+}
+
 const createLocation = `-- name: CreateLocation :one
 INSERT INTO locations (user_id, name, parent_id, notes, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, parent_id, notes, created_at, updated_at
@@ -366,6 +416,37 @@ func (q *Queries) CreateTag(ctx context.Context, arg CreateTagParams) (Tag, erro
 	return i, err
 }
 
+const createTrashEntry = `-- name: CreateTrashEntry :one
+INSERT INTO trash (user_id, snapshot, trashed_at, purges_at)
+VALUES (?, ?, ?, ?)
+RETURNING id, user_id, snapshot, trashed_at, purges_at
+`
+
+type CreateTrashEntryParams struct {
+	UserID    int64  `json:"user_id"`
+	Snapshot  string `json:"snapshot"`
+	TrashedAt string `json:"trashed_at"`
+	PurgesAt  string `json:"purges_at"`
+}
+
+func (q *Queries) CreateTrashEntry(ctx context.Context, arg CreateTrashEntryParams) (Trash, error) {
+	row := q.db.QueryRowContext(ctx, createTrashEntry,
+		arg.UserID,
+		arg.Snapshot,
+		arg.TrashedAt,
+		arg.PurgesAt,
+	)
+	var i Trash
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Snapshot,
+		&i.TrashedAt,
+		&i.PurgesAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, default_item_visibility, is_admin, disabled, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, 0, ?, ?)
@@ -414,6 +495,63 @@ DELETE FROM sessions WHERE user_id = ?
 func (q *Queries) DeleteAllUserSessions(ctx context.Context, userID int64) error {
 	_, err := q.db.ExecContext(ctx, deleteAllUserSessions, userID)
 	return err
+}
+
+const deleteAllUserTrash = `-- name: DeleteAllUserTrash :many
+DELETE FROM trash WHERE user_id = ? RETURNING snapshot
+`
+
+// rows come back so callers can delete the snapshot's files afterwards
+func (q *Queries) DeleteAllUserTrash(ctx context.Context, userID int64) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, deleteAllUserTrash, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var snapshot string
+		if err := rows.Scan(&snapshot); err != nil {
+			return nil, err
+		}
+		items = append(items, snapshot)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const deleteExpiredTrash = `-- name: DeleteExpiredTrash :many
+DELETE FROM trash WHERE purges_at != '' AND purges_at < ? RETURNING snapshot
+`
+
+// purges_at is RFC3339 UTC text (” = never purge), so lexicographic
+// comparison with the now-argument is a correct time comparison
+func (q *Queries) DeleteExpiredTrash(ctx context.Context, purgesAt string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, deleteExpiredTrash, purgesAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var snapshot string
+		if err := rows.Scan(&snapshot); err != nil {
+			return nil, err
+		}
+		items = append(items, snapshot)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const deleteInvite = `-- name: DeleteInvite :exec
@@ -552,6 +690,20 @@ func (q *Queries) DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, er
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const deleteTrashEntry = `-- name: DeleteTrashEntry :exec
+DELETE FROM trash WHERE id = ? AND user_id = ?
+`
+
+type DeleteTrashEntryParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) DeleteTrashEntry(ctx context.Context, arg DeleteTrashEntryParams) error {
+	_, err := q.db.ExecContext(ctx, deleteTrashEntry, arg.ID, arg.UserID)
+	return err
 }
 
 const getDocumentByKey = `-- name: GetDocumentByKey :one
@@ -912,6 +1064,28 @@ func (q *Queries) GetTagByName(ctx context.Context, arg GetTagByNameParams) (Tag
 	return i, err
 }
 
+const getTrashEntry = `-- name: GetTrashEntry :one
+SELECT id, user_id, snapshot, trashed_at, purges_at FROM trash WHERE id = ? AND user_id = ?
+`
+
+type GetTrashEntryParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) GetTrashEntry(ctx context.Context, arg GetTrashEntryParams) (Trash, error) {
+	row := q.db.QueryRowContext(ctx, getTrashEntry, arg.ID, arg.UserID)
+	var i Trash
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Snapshot,
+		&i.TrashedAt,
+		&i.PurgesAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, password_hash, display_name, default_item_visibility, is_admin, disabled, created_at, updated_at FROM users WHERE email = ?
 `
@@ -1100,6 +1274,50 @@ func (q *Queries) ListItemLedger(ctx context.Context, arg ListItemLedgerParams) 
 	return items, nil
 }
 
+const listItemLedgerAll = `-- name: ListItemLedgerAll :many
+SELECT id, item_id, user_id, delta, resulting_qty, kind, project_id, note, created_at FROM item_ledger WHERE item_id = ? AND user_id = ? ORDER BY id ASC
+`
+
+type ListItemLedgerAllParams struct {
+	ItemID int64 `json:"item_id"`
+	UserID int64 `json:"user_id"`
+}
+
+// Full ledger for one item, oldest first (trash snapshots capture the
+// complete history in original order; ListItemLedger paginates DESC).
+func (q *Queries) ListItemLedgerAll(ctx context.Context, arg ListItemLedgerAllParams) ([]ItemLedger, error) {
+	rows, err := q.db.QueryContext(ctx, listItemLedgerAll, arg.ItemID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ItemLedger
+	for rows.Next() {
+		var i ItemLedger
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.UserID,
+			&i.Delta,
+			&i.ResultingQty,
+			&i.Kind,
+			&i.ProjectID,
+			&i.Note,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listItemPhotos = `-- name: ListItemPhotos :many
 SELECT id, item_id, storage_key, caption, sort_order, created_at FROM item_photos WHERE item_id = ? ORDER BY sort_order, id
 `
@@ -1120,6 +1338,48 @@ func (q *Queries) ListItemPhotos(ctx context.Context, itemID int64) ([]ItemPhoto
 			&i.Caption,
 			&i.SortOrder,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listItemProjectLinks = `-- name: ListItemProjectLinks :many
+SELECT project_id, qty_used, notes, added_at
+FROM project_items WHERE item_id = ? ORDER BY project_id
+`
+
+type ListItemProjectLinksRow struct {
+	ProjectID int64           `json:"project_id"`
+	QtyUsed   sql.NullFloat64 `json:"qty_used"`
+	Notes     string          `json:"notes"`
+	AddedAt   string          `json:"added_at"`
+}
+
+// project_items rows for one item (trash snapshot; ListProjectItems is
+// keyed by project_id, the other direction).
+func (q *Queries) ListItemProjectLinks(ctx context.Context, itemID int64) ([]ListItemProjectLinksRow, error) {
+	rows, err := q.db.QueryContext(ctx, listItemProjectLinks, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListItemProjectLinksRow
+	for rows.Next() {
+		var i ListItemProjectLinksRow
+		if err := rows.Scan(
+			&i.ProjectID,
+			&i.QtyUsed,
+			&i.Notes,
+			&i.AddedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1386,6 +1646,56 @@ func (q *Queries) ListTagsWithCounts(ctx context.Context, userID int64) ([]ListT
 	return items, nil
 }
 
+const listTrash = `-- name: ListTrash :many
+SELECT id, snapshot, trashed_at, purges_at, count(*) OVER () AS total_count
+FROM trash WHERE user_id = ?
+ORDER BY trashed_at DESC
+LIMIT ? OFFSET ?
+`
+
+type ListTrashParams struct {
+	UserID int64 `json:"user_id"`
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
+}
+
+type ListTrashRow struct {
+	ID         int64  `json:"id"`
+	Snapshot   string `json:"snapshot"`
+	TrashedAt  string `json:"trashed_at"`
+	PurgesAt   string `json:"purges_at"`
+	TotalCount int64  `json:"total_count"`
+}
+
+func (q *Queries) ListTrash(ctx context.Context, arg ListTrashParams) ([]ListTrashRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTrash, arg.UserID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTrashRow
+	for rows.Next() {
+		var i ListTrashRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Snapshot,
+			&i.TrashedAt,
+			&i.PurgesAt,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserSessions = `-- name: ListUserSessions :many
 SELECT id, token_hash, user_id, user_agent, last_ip, created_at, last_seen_at FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC
 `
@@ -1565,6 +1875,17 @@ type MarkInviteUsedParams struct {
 func (q *Queries) MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error {
 	_, err := q.db.ExecContext(ctx, markInviteUsed, arg.UsedBy, arg.UsedAt, arg.Code)
 	return err
+}
+
+const maxItemID = `-- name: MaxItemID :one
+SELECT CAST(COALESCE(MAX(id), 0) AS INTEGER) FROM items
+`
+
+func (q *Queries) MaxItemID(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, maxItemID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const reparentChildren = `-- name: ReparentChildren :exec

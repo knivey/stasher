@@ -143,6 +143,15 @@ DELETE FROM tags WHERE id = ? AND user_id = ?;
 INSERT INTO items (user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *;
 
+-- name: CreateItemWithID :one
+-- restore path: an explicit id guarantees the restored item never reuses
+-- the trashed item's id (SQLite recycles the max rowid after a delete)
+INSERT INTO items (id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *;
+
+-- name: MaxItemID :one
+SELECT CAST(COALESCE(MAX(id), 0) AS INTEGER) FROM items;
+
 -- name: GetItem :one
 SELECT * FROM items WHERE id = ? AND user_id = ?;
 
@@ -273,3 +282,40 @@ FROM item_ledger l
 WHERE l.item_id = ? AND l.user_id = ?
 ORDER BY l.id DESC
 LIMIT ? OFFSET ?;
+
+-- name: ListItemLedgerAll :many
+-- Full ledger for one item, oldest first (trash snapshots capture the
+-- complete history in original order; ListItemLedger paginates DESC).
+SELECT * FROM item_ledger WHERE item_id = ? AND user_id = ? ORDER BY id ASC;
+
+-- name: ListItemProjectLinks :many
+-- project_items rows for one item (trash snapshot; ListProjectItems is
+-- keyed by project_id, the other direction).
+SELECT project_id, qty_used, notes, added_at
+FROM project_items WHERE item_id = ? ORDER BY project_id;
+
+-- name: CreateTrashEntry :one
+INSERT INTO trash (user_id, snapshot, trashed_at, purges_at)
+VALUES (?, ?, ?, ?)
+RETURNING *;
+
+-- name: ListTrash :many
+SELECT id, snapshot, trashed_at, purges_at, count(*) OVER () AS total_count
+FROM trash WHERE user_id = ?
+ORDER BY trashed_at DESC
+LIMIT ? OFFSET ?;
+
+-- name: GetTrashEntry :one
+SELECT * FROM trash WHERE id = ? AND user_id = ?;
+
+-- name: DeleteTrashEntry :exec
+DELETE FROM trash WHERE id = ? AND user_id = ?;
+
+-- name: DeleteAllUserTrash :many
+-- rows come back so callers can delete the snapshot's files afterwards
+DELETE FROM trash WHERE user_id = ? RETURNING snapshot;
+
+-- name: DeleteExpiredTrash :many
+-- purges_at is RFC3339 UTC text ('' = never purge), so lexicographic
+-- comparison with the now-argument is a correct time comparison
+DELETE FROM trash WHERE purges_at != '' AND purges_at < ? RETURNING snapshot;

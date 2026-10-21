@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -43,5 +44,56 @@ func TestLoadYamlAndEnv(t *testing.T) {
 	}
 	if cfg.Registration != "invite" {
 		t.Errorf("Registration = %q, want default", cfg.Registration)
+	}
+}
+
+func TestLoadTrashRetention(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stasher.yaml")
+
+	// YAML sets, env overrides
+	os.WriteFile(path, []byte("trash_retention_days: 7\n"), 0o644)
+	t.Setenv("STASHER_TRASH_RETENTION_DAYS", "14")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TrashRetentionDays != 14 {
+		t.Errorf("TrashRetentionDays = %d, want env override 14", cfg.TrashRetentionDays)
+	}
+
+	// zero disables auto-purge (valid)
+	t.Setenv("STASHER_TRASH_RETENTION_DAYS", "0")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TrashRetentionDays != 0 {
+		t.Errorf("TrashRetentionDays = %d, want 0", cfg.TrashRetentionDays)
+	}
+
+	// negative rejected
+	t.Setenv("STASHER_TRASH_RETENTION_DAYS", "-1")
+	if _, err = Load(path); err == nil {
+		t.Error("negative trash_retention_days accepted, want error")
+	}
+
+	// non-integer rejected
+	t.Setenv("STASHER_TRASH_RETENTION_DAYS", "soon")
+	if _, err = Load(path); err == nil {
+		t.Error("non-integer trash_retention_days accepted, want error")
+	}
+}
+
+func TestPurgeAfter(t *testing.T) {
+	trashed := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+
+	cfg := Config{TrashRetentionDays: 30}
+	if got := cfg.PurgeAfter(trashed); got != "2026-11-20T12:00:00Z" {
+		t.Errorf("PurgeAfter(30) = %q", got)
+	}
+	cfg.TrashRetentionDays = 0
+	if got := cfg.PurgeAfter(trashed); got != "" {
+		t.Errorf("PurgeAfter(0) = %q, want \"\" (never purge)", got)
 	}
 }
