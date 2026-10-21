@@ -223,3 +223,38 @@ SELECT d.id AS document_id, d.storage_key, d.filename, d.mime_type,
        i.user_id, i.visibility
 FROM item_documents d JOIN items i ON i.id = d.item_id
 WHERE d.storage_key = ?;
+
+-- name: CreateProject :one
+INSERT INTO projects (user_id, name, status, notes, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?) RETURNING *;
+
+-- name: GetProject :one
+SELECT * FROM projects WHERE id = ? AND user_id = ?;
+
+-- name: ListProjects :many
+SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC;
+
+-- name: UpdateProject :exec
+UPDATE projects SET name = ?, status = ?, notes = ?, updated_at = ? WHERE id = ? AND user_id = ?;
+
+-- name: DeleteProject :exec
+DELETE FROM projects WHERE id = ? AND user_id = ?;
+
+-- name: UpsertProjectItem :exec
+INSERT INTO project_items (project_id, item_id, qty_used, notes, added_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (project_id, item_id) DO UPDATE SET qty_used = excluded.qty_used, notes = excluded.notes;
+
+-- name: DeleteProjectItem :exec
+DELETE FROM project_items WHERE project_id = ? AND item_id = ?;
+
+-- name: ListProjectItems :many
+SELECT pi.project_id, pi.item_id, pi.qty_used, pi.notes, pi.added_at,
+       i.name AS item_name, i.qty AS item_qty, i.unit AS item_unit
+FROM project_items pi JOIN items i ON i.id = pi.item_id
+WHERE pi.project_id = ?;
+
+-- name: GetItemProjects :many
+SELECT p.id, p.name, p.status, pi.qty_used
+FROM project_items pi JOIN projects p ON p.id = pi.project_id
+WHERE pi.item_id = ?;

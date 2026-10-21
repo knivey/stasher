@@ -69,3 +69,5 @@ func slogError(msg string, err error) { slog.Error(msg, "err", err) }
 func sqlNullInt64(i int64) sql.NullInt64 { return sql.NullInt64{Int64: i, Valid: true} }
 
 func sqlNullString(s string) sql.NullString { return sql.NullString{String: s, Valid: true} }
+
+func sqlNullFloat64(f float64) sql.NullFloat64 { return sql.NullFloat64{Float64: f, Valid: true} }

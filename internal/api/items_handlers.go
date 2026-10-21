@@ -71,7 +71,21 @@ func (s *Server) itemDetailJSON(r *http.Request, i dbpkg.Item) (map[string]any, 
 	out["tags"] = tagList
 	out["photos"] = photoList
 	out["documents"] = docList
-	out["projects"] = []map[string]any{} // populated by Task 16
+	projects, err := s.q.GetItemProjects(r.Context(), i.ID)
+	if err != nil {
+		return nil, err
+	}
+	projList := make([]map[string]any, 0, len(projects))
+	for _, pj := range projects {
+		var qtyUsed any
+		if pj.QtyUsed.Valid {
+			qtyUsed = pj.QtyUsed.Float64
+		}
+		projList = append(projList, map[string]any{
+			"id": pj.ID, "name": pj.Name, "status": pj.Status, "qty_used": qtyUsed,
+		})
+	}
+	out["projects"] = projList
 	return out, nil
 }
 

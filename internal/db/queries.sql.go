@@ -233,6 +233,42 @@ func (q *Queries) CreateLocation(ctx context.Context, arg CreateLocationParams) 
 	return i, err
 }
 
+const createProject = `-- name: CreateProject :one
+INSERT INTO projects (user_id, name, status, notes, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, status, notes, created_at, updated_at
+`
+
+type CreateProjectParams struct {
+	UserID    int64  `json:"user_id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Notes     string `json:"notes"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
+	row := q.db.QueryRowContext(ctx, createProject,
+		arg.UserID,
+		arg.Name,
+		arg.Status,
+		arg.Notes,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Status,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (token_hash, user_id, user_agent, last_ip, created_at, last_seen_at)
 VALUES (?, ?, ?, ?, ?, ?)
@@ -415,6 +451,34 @@ func (q *Queries) DeleteOtherUserSessions(ctx context.Context, arg DeleteOtherUs
 	return err
 }
 
+const deleteProject = `-- name: DeleteProject :exec
+DELETE FROM projects WHERE id = ? AND user_id = ?
+`
+
+type DeleteProjectParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) error {
+	_, err := q.db.ExecContext(ctx, deleteProject, arg.ID, arg.UserID)
+	return err
+}
+
+const deleteProjectItem = `-- name: DeleteProjectItem :exec
+DELETE FROM project_items WHERE project_id = ? AND item_id = ?
+`
+
+type DeleteProjectItemParams struct {
+	ProjectID int64 `json:"project_id"`
+	ItemID    int64 `json:"item_id"`
+}
+
+func (q *Queries) DeleteProjectItem(ctx context.Context, arg DeleteProjectItemParams) error {
+	_, err := q.db.ExecContext(ctx, deleteProjectItem, arg.ProjectID, arg.ItemID)
+	return err
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions WHERE id = ? AND user_id = ?
 `
@@ -543,6 +607,47 @@ func (q *Queries) GetItemAnyOwner(ctx context.Context, id int64) (Item, error) {
 	return i, err
 }
 
+const getItemProjects = `-- name: GetItemProjects :many
+SELECT p.id, p.name, p.status, pi.qty_used
+FROM project_items pi JOIN projects p ON p.id = pi.project_id
+WHERE pi.item_id = ?
+`
+
+type GetItemProjectsRow struct {
+	ID      int64           `json:"id"`
+	Name    string          `json:"name"`
+	Status  string          `json:"status"`
+	QtyUsed sql.NullFloat64 `json:"qty_used"`
+}
+
+func (q *Queries) GetItemProjects(ctx context.Context, itemID int64) ([]GetItemProjectsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getItemProjects, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetItemProjectsRow
+	for rows.Next() {
+		var i GetItemProjectsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Status,
+			&i.QtyUsed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getItemTags = `-- name: GetItemTags :many
 SELECT t.id, t.name FROM tags t JOIN item_tags it ON it.tag_id = t.id WHERE it.item_id = ?
 `
@@ -654,6 +759,30 @@ func (q *Queries) GetPhotoByKey(ctx context.Context, storageKey string) (GetPhot
 		&i.SortOrder,
 		&i.UserID,
 		&i.Visibility,
+	)
+	return i, err
+}
+
+const getProject = `-- name: GetProject :one
+SELECT id, user_id, name, status, notes, created_at, updated_at FROM projects WHERE id = ? AND user_id = ?
+`
+
+type GetProjectParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project, error) {
+	row := q.db.QueryRowContext(ctx, getProject, arg.ID, arg.UserID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Status,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1006,6 +1135,91 @@ func (q *Queries) ListLocations(ctx context.Context, userID int64) ([]Location, 
 			&i.UserID,
 			&i.Name,
 			&i.ParentID,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectItems = `-- name: ListProjectItems :many
+SELECT pi.project_id, pi.item_id, pi.qty_used, pi.notes, pi.added_at,
+       i.name AS item_name, i.qty AS item_qty, i.unit AS item_unit
+FROM project_items pi JOIN items i ON i.id = pi.item_id
+WHERE pi.project_id = ?
+`
+
+type ListProjectItemsRow struct {
+	ProjectID int64           `json:"project_id"`
+	ItemID    int64           `json:"item_id"`
+	QtyUsed   sql.NullFloat64 `json:"qty_used"`
+	Notes     string          `json:"notes"`
+	AddedAt   string          `json:"added_at"`
+	ItemName  string          `json:"item_name"`
+	ItemQty   float64         `json:"item_qty"`
+	ItemUnit  string          `json:"item_unit"`
+}
+
+func (q *Queries) ListProjectItems(ctx context.Context, projectID int64) ([]ListProjectItemsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectItems, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectItemsRow
+	for rows.Next() {
+		var i ListProjectItemsRow
+		if err := rows.Scan(
+			&i.ProjectID,
+			&i.ItemID,
+			&i.QtyUsed,
+			&i.Notes,
+			&i.AddedAt,
+			&i.ItemName,
+			&i.ItemQty,
+			&i.ItemUnit,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjects = `-- name: ListProjects :many
+SELECT id, user_id, name, status, notes, created_at, updated_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC
+`
+
+func (q *Queries) ListProjects(ctx context.Context, userID int64) ([]Project, error) {
+	rows, err := q.db.QueryContext(ctx, listProjects, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Project
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Status,
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1378,6 +1592,31 @@ func (q *Queries) UpdateLocation(ctx context.Context, arg UpdateLocationParams) 
 	return err
 }
 
+const updateProject = `-- name: UpdateProject :exec
+UPDATE projects SET name = ?, status = ?, notes = ?, updated_at = ? WHERE id = ? AND user_id = ?
+`
+
+type UpdateProjectParams struct {
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Notes     string `json:"notes"`
+	UpdatedAt string `json:"updated_at"`
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+}
+
+func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) error {
+	_, err := q.db.ExecContext(ctx, updateProject,
+		arg.Name,
+		arg.Status,
+		arg.Notes,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.UserID,
+	)
+	return err
+}
+
 const updateTag = `-- name: UpdateTag :execrows
 UPDATE tags SET name = ? WHERE id = ? AND user_id = ?
 `
@@ -1428,6 +1667,31 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		arg.DefaultItemVisibility,
 		arg.UpdatedAt,
 		arg.ID,
+	)
+	return err
+}
+
+const upsertProjectItem = `-- name: UpsertProjectItem :exec
+INSERT INTO project_items (project_id, item_id, qty_used, notes, added_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (project_id, item_id) DO UPDATE SET qty_used = excluded.qty_used, notes = excluded.notes
+`
+
+type UpsertProjectItemParams struct {
+	ProjectID int64           `json:"project_id"`
+	ItemID    int64           `json:"item_id"`
+	QtyUsed   sql.NullFloat64 `json:"qty_used"`
+	Notes     string          `json:"notes"`
+	AddedAt   string          `json:"added_at"`
+}
+
+func (q *Queries) UpsertProjectItem(ctx context.Context, arg UpsertProjectItemParams) error {
+	_, err := q.db.ExecContext(ctx, upsertProjectItem,
+		arg.ProjectID,
+		arg.ItemID,
+		arg.QtyUsed,
+		arg.Notes,
+		arg.AddedAt,
 	)
 	return err
 }

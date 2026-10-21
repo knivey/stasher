@@ -84,6 +84,15 @@ func (s *Server) Router() chi.Router {
 			r.Post("/items/{id}/documents", s.handleUploadDocument)
 			r.Delete("/items/{id}/documents/{docId}", s.handleDeleteDocument)
 
+			r.Get("/projects", s.handleListProjects)
+			r.Post("/projects", s.handleCreateProject)
+			r.Get("/projects/{id}", s.handleGetProject)
+			r.Patch("/projects/{id}", s.handleUpdateProject)
+			r.Delete("/projects/{id}", s.handleDeleteProject)
+			r.Post("/projects/{id}/items", s.handleAddProjectItem)
+			r.Patch("/projects/{id}/items/{itemId}", s.handlePatchProjectItem)
+			r.Delete("/projects/{id}/items/{itemId}", s.handleDeleteProjectItem)
+
 			r.Route("/admin", func(r chi.Router) {
 				r.Use(s.requireAdmin)
 				r.Get("/users", s.handleAdminListUsers)
