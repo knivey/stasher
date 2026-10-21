@@ -1,0 +1,1 @@
+import{at as e,s as t,v as n}from"./runtime-core.esm-bundler-rWRwBPlL.js";var r=(e,t)=>{let n=e.__vccOpts||e;for(let[e,r]of t)n[e]=r;return n},i={};function a(r,i){return n(),t(`div`,null,e(`Admin`))}var o=r(i,[[`render`,a]]);export{o as default};
