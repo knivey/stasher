@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -169,5 +170,71 @@ func TestItemListIsolated(t *testing.T) {
 	doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "a's thing"}, a)
 	if _, total := listItems(t, ts, b, ""); total != 0 {
 		t.Fatal("b sees a's items")
+	}
+}
+
+func TestItemListThumbKey(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "thumb@test.dev", "longpassword1")
+
+	// item A: two photos. The FIRST-uploaded gets sort_order 5, the second
+	// sort_order 1 — the thumbnail must come from the sort_order-1 photo,
+	// proving the ORDER BY sort_order rule (not insertion order).
+	resp := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "A"}, cookie)
+	var itemA struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &itemA)
+
+	upload := func() struct {
+		ID         int64  `json:"id"`
+		StorageKey string `json:"storage_key"`
+	} {
+		pr := postFile(t, ts, "/api/v1/items/"+fmtInt64(itemA.ID)+"/photos",
+			"file", "pic.png", png1x1, cookie)
+		if pr.StatusCode != http.StatusCreated {
+			t.Fatalf("photo upload = %d", pr.StatusCode)
+		}
+		var p struct {
+			ID         int64  `json:"id"`
+			StorageKey string `json:"storage_key"`
+		}
+		decodeBody(t, pr, &p)
+		return p
+	}
+	setSort := func(photoID, sort int64) {
+		pr := doJSON(t, ts, "PATCH", "/api/v1/items/"+fmtInt64(itemA.ID)+"/photos/"+fmtInt64(photoID),
+			map[string]any{"sort_order": sort}, cookie)
+		if pr.StatusCode != http.StatusOK {
+			t.Fatalf("patch photo sort = %d", pr.StatusCode)
+		}
+	}
+	high := upload() // uploaded first, sorted later
+	low := upload()
+	setSort(high.ID, 5)
+	setSort(low.ID, 1)
+
+	// item B: no photos at all
+	doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "B"}, cookie)
+
+	var list struct {
+		Data []struct {
+			Name     string          `json:"name"`
+			ThumbKey json.RawMessage `json:"thumb_key"`
+		} `json:"data"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items", nil, cookie), &list)
+	byName := map[string]json.RawMessage{}
+	for _, d := range list.Data {
+		byName[d.Name] = d.ThumbKey
+	}
+	// thumb_key is the lowest-sort photo's storage key (raw JSON string)
+	if got := string(byName["A"]); got != jsonString(low.StorageKey) {
+		t.Fatalf("A thumb_key = %s, want %s (sort_order-1 photo, not %q)",
+			got, jsonString(low.StorageKey), high.StorageKey)
+	}
+	// no photos -> explicit null (not absent, not "")
+	if got := string(byName["B"]); got != "null" {
+		t.Fatalf("B thumb_key = %s, want null", got)
 	}
 }

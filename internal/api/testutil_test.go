@@ -117,6 +117,16 @@ func registerUser(t *testing.T, ts *httptest.Server, email, password string) *ht
 
 func fmtInt64(i int64) string { return strconv.FormatInt(i, 10) }
 
+// jsonString returns s as a JSON-encoded string literal, for asserting raw
+// decoded fields (absent key -> "" vs explicit null -> "null" vs value).
+func jsonString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 func sessionCookieFrom(resp *http.Response) *http.Cookie {
 	for _, c := range resp.Cookies() {
 		if c.Name == auth.CookieName {

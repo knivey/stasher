@@ -1,9 +1,54 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 )
+
+func TestSharedListThumbKey(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	alice := registerUser(t, ts, "share-thumb-a@test.dev", "longpassword1")
+	bob := registerUser(t, ts, "share-thumb-b@test.dev", "longpassword1")
+
+	// alice: a private item with a photo (must stay invisible) and a shared
+	// item with a photo (thumb_key must surface in bob's /shared list)
+	priv := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "secret"}, alice)
+	var privItem struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, priv, &privItem)
+	postFile(t, ts, "/api/v1/items/"+fmtInt64(privItem.ID)+"/photos",
+		"file", "secret.png", png1x1, alice)
+
+	shared := doJSON(t, ts, "POST", "/api/v1/items",
+		map[string]any{"name": "public widget", "visibility": "shared"}, alice)
+	var sharedItem struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, shared, &sharedItem)
+	photoResp := postFile(t, ts, "/api/v1/items/"+fmtInt64(sharedItem.ID)+"/photos",
+		"file", "widget.png", png1x1, alice)
+	var photo struct {
+		StorageKey string `json:"storage_key"`
+	}
+	decodeBody(t, photoResp, &photo)
+
+	var list struct {
+		Data []struct {
+			Name     string          `json:"name"`
+			ThumbKey json.RawMessage `json:"thumb_key"`
+		} `json:"data"`
+		Total int64 `json:"total"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/shared", nil, bob), &list)
+	if list.Total != 1 || len(list.Data) != 1 || list.Data[0].Name != "public widget" {
+		t.Fatalf("shared list should hold only the shared item, got %+v", list)
+	}
+	if got := string(list.Data[0].ThumbKey); got != jsonString(photo.StorageKey) {
+		t.Fatalf("shared thumb_key = %s, want %s", got, jsonString(photo.StorageKey))
+	}
+}
 
 func TestSharedBrowseAndCopy(t *testing.T) {
 	_, ts := newTestServer(t, nil)

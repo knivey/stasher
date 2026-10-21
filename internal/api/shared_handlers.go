@@ -32,10 +32,15 @@ func (s *Server) handleListShared(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(rows))
 	total := int64(len(rows))
 	for _, row := range rows {
+		var thumb any // nil -> JSON null when the item has no photos
+		if row.ThumbKey.Valid {
+			thumb = row.ThumbKey.String
+		}
 		out = append(out, map[string]any{
 			"id": row.ID, "name": row.Name, "description": row.Description,
 			"qty": row.Qty, "unit": row.Unit, "visibility": row.Visibility,
-			"photo_count": row.PhotoCount, "owner_name": row.OwnerName,
+			"photo_count": row.PhotoCount, "thumb_key": thumb,
+			"owner_name": row.OwnerName,
 			"created_at": row.CreatedAt, "updated_at": row.UpdatedAt,
 		})
 	}

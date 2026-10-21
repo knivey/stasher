@@ -365,6 +365,7 @@ type itemListRow struct {
 	CreatedAt   string
 	UpdatedAt   string
 	PhotoCount  int64
+	ThumbKey    sql.NullString
 	TotalCount  int64
 }
 
@@ -394,6 +395,7 @@ func buildItemListSQL(f itemFilters, sortCol, dir string) (string, []any) {
 	stmt := `SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id,
        i.visibility, i.created_at, i.updated_at,
        (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
+       (SELECT p.storage_key FROM item_photos p WHERE p.item_id = i.id ORDER BY p.sort_order, p.id LIMIT 1) AS thumb_key,
        count(*) OVER () AS total_count
 FROM items i
 WHERE i.user_id = ?`
@@ -503,7 +505,7 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&row.ID, &row.Name, &row.Description, &row.Qty, &row.Unit,
 			&row.LocationID, &row.Visibility, &row.CreatedAt, &row.UpdatedAt,
-			&row.PhotoCount, &row.TotalCount,
+			&row.PhotoCount, &row.ThumbKey, &row.TotalCount,
 		); err != nil {
 			s.internalErr(w, err)
 			return
@@ -521,10 +523,15 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 		if row.LocationID.Valid {
 			loc = row.LocationID.Int64
 		}
+		var thumb any // nil -> JSON null when the item has no photos
+		if row.ThumbKey.Valid {
+			thumb = row.ThumbKey.String
+		}
 		out = append(out, map[string]any{
 			"id": row.ID, "name": row.Name, "description": row.Description,
 			"qty": row.Qty, "unit": row.Unit, "location_id": loc,
 			"visibility": row.Visibility, "photo_count": row.PhotoCount,
+			"thumb_key":  thumb,
 			"created_at": row.CreatedAt, "updated_at": row.UpdatedAt,
 		})
 	}

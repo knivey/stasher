@@ -1146,8 +1146,13 @@ const listSharedItemsFromOthers = `-- name: ListSharedItemsFromOthers :many
 SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id, i.visibility,
        i.created_at, i.updated_at, u.display_name AS owner_name,
        (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
+       tp.storage_key AS thumb_key,
        count(*) OVER () AS total_count
-FROM items i JOIN users u ON u.id = i.user_id
+FROM items i
+JOIN users u ON u.id = i.user_id
+LEFT JOIN item_photos tp ON tp.id = (
+  SELECT p.id FROM item_photos p WHERE p.item_id = i.id ORDER BY p.sort_order, p.id LIMIT 1
+)
 WHERE i.user_id != ?1 AND i.visibility = 'shared'
   AND (?2 IS NULL OR i.id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?2))
 ORDER BY i.updated_at DESC
@@ -1162,18 +1167,19 @@ type ListSharedItemsFromOthersParams struct {
 }
 
 type ListSharedItemsFromOthersRow struct {
-	ID          int64         `json:"id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Qty         float64       `json:"qty"`
-	Unit        string        `json:"unit"`
-	LocationID  sql.NullInt64 `json:"location_id"`
-	Visibility  string        `json:"visibility"`
-	CreatedAt   string        `json:"created_at"`
-	UpdatedAt   string        `json:"updated_at"`
-	OwnerName   string        `json:"owner_name"`
-	PhotoCount  int64         `json:"photo_count"`
-	TotalCount  int64         `json:"total_count"`
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Qty         float64        `json:"qty"`
+	Unit        string         `json:"unit"`
+	LocationID  sql.NullInt64  `json:"location_id"`
+	Visibility  string         `json:"visibility"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
+	OwnerName   string         `json:"owner_name"`
+	PhotoCount  int64          `json:"photo_count"`
+	ThumbKey    sql.NullString `json:"thumb_key"`
+	TotalCount  int64          `json:"total_count"`
 }
 
 // ListItems is intentionally NOT a sqlc query: ORDER BY must support the
@@ -1181,6 +1187,11 @@ type ListSharedItemsFromOthersRow struct {
 // cannot be bound as placeholder args. The handler (handleListItems) builds
 // the statement via buildItemListSQL with a strict identifier whitelist;
 // all values remain bound args. Filter semantics live there.
+// thumb_key: the item's first photo (lowest sort_order, then id) via a LEFT
+// JOIN onto the subquery-picked row, so sqlc emits a nullable sql.NullString
+// (a bare scalar subquery is inferred NOT NULL and would fail to Scan the
+// no-photo NULL). Join is on the photo primary key: at most one row, so
+// multiplicity and total_count are unchanged.
 func (q *Queries) ListSharedItemsFromOthers(ctx context.Context, arg ListSharedItemsFromOthersParams) ([]ListSharedItemsFromOthersRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSharedItemsFromOthers,
 		arg.UserID,
@@ -1207,6 +1218,7 @@ func (q *Queries) ListSharedItemsFromOthers(ctx context.Context, arg ListSharedI
 			&i.UpdatedAt,
 			&i.OwnerName,
 			&i.PhotoCount,
+			&i.ThumbKey,
 			&i.TotalCount,
 		); err != nil {
 			return nil, err
