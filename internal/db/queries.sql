@@ -133,8 +133,8 @@ WHERE t.user_id = ?
 GROUP BY t.id, t.name
 ORDER BY t.name;
 
--- name: UpdateTag :exec
+-- name: UpdateTag :execrows
 UPDATE tags SET name = ? WHERE id = ? AND user_id = ?;
 
--- name: DeleteTag :exec
+-- name: DeleteTag :execrows
 DELETE FROM tags WHERE id = ? AND user_id = ?;

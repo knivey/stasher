@@ -250,7 +250,7 @@ func (q *Queries) DeleteSession(ctx context.Context, arg DeleteSessionParams) er
 	return err
 }
 
-const deleteTag = `-- name: DeleteTag :exec
+const deleteTag = `-- name: DeleteTag :execrows
 DELETE FROM tags WHERE id = ? AND user_id = ?
 `
 
@@ -259,9 +259,12 @@ type DeleteTagParams struct {
 	UserID int64 `json:"user_id"`
 }
 
-func (q *Queries) DeleteTag(ctx context.Context, arg DeleteTagParams) error {
-	_, err := q.db.ExecContext(ctx, deleteTag, arg.ID, arg.UserID)
-	return err
+func (q *Queries) DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteTag, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const getInvite = `-- name: GetInvite :one
@@ -837,7 +840,7 @@ func (q *Queries) UpdateLocation(ctx context.Context, arg UpdateLocationParams) 
 	return err
 }
 
-const updateTag = `-- name: UpdateTag :exec
+const updateTag = `-- name: UpdateTag :execrows
 UPDATE tags SET name = ? WHERE id = ? AND user_id = ?
 `
 
@@ -847,9 +850,12 @@ type UpdateTagParams struct {
 	UserID int64  `json:"user_id"`
 }
 
-func (q *Queries) UpdateTag(ctx context.Context, arg UpdateTagParams) error {
-	_, err := q.db.ExecContext(ctx, updateTag, arg.Name, arg.ID, arg.UserID)
-	return err
+func (q *Queries) UpdateTag(ctx context.Context, arg UpdateTagParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateTag, arg.Name, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec

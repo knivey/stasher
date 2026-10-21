@@ -68,8 +68,13 @@ func (s *Server) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "tag_exists", "another tag already has this name")
 		return
 	}
-	if err := s.q.UpdateTag(r.Context(), dbpkg.UpdateTagParams{Name: req.Name, ID: id, UserID: u.ID}); err != nil {
+	n, err := s.q.UpdateTag(r.Context(), dbpkg.UpdateTagParams{Name: req.Name, ID: id, UserID: u.ID})
+	if err != nil {
 		s.internalErr(w, err)
+		return
+	}
+	if n == 0 {
+		writeErr(w, http.StatusNotFound, "not_found", "tag not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "name": req.Name})
@@ -82,8 +87,13 @@ func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid tag id")
 		return
 	}
-	if err := s.q.DeleteTag(r.Context(), dbpkg.DeleteTagParams{ID: id, UserID: u.ID}); err != nil {
+	n, err := s.q.DeleteTag(r.Context(), dbpkg.DeleteTagParams{ID: id, UserID: u.ID})
+	if err != nil {
 		s.internalErr(w, err)
+		return
+	}
+	if n == 0 {
+		writeErr(w, http.StatusNotFound, "not_found", "tag not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
