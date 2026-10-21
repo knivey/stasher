@@ -70,3 +70,21 @@ File references are to the state at commit `60c61fe`.
 - `docs/api-notes.md`: locations `name` row should note provided-`""`-keeps
   (items row documents the pattern); create-vs-PATCH tags/location error
   precedence asymmetry (400-on-create, 404-on-PATCH) undocumented.
+
+## Frontend v1.1 (from the frontend final review, 2026-10-21)
+
+- **Project delete UI** — backend `DELETE /projects/{id}` exists; every sibling
+  resource has delete-with-confirm but projects don't. Plan gap vs spec §7.
+- **Thumbnails in list views** — mobile/shared cards show a 📷 count badge
+  because list endpoints carry no storage keys; would need a backend change
+  (e.g. include first-photo key in list rows).
+- **Extended smoke** — log in against the real binary and dump one authed
+  view's DOM at 375px (would guard table-overflow + nav reachability).
+- **`make check`** — single target running go + web (vue-tsc, vitest).
+- **Residual upload race** (narrowed by the final fix wave) — a photo picked
+  DURING an in-flight save (after the second encode drain) still misses the
+  flush; disable the photo input while `saving`.
+- **Negative `qty_used` savable** (backend laxity — client `min=0` advisory).
+- Tap-target size for the mobile header's emoji links; 5-char bottom-nav
+  label truncation; `locations.ts` cycle-comment imprecision.
+
