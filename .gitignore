@@ -1,0 +1,6 @@
+/data/
+/stasher
+/web/node_modules/
+*.db
+*.db-wal
+*.db-shm
