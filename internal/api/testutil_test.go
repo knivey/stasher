@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -145,4 +146,18 @@ func sessionParams(hash string, userID int64, now string) db.CreateSessionParams
 		TokenHash: hash, UserID: userID, UserAgent: "test", LastIp: "127.0.0.1",
 		CreatedAt: now, LastSeenAt: now,
 	}
+}
+
+// mustExec runs a raw SQL statement (test convenience for tables without APIs yet).
+func mustExec(t *testing.T, s *Server, query string, args ...any) {
+	t.Helper()
+	if _, err := s.raw.Exec(query, args...); err != nil {
+		t.Fatalf("exec %q: %v", query, err)
+	}
+}
+
+// mustQueryRow runs a raw SQL query returning one row.
+func mustQueryRow(t *testing.T, s *Server, query string) *sql.Row {
+	t.Helper()
+	return s.raw.QueryRow(query)
 }

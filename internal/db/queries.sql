@@ -72,3 +72,50 @@ UPDATE invites SET used_by = ?, used_at = ? WHERE code = ?;
 
 -- name: DeleteInvite :exec
 DELETE FROM invites WHERE id = ?;
+
+-- name: CreateLocation :one
+INSERT INTO locations (user_id, name, parent_id, notes, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?) RETURNING *;
+
+-- name: GetLocation :one
+SELECT * FROM locations WHERE id = ? AND user_id = ?;
+
+-- name: ListLocations :many
+SELECT * FROM locations WHERE user_id = ? ORDER BY name;
+
+-- name: UpdateLocation :exec
+UPDATE locations SET name = ?, notes = ?, parent_id = ?, updated_at = ? WHERE id = ? AND user_id = ?;
+
+-- name: DeleteLocation :exec
+DELETE FROM locations WHERE id = ? AND user_id = ?;
+
+-- name: ReparentChildren :exec
+UPDATE locations SET parent_id = ? WHERE parent_id = ? AND user_id = ?;
+
+-- name: ClearItemsLocation :exec
+UPDATE items SET location_id = NULL, updated_at = ? WHERE location_id = ? AND user_id = ?;
+
+-- name: LocationDescendants :many
+-- CTE named "d" not "desc": DESC is a reserved SQLite keyword that breaks sqlc's
+-- analyzer; anchor columns are table-qualified for the same reason.
+WITH RECURSIVE d(id) AS (
+    SELECT locations.id FROM locations WHERE locations.id = ? AND locations.user_id = ?
+    UNION ALL
+    SELECT l.id FROM locations l JOIN d ON l.parent_id = d.id WHERE l.user_id = ?
+) SELECT id FROM d;
+
+-- name: LocationBreadcrumbs :many
+WITH RECURSIVE up(id, name, parent_id, depth) AS (
+    SELECT locations.id, locations.name, locations.parent_id, 0 AS depth
+    FROM locations WHERE locations.id = ? AND locations.user_id = ?
+    UNION ALL
+    SELECT l.id, l.name, l.parent_id, up.depth + 1
+    FROM locations l JOIN up ON l.id = up.parent_id WHERE l.user_id = ?
+) SELECT id, name, depth FROM up ORDER BY depth DESC;
+
+-- name: GetLocationByName :one
+-- NULL-safe parent comparison ("IS ?") so duplicates under the same parent
+-- (including the root, NULL) are detectable - spec: app-logic uniqueness.
+-- (Comment uses ASCII "-" not an em dash: sqlc v1.31.1 mis-handles multi-byte
+-- UTF-8 inside comments and corrupts its rewritten query text.)
+SELECT * FROM locations WHERE user_id = ? AND name = ? AND parent_id IS ?;

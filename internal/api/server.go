@@ -62,6 +62,12 @@ func (s *Server) Router() chi.Router {
 			r.Delete("/auth/sessions/{id}", s.handleRevokeSession)
 			r.Post("/auth/sessions/revoke-all", s.handleRevokeAllSessions)
 
+			r.Get("/locations", s.handleListLocations)
+			r.Post("/locations", s.handleCreateLocation)
+			r.Get("/locations/{id}", s.handleGetLocation)
+			r.Patch("/locations/{id}", s.handleUpdateLocation)
+			r.Delete("/locations/{id}", s.handleDeleteLocation)
+
 			r.Route("/admin", func(r chi.Router) {
 				r.Use(s.requireAdmin)
 				r.Get("/users", s.handleAdminListUsers)

@@ -10,6 +10,21 @@ import (
 	"database/sql"
 )
 
+const clearItemsLocation = `-- name: ClearItemsLocation :exec
+UPDATE items SET location_id = NULL, updated_at = ? WHERE location_id = ? AND user_id = ?
+`
+
+type ClearItemsLocationParams struct {
+	UpdatedAt  string        `json:"updated_at"`
+	LocationID sql.NullInt64 `json:"location_id"`
+	UserID     int64         `json:"user_id"`
+}
+
+func (q *Queries) ClearItemsLocation(ctx context.Context, arg ClearItemsLocationParams) error {
+	_, err := q.db.ExecContext(ctx, clearItemsLocation, arg.UpdatedAt, arg.LocationID, arg.UserID)
+	return err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT COUNT(*) FROM users
 `
@@ -41,6 +56,42 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Inv
 		&i.CreatedAt,
 		&i.UsedBy,
 		&i.UsedAt,
+	)
+	return i, err
+}
+
+const createLocation = `-- name: CreateLocation :one
+INSERT INTO locations (user_id, name, parent_id, notes, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, parent_id, notes, created_at, updated_at
+`
+
+type CreateLocationParams struct {
+	UserID    int64         `json:"user_id"`
+	Name      string        `json:"name"`
+	ParentID  sql.NullInt64 `json:"parent_id"`
+	Notes     string        `json:"notes"`
+	CreatedAt string        `json:"created_at"`
+	UpdatedAt string        `json:"updated_at"`
+}
+
+func (q *Queries) CreateLocation(ctx context.Context, arg CreateLocationParams) (Location, error) {
+	row := q.db.QueryRowContext(ctx, createLocation,
+		arg.UserID,
+		arg.Name,
+		arg.ParentID,
+		arg.Notes,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i Location
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.ParentID,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -141,6 +192,20 @@ func (q *Queries) DeleteInvite(ctx context.Context, id int64) error {
 	return err
 }
 
+const deleteLocation = `-- name: DeleteLocation :exec
+DELETE FROM locations WHERE id = ? AND user_id = ?
+`
+
+type DeleteLocationParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) DeleteLocation(ctx context.Context, arg DeleteLocationParams) error {
+	_, err := q.db.ExecContext(ctx, deleteLocation, arg.ID, arg.UserID)
+	return err
+}
+
 const deleteOtherUserSessions = `-- name: DeleteOtherUserSessions :exec
 DELETE FROM sessions WHERE user_id = ? AND id != ?
 `
@@ -183,6 +248,59 @@ func (q *Queries) GetInvite(ctx context.Context, code string) (Invite, error) {
 		&i.CreatedAt,
 		&i.UsedBy,
 		&i.UsedAt,
+	)
+	return i, err
+}
+
+const getLocation = `-- name: GetLocation :one
+SELECT id, user_id, name, parent_id, notes, created_at, updated_at FROM locations WHERE id = ? AND user_id = ?
+`
+
+type GetLocationParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) GetLocation(ctx context.Context, arg GetLocationParams) (Location, error) {
+	row := q.db.QueryRowContext(ctx, getLocation, arg.ID, arg.UserID)
+	var i Location
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.ParentID,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLocationByName = `-- name: GetLocationByName :one
+SELECT id, user_id, name, parent_id, notes, created_at, updated_at FROM locations WHERE user_id = ? AND name = ? AND parent_id IS ?
+`
+
+type GetLocationByNameParams struct {
+	UserID   int64         `json:"user_id"`
+	Name     string        `json:"name"`
+	ParentID sql.NullInt64 `json:"parent_id"`
+}
+
+// NULL-safe parent comparison ("IS ?") so duplicates under the same parent
+// (including the root, NULL) are detectable - spec: app-logic uniqueness.
+// (Comment uses ASCII "-" not an em dash: sqlc v1.31.1 mis-handles multi-byte
+// UTF-8 inside comments and corrupts its rewritten query text.)
+func (q *Queries) GetLocationByName(ctx context.Context, arg GetLocationByNameParams) (Location, error) {
+	row := q.db.QueryRowContext(ctx, getLocationByName, arg.UserID, arg.Name, arg.ParentID)
+	var i Location
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.ParentID,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -336,6 +454,41 @@ func (q *Queries) ListInvites(ctx context.Context) ([]ListInvitesRow, error) {
 	return items, nil
 }
 
+const listLocations = `-- name: ListLocations :many
+SELECT id, user_id, name, parent_id, notes, created_at, updated_at FROM locations WHERE user_id = ? ORDER BY name
+`
+
+func (q *Queries) ListLocations(ctx context.Context, userID int64) ([]Location, error) {
+	rows, err := q.db.QueryContext(ctx, listLocations, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Location
+	for rows.Next() {
+		var i Location
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.ParentID,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserSessions = `-- name: ListUserSessions :many
 SELECT id, token_hash, user_id, user_agent, last_ip, created_at, last_seen_at FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC
 `
@@ -418,6 +571,90 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	return items, nil
 }
 
+const locationBreadcrumbs = `-- name: LocationBreadcrumbs :many
+WITH RECURSIVE up(id, name, parent_id, depth) AS (
+    SELECT locations.id, locations.name, locations.parent_id, 0 AS depth
+    FROM locations WHERE locations.id = ? AND locations.user_id = ?
+    UNION ALL
+    SELECT l.id, l.name, l.parent_id, up.depth + 1
+    FROM locations l JOIN up ON l.id = up.parent_id WHERE l.user_id = ?
+) SELECT id, name, depth FROM up ORDER BY depth DESC
+`
+
+type LocationBreadcrumbsParams struct {
+	ID       int64 `json:"id"`
+	UserID   int64 `json:"user_id"`
+	UserID_2 int64 `json:"user_id_2"`
+}
+
+type LocationBreadcrumbsRow struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Depth int64  `json:"depth"`
+}
+
+func (q *Queries) LocationBreadcrumbs(ctx context.Context, arg LocationBreadcrumbsParams) ([]LocationBreadcrumbsRow, error) {
+	rows, err := q.db.QueryContext(ctx, locationBreadcrumbs, arg.ID, arg.UserID, arg.UserID_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LocationBreadcrumbsRow
+	for rows.Next() {
+		var i LocationBreadcrumbsRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Depth); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const locationDescendants = `-- name: LocationDescendants :many
+WITH RECURSIVE d(id) AS (
+    SELECT locations.id FROM locations WHERE locations.id = ? AND locations.user_id = ?
+    UNION ALL
+    SELECT l.id FROM locations l JOIN d ON l.parent_id = d.id WHERE l.user_id = ?
+) SELECT id FROM d
+`
+
+type LocationDescendantsParams struct {
+	ID       int64 `json:"id"`
+	UserID   int64 `json:"user_id"`
+	UserID_2 int64 `json:"user_id_2"`
+}
+
+// CTE named "d" not "desc": DESC is a reserved SQLite keyword that breaks sqlc's
+// analyzer; anchor columns are table-qualified for the same reason.
+func (q *Queries) LocationDescendants(ctx context.Context, arg LocationDescendantsParams) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, locationDescendants, arg.ID, arg.UserID, arg.UserID_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markInviteUsed = `-- name: MarkInviteUsed :exec
 UPDATE invites SET used_by = ?, used_at = ? WHERE code = ?
 `
@@ -430,6 +667,21 @@ type MarkInviteUsedParams struct {
 
 func (q *Queries) MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error {
 	_, err := q.db.ExecContext(ctx, markInviteUsed, arg.UsedBy, arg.UsedAt, arg.Code)
+	return err
+}
+
+const reparentChildren = `-- name: ReparentChildren :exec
+UPDATE locations SET parent_id = ? WHERE parent_id = ? AND user_id = ?
+`
+
+type ReparentChildrenParams struct {
+	ParentID   sql.NullInt64 `json:"parent_id"`
+	ParentID_2 sql.NullInt64 `json:"parent_id_2"`
+	UserID     int64         `json:"user_id"`
+}
+
+func (q *Queries) ReparentChildren(ctx context.Context, arg ReparentChildrenParams) error {
+	_, err := q.db.ExecContext(ctx, reparentChildren, arg.ParentID, arg.ParentID_2, arg.UserID)
 	return err
 }
 
@@ -474,6 +726,31 @@ type TouchSessionParams struct {
 
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
 	_, err := q.db.ExecContext(ctx, touchSession, arg.LastSeenAt, arg.ID)
+	return err
+}
+
+const updateLocation = `-- name: UpdateLocation :exec
+UPDATE locations SET name = ?, notes = ?, parent_id = ?, updated_at = ? WHERE id = ? AND user_id = ?
+`
+
+type UpdateLocationParams struct {
+	Name      string        `json:"name"`
+	Notes     string        `json:"notes"`
+	ParentID  sql.NullInt64 `json:"parent_id"`
+	UpdatedAt string        `json:"updated_at"`
+	ID        int64         `json:"id"`
+	UserID    int64         `json:"user_id"`
+}
+
+func (q *Queries) UpdateLocation(ctx context.Context, arg UpdateLocationParams) error {
+	_, err := q.db.ExecContext(ctx, updateLocation,
+		arg.Name,
+		arg.Notes,
+		arg.ParentID,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.UserID,
+	)
 	return err
 }
 
