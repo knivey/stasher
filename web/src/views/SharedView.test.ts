@@ -61,6 +61,41 @@ describe('SharedView', () => {
     expect(router.currentRoute.value.path).toBe('/shared')
   })
 
+  it('keeps per-card busy state: a second copy elsewhere cannot re-enable or duplicate an in-flight copy', async () => {
+    const calls: string[] = []
+    let releaseA!: (r: Response) => void
+    const pendingA = new Promise<Response>(res => { releaseA = res })
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`)
+      if (url.includes('/items/9/copy')) return pendingA            // A: held until the test releases it
+      if (url.includes('/items/10/copy')) return new Response(JSON.stringify({ id: 13, name: 'wrench', qty: 1, unit: '' }), { status: 201 })
+      return new Response(JSON.stringify({
+        data: [
+          shared,
+          { id: 10, name: 'wrench', owner_name: 'Bob', qty: 1, photo_count: 2 },
+        ], total: 2,
+      }), { status: 200 })
+    }))
+    const { w, router } = await mountView()
+    const cards = w.findAll('[data-cards] > div')
+    const btnA = cards[0].find('button')!
+    const btnB = cards[1].find('button')!
+
+    await btnA.trigger('click')                                    // A in flight, held
+    expect(btnA.attributes('disabled')).toBeDefined()               // A busy
+    await btnB.trigger('click')                                    // B copies concurrently
+    expect(btnA.attributes('disabled')).toBeDefined()               // B must NOT re-enable A
+    await btnA.trigger('click')                                    // duplicate A click while in flight
+    await flushPromises()                                          // B settles; A still held
+    expect(calls.filter(c => c === 'POST /api/v1/items/9/copy')).toHaveLength(1)
+
+    releaseA(new Response(JSON.stringify({ id: 12, name: 'solder tips', qty: 8, unit: '' }), { status: 201 }))
+    await flushPromises()
+    expect(calls.filter(c => c === 'POST /api/v1/items/9/copy')).toHaveLength(1)
+    expect(toasts.some(t => t.message === 'Copied to your inventory' && t.type === 'success')).toBe(true)
+    expect(router.currentRoute.value.path).toBe('/items/12')
+  })
+
   it('shows the empty state when nothing is shared with you', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
     const { w } = await mountView()

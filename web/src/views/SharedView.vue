@@ -61,12 +61,14 @@ async function fetch() {
 
 onMounted(fetch)
 
-// Copy: one in flight per card — the busy ref holds the copied item's id.
-const copying = ref<number | null>(null)
+// Copy: busy tracked per item id — several cards can be in flight at once and
+// each stays disabled until its own request settles (a single-slot ref would
+// let a later click re-enable an earlier card's button).
+const copying = ref(new Set<number>())
 
 async function copy(item: SharedItem) {
-  if (copying.value === item.id) return
-  copying.value = item.id
+  if (copying.value.has(item.id)) return
+  copying.value.add(item.id)
   try {
     const created = await api.post<Item>(`/api/v1/items/${item.id}/copy`)
     toast('Copied to your inventory', 'success')
@@ -75,7 +77,7 @@ async function copy(item: SharedItem) {
     toast((e as Error).message, 'error')
     if (e instanceof ApiError && e.status === 404) fetch() // un-shared/deleted meanwhile
   } finally {
-    copying.value = null
+    copying.value.delete(item.id)
   }
 }
 </script>
@@ -97,9 +99,9 @@ async function copy(item: SharedItem) {
           <div class="text-xs text-slate-500">from {{ i.owner_name }} · {{ i.qty }}{{ i.unit ? ` ${i.unit}` : '' }}</div>
           <div v-if="i.photo_count" class="text-xs text-slate-400">📷 {{ i.photo_count }}</div>
         </div>
-        <button @click="copy(i)" :disabled="copying === i.id"
+        <button @click="copy(i)" :disabled="copying.has(i.id)"
           class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-40">
-          {{ copying === i.id ? 'Copying…' : 'Copy' }}
+          {{ copying.has(i.id) ? 'Copying…' : 'Copy' }}
         </button>
       </div>
     </div>
