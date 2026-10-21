@@ -1,1 +1,0 @@
-import{D as e,m as t,y as n}from"./index-CVEvXDWY.js";import{t as r}from"./_plugin-vue_export-helper-BDNMzG2s.js";var i={};function a(r,i){return n(),t(`div`,null,e(`Admin`))}var o=r(i,[[`render`,a]]);export{o as default};
