@@ -258,95 +258,110 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid item id")
 		return
 	}
-	item, err := s.q.GetItem(r.Context(), dbpkg.GetItemParams{ID: id, UserID: u.ID})
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", "item not found")
-		return
-	}
 	var req itemReq
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	oldQty := item.Qty
-	if req.Name != "" { // absent = keep
-		if len(req.Name) > 200 {
-			writeErr(w, http.StatusBadRequest, "validation_error", "name must be 1-200 chars")
-			return
-		}
-		item.Name = req.Name
-	}
-	if req.Description != nil {
-		item.Description = *req.Description
+	// pure request validations run BEFORE any read or write (validate-before-
+	// write invariant, final-review Finding 2); the item row itself is read
+	// inside the write transaction below.
+	if req.Name != "" && len(req.Name) > 200 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "name must be 1-200 chars")
+		return
 	}
 	if req.Qty != nil {
 		if *req.Qty < 0 || *req.Qty > 1e12 {
 			writeErr(w, http.StatusBadRequest, "validation_error", "qty must be between 0 and 1e12")
 			return
 		}
-		item.Qty = *req.Qty
-	}
-	if req.Unit != nil {
-		item.Unit = *req.Unit
 	}
 	if req.Visibility != nil {
 		if *req.Visibility != "private" && *req.Visibility != "shared" {
 			writeErr(w, http.StatusBadRequest, "validation_error", "visibility must be private or shared")
 			return
 		}
-		item.Visibility = *req.Visibility
 	}
-	if req.LocationID != nil { // explicit null clears; absent keeps
-		if *req.LocationID == 0 {
-			item.LocationID = sql.NullInt64{}
-		} else {
-			if _, err := s.q.GetLocation(r.Context(), dbpkg.GetLocationParams{ID: *req.LocationID, UserID: u.ID}); err != nil {
-				writeErr(w, http.StatusNotFound, "not_found", "location not found")
-				return
-			}
-			item.LocationID = sqlNullInt64(*req.LocationID)
-		}
-	}
-	// validate tags before ANY write (final-review Finding 2): otherwise
-	// UpdateItem applies the sibling fields and the 400 arrives too late
 	if req.Tags != nil {
 		if err := validateTagNames(req.Tags); err != nil {
 			s.tagErr(w, err)
 			return
 		}
 	}
+	if req.LocationID != nil && *req.LocationID != 0 { // 0 clears; existence check here
+		if _, err := s.q.GetLocation(r.Context(), dbpkg.GetLocationParams{ID: *req.LocationID, UserID: u.ID}); err != nil {
+			writeErr(w, http.StatusNotFound, "not_found", "location not found")
+			return
+		}
+	}
+
+	// Read-modify-write inside ONE transaction: with the single-connection
+	// pool, BeginTx serializes concurrent writers, so the row read here is
+	// the committed predecessor of the update - a concurrent qty edit (PATCH
+	// or usage) can no longer interleave and clobber the chain.
+	tx, err := s.raw.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	defer tx.Rollback()
+	qtx := dbpkg.New(tx)
+	item, err := qtx.GetItem(r.Context(), dbpkg.GetItemParams{ID: id, UserID: u.ID})
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "item not found")
+		return
+	}
+	oldQty := item.Qty
+	if req.Name != "" { // absent = keep
+		item.Name = req.Name
+	}
+	if req.Description != nil {
+		item.Description = *req.Description
+	}
+	if req.Qty != nil {
+		item.Qty = *req.Qty
+	}
+	if req.Unit != nil {
+		item.Unit = *req.Unit
+	}
+	if req.Visibility != nil {
+		item.Visibility = *req.Visibility
+	}
+	if req.LocationID != nil { // explicit 0 clears; absent keeps
+		if *req.LocationID == 0 {
+			item.LocationID = sql.NullInt64{}
+		} else {
+			item.LocationID = sqlNullInt64(*req.LocationID)
+		}
+	}
 	// a qty change is logged to the ledger in the same transaction as the
-	// update; other-field PATCHes write no entry
-	qtyChanged := req.Qty != nil && *req.Qty != oldQty
-	params := dbpkg.UpdateItemParams{
+	// update; other-field PATCHes write no entry. Any change resulting in
+	// qty > 0 clears the disposed flag (same rule as the usage path); a
+	// change landing on 0 leaves the flag unchanged.
+	qtyChanged := req.Qty != nil && item.Qty != oldQty
+	disposed := item.Disposed
+	if qtyChanged && item.Qty > 0 {
+		disposed = 0
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if err := qtx.UpdateItem(r.Context(), dbpkg.UpdateItemParams{
 		Name: item.Name, Description: item.Description, Qty: item.Qty, Unit: item.Unit,
 		LocationID: item.LocationID, Visibility: item.Visibility,
-		Disposed: item.Disposed, UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		Disposed: disposed, UpdatedAt: now,
 		ID: id, UserID: u.ID,
+	}); err != nil {
+		s.internalErr(w, err)
+		return
 	}
 	if qtyChanged {
-		tx, err := s.raw.BeginTx(r.Context(), nil)
-		if err != nil {
-			s.internalErr(w, err)
-			return
-		}
-		defer tx.Rollback()
-		qtx := dbpkg.New(tx)
-		if err := qtx.UpdateItem(r.Context(), params); err != nil {
-			s.internalErr(w, err)
-			return
-		}
 		if _, err := insertLedgerEntry(r.Context(), qtx, dbpkg.CreateItemLedgerParams{
 			ItemID: id, UserID: u.ID, Delta: item.Qty - oldQty, ResultingQty: item.Qty,
-			Kind: "adjustment", Note: "", CreatedAt: params.UpdatedAt,
+			Kind: "adjustment", Note: "", CreatedAt: now,
 		}); err != nil {
 			s.internalErr(w, err)
 			return
 		}
-		if err := tx.Commit(); err != nil {
-			s.internalErr(w, err)
-			return
-		}
-	} else if err := s.q.UpdateItem(r.Context(), params); err != nil {
+	}
+	if err := tx.Commit(); err != nil {
 		s.internalErr(w, err)
 		return
 	}

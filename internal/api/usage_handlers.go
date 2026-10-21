@@ -56,17 +56,14 @@ func (s *Server) recordInitialLedger(ctx context.Context, itemID, userID int64, 
 }
 
 // handleAddItemUsage records one usage event and applies its qty effect
-// atomically: items.qty/disposed update + ledger insert in a single tx.
+// atomically: the item row is read, updated, and ledgered in a single tx,
+// so with the single-connection pool concurrent usage posts serialize and
+// each delta applies to the committed predecessor qty.
 func (s *Server) handleAddItemUsage(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid item id")
-		return
-	}
-	item, err := s.q.GetItem(r.Context(), dbpkg.GetItemParams{ID: id, UserID: u.ID})
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", "item not found")
 		return
 	}
 	var req usageReq
@@ -89,6 +86,20 @@ func (s *Server) handleAddItemUsage(w http.ResponseWriter, r *http.Request) {
 	note := ""
 	if req.Note != nil {
 		note = *req.Note
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := s.raw.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	defer tx.Rollback()
+	qtx := dbpkg.New(tx)
+	item, err := qtx.GetItem(r.Context(), dbpkg.GetItemParams{ID: id, UserID: u.ID})
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "item not found")
+		return
 	}
 
 	var delta, resulting float64
@@ -118,14 +129,6 @@ func (s *Server) handleAddItemUsage(w http.ResponseWriter, r *http.Request) {
 		} // resulting == 0: flag unchanged
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	tx, err := s.raw.BeginTx(r.Context(), nil)
-	if err != nil {
-		s.internalErr(w, err)
-		return
-	}
-	defer tx.Rollback()
-	qtx := dbpkg.New(tx)
 	if err := qtx.UpdateItem(r.Context(), dbpkg.UpdateItemParams{
 		Name: item.Name, Description: item.Description, Qty: resulting,
 		Unit: item.Unit, LocationID: item.LocationID, Visibility: item.Visibility,

@@ -1,8 +1,10 @@
 package api
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -281,5 +283,121 @@ func TestItemUsageDisposedFlagAndIsolation(t *testing.T) {
 	}
 	if resp := doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id)+"/usage", nil, bob); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("foreign GET usage = %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestPatchQtyRaiseClearsDisposed pins review fix 1: any change resulting
+// in qty > 0 clears the disposed flag - including the PATCH path.
+func TestPatchQtyRaiseClearsDisposed(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "fix1-patch@test.dev", "longpassword1")
+	id := createQtyItem(t, ts, cookie, "old cables", 4)
+
+	if resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/usage",
+		map[string]any{"kind": "disposed"}, cookie); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("dispose = %d", resp.StatusCode)
+	}
+	resp := doJSON(t, ts, "PATCH", "/api/v1/items/"+fmtInt64(id),
+		map[string]any{"qty": 5}, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch qty raise = %d", resp.StatusCode)
+	}
+	var d struct {
+		Qty      float64 `json:"qty"`
+		Disposed bool    `json:"disposed"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id), nil, cookie), &d)
+	if d.Qty != 5 || d.Disposed {
+		t.Fatalf("after qty raise: qty=%v disposed=%v, want 5/false", d.Qty, d.Disposed)
+	}
+	// ledger carries the raise as an adjustment (0 -> 5)
+	entries, total := listUsage(t, ts, cookie, id)
+	if total != 3 { // initial, disposed, adjustment
+		t.Fatalf("total = %d, want 3", total)
+	}
+	if top := entries[0]; top.Kind != "adjustment" || top.Delta != 5 || top.ResultingQty != 5 {
+		t.Fatalf("adjustment entry = %+v", top)
+	}
+}
+
+// TestUsageRestockClearsDisposed pins the usage-path half of the same rule:
+// a positive resulting qty clears the flag (restock on a disposed item).
+func TestUsageRestockClearsDisposed(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "fix1-restock@test.dev", "longpassword1")
+	id := createQtyItem(t, ts, cookie, "garden hose", 4)
+
+	if resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/usage",
+		map[string]any{"kind": "disposed"}, cookie); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("dispose = %d", resp.StatusCode)
+	}
+	if resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/usage",
+		map[string]any{"kind": "restock", "delta": 5}, cookie); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("restock = %d", resp.StatusCode)
+	}
+	var d struct {
+		Qty      float64 `json:"qty"`
+		Disposed bool    `json:"disposed"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id), nil, cookie), &d)
+	if d.Qty != 5 || d.Disposed {
+		t.Fatalf("after restock: qty=%v disposed=%v, want 5/false", d.Qty, d.Disposed)
+	}
+}
+
+// TestUsageChainIntegrityUnderConcurrency pins review fix 2: the qty read
+// feeding a usage write happens inside the write transaction, so N
+// concurrent -1 posts from qty N must land a gapless chain (each entry's
+// resulting_qty == previous resulting + delta) and drain the item to 0.
+func TestUsageChainIntegrityUnderConcurrency(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "fix2-chain@test.dev", "longpassword1")
+	const n = 20
+	id := createQtyItem(t, ts, cookie, "washers", n)
+
+	var wg sync.WaitGroup
+	statuses := make(chan int, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/usage",
+				map[string]any{"kind": "used", "delta": -1}, cookie)
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusCreated {
+				statuses <- resp.StatusCode
+			}
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	for sc := range statuses {
+		t.Fatalf("concurrent usage post = %d, want 201", sc)
+	}
+
+	var d struct {
+		Qty float64 `json:"qty"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id), nil, cookie), &d)
+	if d.Qty != 0 {
+		t.Fatalf("qty after %dx-1 = %v, want 0", n, d.Qty)
+	}
+
+	// full history, newest first: the newest -1 entry drained to 0 and each
+	// older one sat one higher (resulting[k] == k), then the initial
+	// baseline (delta=n, resulting=n)
+	entries, total := listUsage(t, ts, cookie, id)
+	if total != n+1 || len(entries) != n+1 {
+		t.Fatalf("usage total=%d len=%d, want %d", total, len(entries), n+1)
+	}
+	for k := 0; k < n; k++ {
+		if e := entries[k]; e.Delta != -1 || e.ResultingQty != float64(k) {
+			t.Fatalf("entry[%d] = %+v, want delta -1 resulting %d", k, e, k)
+		}
+	}
+	if base := entries[n]; base.Kind != "adjustment" || base.Note != "initial" ||
+		base.Delta != n || base.ResultingQty != n {
+		t.Fatalf("baseline = %+v", base)
 	}
 }
