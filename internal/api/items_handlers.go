@@ -31,7 +31,8 @@ func itemJSON(i dbpkg.Item) map[string]any {
 	return map[string]any{
 		"id": i.ID, "name": i.Name, "description": i.Description,
 		"qty": i.Qty, "unit": i.Unit, "location_id": loc,
-		"visibility": i.Visibility, "created_at": i.CreatedAt, "updated_at": i.UpdatedAt,
+		"visibility": i.Visibility, "disposed": i.Disposed != 0,
+		"created_at": i.CreatedAt, "updated_at": i.UpdatedAt,
 	}
 }
 
@@ -200,6 +201,11 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
+	// every item starts with a baseline ledger entry (delta=resulting=qty)
+	if err := s.recordInitialLedger(r.Context(), item.ID, u.ID, qty, now); err != nil {
+		s.internalErr(w, err)
+		return
+	}
 	if req.Tags != nil {
 		if err := s.setItemTags(r, u, item.ID, req.Tags); err != nil {
 			s.tagErr(w, err)
@@ -261,6 +267,7 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	oldQty := item.Qty
 	if req.Name != "" { // absent = keep
 		if len(req.Name) > 200 {
 			writeErr(w, http.StatusBadRequest, "validation_error", "name must be 1-200 chars")
@@ -307,11 +314,39 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.q.UpdateItem(r.Context(), dbpkg.UpdateItemParams{
+	// a qty change is logged to the ledger in the same transaction as the
+	// update; other-field PATCHes write no entry
+	qtyChanged := req.Qty != nil && *req.Qty != oldQty
+	params := dbpkg.UpdateItemParams{
 		Name: item.Name, Description: item.Description, Qty: item.Qty, Unit: item.Unit,
 		LocationID: item.LocationID, Visibility: item.Visibility,
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339), ID: id, UserID: u.ID,
-	}); err != nil {
+		Disposed: item.Disposed, UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		ID: id, UserID: u.ID,
+	}
+	if qtyChanged {
+		tx, err := s.raw.BeginTx(r.Context(), nil)
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		defer tx.Rollback()
+		qtx := dbpkg.New(tx)
+		if err := qtx.UpdateItem(r.Context(), params); err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		if _, err := insertLedgerEntry(r.Context(), qtx, dbpkg.CreateItemLedgerParams{
+			ItemID: id, UserID: u.ID, Delta: item.Qty - oldQty, ResultingQty: item.Qty,
+			Kind: "adjustment", Note: "", CreatedAt: params.UpdatedAt,
+		}); err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			s.internalErr(w, err)
+			return
+		}
+	} else if err := s.q.UpdateItem(r.Context(), params); err != nil {
 		s.internalErr(w, err)
 		return
 	}
@@ -362,6 +397,7 @@ type itemListRow struct {
 	Unit        string
 	LocationID  sql.NullInt64
 	Visibility  string
+	Disposed    int64
 	CreatedAt   string
 	UpdatedAt   string
 	PhotoCount  int64
@@ -393,7 +429,7 @@ type itemFilters struct {
 // count(*) OVER() AS total_count for the pre-pagination total.
 func buildItemListSQL(f itemFilters, sortCol, dir string) (string, []any) {
 	stmt := `SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id,
-       i.visibility, i.created_at, i.updated_at,
+       i.visibility, i.disposed, i.created_at, i.updated_at,
        (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
        (SELECT p.storage_key FROM item_photos p WHERE p.item_id = i.id ORDER BY p.sort_order, p.id LIMIT 1) AS thumb_key,
        count(*) OVER () AS total_count
@@ -504,7 +540,7 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 		var row itemListRow
 		if err := rows.Scan(
 			&row.ID, &row.Name, &row.Description, &row.Qty, &row.Unit,
-			&row.LocationID, &row.Visibility, &row.CreatedAt, &row.UpdatedAt,
+			&row.LocationID, &row.Visibility, &row.Disposed, &row.CreatedAt, &row.UpdatedAt,
 			&row.PhotoCount, &row.ThumbKey, &row.TotalCount,
 		); err != nil {
 			s.internalErr(w, err)
@@ -530,9 +566,10 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": row.ID, "name": row.Name, "description": row.Description,
 			"qty": row.Qty, "unit": row.Unit, "location_id": loc,
-			"visibility": row.Visibility, "photo_count": row.PhotoCount,
-			"thumb_key":  thumb,
-			"created_at": row.CreatedAt, "updated_at": row.UpdatedAt,
+			"visibility": row.Visibility, "disposed": row.Disposed != 0,
+			"photo_count": row.PhotoCount,
+			"thumb_key":   thumb,
+			"created_at":  row.CreatedAt, "updated_at": row.UpdatedAt,
 		})
 	}
 	if len(list) > 0 {

@@ -154,7 +154,7 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Inv
 
 const createItem = `-- name: CreateItem :one
 INSERT INTO items (user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed
 `
 
 type CreateItemParams struct {
@@ -193,6 +193,50 @@ func (q *Queries) CreateItem(ctx context.Context, arg CreateItemParams) (Item, e
 		&i.Visibility,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Disposed,
+	)
+	return i, err
+}
+
+const createItemLedger = `-- name: CreateItemLedger :one
+INSERT INTO item_ledger (item_id, user_id, delta, resulting_qty, kind, project_id, note, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, item_id, user_id, delta, resulting_qty, kind, project_id, note, created_at
+`
+
+type CreateItemLedgerParams struct {
+	ItemID       int64         `json:"item_id"`
+	UserID       int64         `json:"user_id"`
+	Delta        float64       `json:"delta"`
+	ResultingQty float64       `json:"resulting_qty"`
+	Kind         string        `json:"kind"`
+	ProjectID    sql.NullInt64 `json:"project_id"`
+	Note         string        `json:"note"`
+	CreatedAt    string        `json:"created_at"`
+}
+
+func (q *Queries) CreateItemLedger(ctx context.Context, arg CreateItemLedgerParams) (ItemLedger, error) {
+	row := q.db.QueryRowContext(ctx, createItemLedger,
+		arg.ItemID,
+		arg.UserID,
+		arg.Delta,
+		arg.ResultingQty,
+		arg.Kind,
+		arg.ProjectID,
+		arg.Note,
+		arg.CreatedAt,
+	)
+	var i ItemLedger
+	err := row.Scan(
+		&i.ID,
+		&i.ItemID,
+		&i.UserID,
+		&i.Delta,
+		&i.ResultingQty,
+		&i.Kind,
+		&i.ProjectID,
+		&i.Note,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -559,7 +603,7 @@ func (q *Queries) GetInvite(ctx context.Context, code string) (Invite, error) {
 }
 
 const getItem = `-- name: GetItem :one
-SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at FROM items WHERE id = ? AND user_id = ?
+SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed FROM items WHERE id = ? AND user_id = ?
 `
 
 type GetItemParams struct {
@@ -581,12 +625,13 @@ func (q *Queries) GetItem(ctx context.Context, arg GetItemParams) (Item, error) 
 		&i.Visibility,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Disposed,
 	)
 	return i, err
 }
 
 const getItemAnyOwner = `-- name: GetItemAnyOwner :one
-SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at FROM items WHERE id = ?
+SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed FROM items WHERE id = ?
 `
 
 func (q *Queries) GetItemAnyOwner(ctx context.Context, id int64) (Item, error) {
@@ -603,6 +648,7 @@ func (q *Queries) GetItemAnyOwner(ctx context.Context, id int64) (Item, error) {
 		&i.Visibility,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Disposed,
 	)
 	return i, err
 }
@@ -987,6 +1033,73 @@ func (q *Queries) ListItemDocuments(ctx context.Context, itemID int64) ([]ItemDo
 	return items, nil
 }
 
+const listItemLedger = `-- name: ListItemLedger :many
+SELECT l.id, l.item_id, l.user_id, l.delta, l.resulting_qty, l.kind, l.project_id, l.note, l.created_at, count(*) OVER () AS total_count
+FROM item_ledger l
+WHERE l.item_id = ? AND l.user_id = ?
+ORDER BY l.id DESC
+LIMIT ? OFFSET ?
+`
+
+type ListItemLedgerParams struct {
+	ItemID int64 `json:"item_id"`
+	UserID int64 `json:"user_id"`
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
+}
+
+type ListItemLedgerRow struct {
+	ID           int64         `json:"id"`
+	ItemID       int64         `json:"item_id"`
+	UserID       int64         `json:"user_id"`
+	Delta        float64       `json:"delta"`
+	ResultingQty float64       `json:"resulting_qty"`
+	Kind         string        `json:"kind"`
+	ProjectID    sql.NullInt64 `json:"project_id"`
+	Note         string        `json:"note"`
+	CreatedAt    string        `json:"created_at"`
+	TotalCount   int64         `json:"total_count"`
+}
+
+func (q *Queries) ListItemLedger(ctx context.Context, arg ListItemLedgerParams) ([]ListItemLedgerRow, error) {
+	rows, err := q.db.QueryContext(ctx, listItemLedger,
+		arg.ItemID,
+		arg.UserID,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListItemLedgerRow
+	for rows.Next() {
+		var i ListItemLedgerRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.UserID,
+			&i.Delta,
+			&i.ResultingQty,
+			&i.Kind,
+			&i.ProjectID,
+			&i.Note,
+			&i.CreatedAt,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listItemPhotos = `-- name: ListItemPhotos :many
 SELECT id, item_id, storage_key, caption, sort_order, created_at FROM item_photos WHERE item_id = ? ORDER BY sort_order, id
 `
@@ -1144,7 +1257,7 @@ func (q *Queries) ListProjects(ctx context.Context, userID int64) ([]Project, er
 const listSharedItemsFromOthers = `-- name: ListSharedItemsFromOthers :many
 
 SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id, i.visibility,
-       i.created_at, i.updated_at, u.display_name AS owner_name,
+       i.created_at, i.updated_at, i.disposed AS disposed, u.display_name AS owner_name,
        (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
        tp.storage_key AS thumb_key,
        count(*) OVER () AS total_count
@@ -1176,6 +1289,7 @@ type ListSharedItemsFromOthersRow struct {
 	Visibility  string         `json:"visibility"`
 	CreatedAt   string         `json:"created_at"`
 	UpdatedAt   string         `json:"updated_at"`
+	Disposed    int64          `json:"disposed"`
 	OwnerName   string         `json:"owner_name"`
 	PhotoCount  int64          `json:"photo_count"`
 	ThumbKey    sql.NullString `json:"thumb_key"`
@@ -1216,6 +1330,7 @@ func (q *Queries) ListSharedItemsFromOthers(ctx context.Context, arg ListSharedI
 			&i.Visibility,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Disposed,
 			&i.OwnerName,
 			&i.PhotoCount,
 			&i.ThumbKey,
@@ -1512,7 +1627,7 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 }
 
 const updateItem = `-- name: UpdateItem :exec
-UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, updated_at = ?
+UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, disposed = ?, updated_at = ?
 WHERE id = ? AND user_id = ?
 `
 
@@ -1523,6 +1638,7 @@ type UpdateItemParams struct {
 	Unit        string        `json:"unit"`
 	LocationID  sql.NullInt64 `json:"location_id"`
 	Visibility  string        `json:"visibility"`
+	Disposed    int64         `json:"disposed"`
 	UpdatedAt   string        `json:"updated_at"`
 	ID          int64         `json:"id"`
 	UserID      int64         `json:"user_id"`
@@ -1536,6 +1652,7 @@ func (q *Queries) UpdateItem(ctx context.Context, arg UpdateItemParams) error {
 		arg.Unit,
 		arg.LocationID,
 		arg.Visibility,
+		arg.Disposed,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.UserID,

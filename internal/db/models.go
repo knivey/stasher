@@ -28,6 +28,7 @@ type Item struct {
 	Visibility  string        `json:"visibility"`
 	CreatedAt   string        `json:"created_at"`
 	UpdatedAt   string        `json:"updated_at"`
+	Disposed    int64         `json:"disposed"`
 }
 
 type ItemDocument struct {
@@ -38,6 +39,18 @@ type ItemDocument struct {
 	MimeType   string `json:"mime_type"`
 	SizeBytes  int64  `json:"size_bytes"`
 	CreatedAt  string `json:"created_at"`
+}
+
+type ItemLedger struct {
+	ID           int64         `json:"id"`
+	ItemID       int64         `json:"item_id"`
+	UserID       int64         `json:"user_id"`
+	Delta        float64       `json:"delta"`
+	ResultingQty float64       `json:"resulting_qty"`
+	Kind         string        `json:"kind"`
+	ProjectID    sql.NullInt64 `json:"project_id"`
+	Note         string        `json:"note"`
+	CreatedAt    string        `json:"created_at"`
 }
 
 type ItemPhoto struct {

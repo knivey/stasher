@@ -84,6 +84,8 @@ func (s *Server) Router() chi.Router {
 			r.Post("/items/{id}/documents", s.handleUploadDocument)
 			r.Delete("/items/{id}/documents/{docId}", s.handleDeleteDocument)
 			r.Post("/items/{id}/copy", s.handleCopyItem)
+			r.Post("/items/{id}/usage", s.handleAddItemUsage)
+			r.Get("/items/{id}/usage", s.handleListItemUsage)
 
 			r.Get("/shared", s.handleListShared)
 

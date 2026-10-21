@@ -39,6 +39,7 @@ func (s *Server) handleListShared(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": row.ID, "name": row.Name, "description": row.Description,
 			"qty": row.Qty, "unit": row.Unit, "visibility": row.Visibility,
+			"disposed":    row.Disposed != 0,
 			"photo_count": row.PhotoCount, "thumb_key": thumb,
 			"owner_name": row.OwnerName,
 			"created_at": row.CreatedAt, "updated_at": row.UpdatedAt,
@@ -78,6 +79,11 @@ func (s *Server) handleCopyItem(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	// fresh ledger baseline for the copy (source history is not copied)
+	if err := s.recordInitialLedger(r.Context(), newItem.ID, u.ID, src.Qty, now); err != nil {
 		s.internalErr(w, err)
 		return
 	}

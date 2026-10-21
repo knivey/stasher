@@ -150,7 +150,7 @@ SELECT * FROM items WHERE id = ? AND user_id = ?;
 SELECT * FROM items WHERE id = ?;
 
 -- name: UpdateItem :exec
-UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, updated_at = ?
+UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, disposed = ?, updated_at = ?
 WHERE id = ? AND user_id = ?;
 
 -- name: DeleteItem :exec
@@ -179,7 +179,7 @@ SELECT * FROM item_documents WHERE item_id = ? ORDER BY filename;
 
 -- name: ListSharedItemsFromOthers :many
 SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id, i.visibility,
-       i.created_at, i.updated_at, u.display_name AS owner_name,
+       i.created_at, i.updated_at, i.disposed AS disposed, u.display_name AS owner_name,
        (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
        tp.storage_key AS thumb_key,
        count(*) OVER () AS total_count
@@ -261,3 +261,15 @@ WHERE pi.project_id = ?;
 SELECT p.id, p.name, p.status, pi.qty_used
 FROM project_items pi JOIN projects p ON p.id = pi.project_id
 WHERE pi.item_id = ?;
+
+-- name: CreateItemLedger :one
+INSERT INTO item_ledger (item_id, user_id, delta, resulting_qty, kind, project_id, note, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: ListItemLedger :many
+SELECT l.*, count(*) OVER () AS total_count
+FROM item_ledger l
+WHERE l.item_id = ? AND l.user_id = ?
+ORDER BY l.id DESC
+LIMIT ? OFFSET ?;
