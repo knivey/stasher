@@ -83,7 +83,7 @@ func (s *Storage) Delete(key string) error {
 }
 
 func (s *Storage) newKey(ext string) string {
-	ext = strings.TrimPrefix(path.Ext(ext), ".") // tolerate ".png" or "png"
+	ext = strings.TrimPrefix(ext, ".") // tolerate ".png" or "png"
 	if ext == "" || len(ext) > 8 {
 		ext = "bin"
 	}

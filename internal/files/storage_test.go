@@ -43,6 +43,24 @@ func TestSaveOpenRoundtrip(t *testing.T) {
 	}
 }
 
+func TestSavePreservesExtension(t *testing.T) {
+	s := newStorage(t)
+	key, _, err := s.Save(strings.NewReader("x"), "txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(key, ".txt") {
+		t.Fatalf("dotless ext: key=%q, want .txt suffix", key)
+	}
+	key, _, err = s.Save(strings.NewReader("x"), ".png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(key, ".png") {
+		t.Fatalf("dotted ext: key=%q, want .png suffix", key)
+	}
+}
+
 func TestOpenRejectsBadKeys(t *testing.T) {
 	s := newStorage(t)
 	for _, key := range []string{
@@ -68,6 +86,9 @@ func TestCopyDuplicatesContent(t *testing.T) {
 	}
 	if key2 == key {
 		t.Fatal("copy returned same key")
+	}
+	if !strings.HasSuffix(key, ".pdf") || !strings.HasSuffix(key2, ".pdf") {
+		t.Fatalf("extension not preserved: key=%q key2=%q", key, key2)
 	}
 	f, _ := s.Open(key2)
 	defer f.Close()
