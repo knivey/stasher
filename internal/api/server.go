@@ -68,6 +68,11 @@ func (s *Server) Router() chi.Router {
 			r.Patch("/locations/{id}", s.handleUpdateLocation)
 			r.Delete("/locations/{id}", s.handleDeleteLocation)
 
+			r.Get("/tags", s.handleListTags)
+			r.Post("/tags", s.handleCreateTag)
+			r.Patch("/tags/{id}", s.handleUpdateTag)
+			r.Delete("/tags/{id}", s.handleDeleteTag)
+
 			r.Route("/admin", func(r chi.Router) {
 				r.Use(s.requireAdmin)
 				r.Get("/users", s.handleAdminListUsers)

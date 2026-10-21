@@ -119,3 +119,22 @@ WITH RECURSIVE up(id, name, parent_id, depth) AS (
 -- (Comment uses ASCII "-" not an em dash: sqlc v1.31.1 mis-handles multi-byte
 -- UTF-8 inside comments and corrupts its rewritten query text.)
 SELECT * FROM locations WHERE user_id = ? AND name = ? AND parent_id IS ?;
+
+-- name: CreateTag :one
+INSERT INTO tags (user_id, name) VALUES (?, ?) RETURNING *;
+
+-- name: GetTagByName :one
+SELECT * FROM tags WHERE user_id = ? AND name = ?;
+
+-- name: ListTagsWithCounts :many
+SELECT t.id, t.name, COUNT(it.item_id) AS item_count
+FROM tags t LEFT JOIN item_tags it ON it.tag_id = t.id
+WHERE t.user_id = ?
+GROUP BY t.id, t.name
+ORDER BY t.name;
+
+-- name: UpdateTag :exec
+UPDATE tags SET name = ? WHERE id = ? AND user_id = ?;
+
+-- name: DeleteTag :exec
+DELETE FROM tags WHERE id = ? AND user_id = ?;

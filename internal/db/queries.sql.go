@@ -133,6 +133,22 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	return i, err
 }
 
+const createTag = `-- name: CreateTag :one
+INSERT INTO tags (user_id, name) VALUES (?, ?) RETURNING id, user_id, name
+`
+
+type CreateTagParams struct {
+	UserID int64  `json:"user_id"`
+	Name   string `json:"name"`
+}
+
+func (q *Queries) CreateTag(ctx context.Context, arg CreateTagParams) (Tag, error) {
+	row := q.db.QueryRowContext(ctx, createTag, arg.UserID, arg.Name)
+	var i Tag
+	err := row.Scan(&i.ID, &i.UserID, &i.Name)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, default_item_visibility, is_admin, disabled, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, 0, ?, ?)
@@ -231,6 +247,20 @@ type DeleteSessionParams struct {
 
 func (q *Queries) DeleteSession(ctx context.Context, arg DeleteSessionParams) error {
 	_, err := q.db.ExecContext(ctx, deleteSession, arg.ID, arg.UserID)
+	return err
+}
+
+const deleteTag = `-- name: DeleteTag :exec
+DELETE FROM tags WHERE id = ? AND user_id = ?
+`
+
+type DeleteTagParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) DeleteTag(ctx context.Context, arg DeleteTagParams) error {
+	_, err := q.db.ExecContext(ctx, deleteTag, arg.ID, arg.UserID)
 	return err
 }
 
@@ -368,6 +398,22 @@ func (q *Queries) GetSessionWithUser(ctx context.Context, tokenHash string) (Get
 	return i, err
 }
 
+const getTagByName = `-- name: GetTagByName :one
+SELECT id, user_id, name FROM tags WHERE user_id = ? AND name = ?
+`
+
+type GetTagByNameParams struct {
+	UserID int64  `json:"user_id"`
+	Name   string `json:"name"`
+}
+
+func (q *Queries) GetTagByName(ctx context.Context, arg GetTagByNameParams) (Tag, error) {
+	row := q.db.QueryRowContext(ctx, getTagByName, arg.UserID, arg.Name)
+	var i Tag
+	err := row.Scan(&i.ID, &i.UserID, &i.Name)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, password_hash, display_name, default_item_visibility, is_admin, disabled, created_at, updated_at FROM users WHERE email = ?
 `
@@ -476,6 +522,43 @@ func (q *Queries) ListLocations(ctx context.Context, userID int64) ([]Location, 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTagsWithCounts = `-- name: ListTagsWithCounts :many
+SELECT t.id, t.name, COUNT(it.item_id) AS item_count
+FROM tags t LEFT JOIN item_tags it ON it.tag_id = t.id
+WHERE t.user_id = ?
+GROUP BY t.id, t.name
+ORDER BY t.name
+`
+
+type ListTagsWithCountsRow struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	ItemCount int64  `json:"item_count"`
+}
+
+func (q *Queries) ListTagsWithCounts(ctx context.Context, userID int64) ([]ListTagsWithCountsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTagsWithCounts, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTagsWithCountsRow
+	for rows.Next() {
+		var i ListTagsWithCountsRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.ItemCount); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -751,6 +834,21 @@ func (q *Queries) UpdateLocation(ctx context.Context, arg UpdateLocationParams) 
 		arg.ID,
 		arg.UserID,
 	)
+	return err
+}
+
+const updateTag = `-- name: UpdateTag :exec
+UPDATE tags SET name = ? WHERE id = ? AND user_id = ?
+`
+
+type UpdateTagParams struct {
+	Name   string `json:"name"`
+	ID     int64  `json:"id"`
+	UserID int64  `json:"user_id"`
+}
+
+func (q *Queries) UpdateTag(ctx context.Context, arg UpdateTagParams) error {
+	_, err := q.db.ExecContext(ctx, updateTag, arg.Name, arg.ID, arg.UserID)
 	return err
 }
 
