@@ -265,7 +265,7 @@ async function deleteLocation() {
             class="w-full max-w-xs border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm" />
           <p v-if="preview?.error" data-preview-error class="text-xs text-red-600 dark:text-red-400">{{ preview.error }}</p>
           <p v-else-if="preview" data-preview class="text-xs text-slate-500 dark:text-slate-400">
-            Will create {{ preview.count }} sublocations: {{ preview.first.join(', ') }}{{ preview.count > 5 ? ', …' : '' }}
+            Will create {{ preview.count }} sublocations: {{ preview.first.join(', ') }}{{ preview.more ? ', …' : '' }}
           </p>
         </div>
 
@@ -324,13 +324,14 @@ async function deleteLocation() {
         : ''"
       confirm-label="Delete" @confirm="deleteLocation" @cancel="deleteTarget = null" />
 
-    <div v-if="dupTarget" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click="dupTarget = null">
+    <div v-if="dupTarget" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      @click="dupTarget = null" @keydown.escape="dupTarget = null">
       <div class="bg-white dark:bg-slate-800 rounded-xl shadow-lg w-full max-w-sm p-5" role="dialog" aria-modal="true" @click.stop>
         <h2 class="text-lg font-bold mb-2 dark:text-slate-100">Duplicate layout</h2>
         <p class="text-sm text-slate-600 dark:text-slate-300 mb-3">
           Copies '{{ dupTarget.name }}' and its sublocations (names and shape only — items stay put) beside it.
         </p>
-        <input v-model="dupName" data-dup-name maxlength="200"
+        <input v-model="dupName" data-dup-name maxlength="200" aria-label="New location name"
           class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm" />
         <p v-if="dupError" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ dupError }}</p>
         <div class="flex justify-end gap-2 mt-3">

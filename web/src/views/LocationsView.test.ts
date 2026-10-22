@@ -149,6 +149,23 @@ describe('LocationsView', () => {
     expect(preview.text()).toContain('A1, A2, A3, A4, A5, …')
   })
 
+  it('nested size-1 dims list every leaf with no misleading ellipsis', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.find('[data-sub-mode]').setValue('generate')
+    await w.find('input[type="radio"][value="nested"]').setValue(true)
+    await w.find('[data-add-dim]').trigger('click') // 3 dims
+    const dims = w.findAll('[data-dim]')
+    await dims[0].setValue('4')
+    await dims[1].setValue('1')
+    await dims[2].setValue('1')
+    const preview = w.find('[data-preview]')
+    // 12 nodes total (4 per level) but only 4 leaves — none hidden
+    expect(preview.text()).toContain('12 sublocations')
+    expect(preview.text()).toContain('A1a, B1a, C1a, D1a')
+    expect(preview.text()).not.toContain('…')
+  })
+
   it('mode switching shows and hides the right inputs', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
@@ -256,5 +273,15 @@ describe('LocationsView', () => {
     expect(JSON.parse(post!.body!)).toEqual({ name: 'Cabinet copy', parent_id: 1 })
     expect(toasts.some(t => t.message === 'Created Cabinet copy + 1 sublocations' && t.type === 'success')).toBe(true)
     expect(calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('duplicate layout dialog closes on Escape without posting', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.findAll('[data-duplicate]')[1].trigger('click')
+    expect(w.find('[role="dialog"]').exists()).toBe(true)
+    await w.find('[role="dialog"]').trigger('keydown', { key: 'Escape' })
+    expect(w.find('[role="dialog"]').exists()).toBe(false)
+    expect(calls.some(c => c.method === 'POST')).toBe(false)
   })
 })

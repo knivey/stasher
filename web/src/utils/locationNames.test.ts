@@ -96,12 +96,22 @@ describe('bulkPreview', () => {
     expect(p.error).toBeNull()
     expect(p.count).toBe(72)
     expect(p.first).toEqual(['A1', 'A2', 'A3', 'A4', 'A5'])
+    expect(p.more).toBe(true)
   })
 
   it('nested counts intermediate levels too; first names are leaves', () => {
     const p = bulkPreview([2, 3], 'nested', 'compact', '')
     expect(p.count).toBe(8) // 2 rows + 6 cells, matching children_created
     expect(p.first).toEqual(['A1', 'A2', 'A3', 'B1', 'B2'])
+    expect(p.more).toBe(true) // 6 leaves, only 5 shown
+  })
+
+  it('size-1 dims: no ellipsis when every leaf is already listed', () => {
+    // 12 nodes (4 per level) but only 4 leaves - nothing is hidden
+    const p = bulkPreview([4, 1, 1], 'nested', 'compact', '')
+    expect(p.count).toBe(12)
+    expect(p.first).toEqual(['A1a', 'B1a', 'C1a', 'D1a'])
+    expect(p.more).toBe(false)
   })
 
   it('returns the validation error instead of names for invalid configs', () => {
@@ -109,5 +119,6 @@ describe('bulkPreview', () => {
     expect(p.error).toContain('1000')
     expect(p.count).toBe(0)
     expect(p.first).toEqual([])
+    expect(p.more).toBe(false)
   })
 })

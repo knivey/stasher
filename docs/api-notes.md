@@ -110,7 +110,9 @@ thumbnail (thumb_key follows (sort_order, id)).
 
 - Creates the root location plus generated sublocations in **one
   transaction** — all or nothing. `201` returns the root location JSON
-  (same shape as `POST /locations`) plus `"children_created": <int>`.
+  (same shape as `POST /locations`) plus `"children_created": <int>`,
+  which counts every generated location besides the new root — in
+  nested mode that includes intermediate levels.
 - Validation (all `400 validation_error`, specific messages) runs before
   any write: `name` trimmed 1-200 chars; `dims` 1–3 entries, each 1–100,
   product ≤ 1000; `structure` exactly `flat`|`nested`; `naming` exactly
@@ -146,6 +148,10 @@ thumbnail (thumb_key follows (sort_order, id)).
   not be the source or any descendant of it. Subtrees over 1000 nodes
   (source + descendants) are rejected `400`. Root-name collision under
   the parent is `409 location_exists`.
+- **Wart:** on these two endpoints (bulk, copy-layout) an explicit
+  `parent_id: 0` means root, same as omitting it. The legacy
+  `POST /locations` instead treats an explicit `0` as a lookup miss →
+  404 — don't copy that behavior to new callers.
 
 ## Frontend notes
 

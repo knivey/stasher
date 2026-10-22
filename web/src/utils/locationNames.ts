@@ -103,21 +103,25 @@ export function validateBulkDims(dims: number[]): string | null {
 export interface BulkPreview {
   count: number
   first: string[]
+  /** more leaves exist than the (at most five) names shown */
+  more: boolean
   error: string | null
 }
 
 // Live-preview data: the total child count the backend will create
-// (nested mode includes intermediate levels) plus the first generated
-// leaf names.
+// (nested mode includes intermediate levels), the first generated leaf
+// names, and whether any leaves are hidden beyond those five.
 export function bulkPreview(
   dims: number[], structure: BulkStructure, naming: BulkNaming, prefix: string,
 ): BulkPreview {
   const error = validateBulkDims(dims)
-  if (error) return { count: 0, first: [], error }
+  if (error) return { count: 0, first: [], more: false, error }
   const nodes = generateBulkLocations(dims, structure, naming, prefix.trim())
+  const leaves = nodes.filter(n => n.depth === dims.length)
   return {
     count: nodes.length,
-    first: nodes.filter(n => n.depth === dims.length).slice(0, 5).map(n => n.name),
+    first: leaves.slice(0, 5).map(n => n.name),
+    more: leaves.length > 5,
     error: null,
   }
 }
