@@ -262,7 +262,8 @@ INSERT INTO project_items (project_id, item_id, qty_used, notes, added_at)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (project_id, item_id) DO UPDATE SET qty_used = excluded.qty_used, notes = excluded.notes;
 
--- name: DeleteProjectItem :exec
+-- name: DeleteProjectItem :execrows
+-- execrows so the handler can 404 on absent rows (tags' post-fix semantics)
 DELETE FROM project_items WHERE project_id = ? AND item_id = ?;
 
 -- name: ListProjectItems :many

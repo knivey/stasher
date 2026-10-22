@@ -178,6 +178,9 @@ type projectItemReq struct {
 	Notes   string   `json:"notes"`
 }
 
+// validQtyUsed matches the items.qty range: 0..1e12.
+func validQtyUsed(q float64) bool { return q >= 0 && q <= 1e12 }
+
 func (s *Server) handleAddProjectItem(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
 	p, ok := s.requireOwnedProject(w, r, u)
@@ -186,6 +189,10 @@ func (s *Server) handleAddProjectItem(w http.ResponseWriter, r *http.Request) {
 	}
 	var req projectItemReq
 	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.QtyUsed != nil && !validQtyUsed(*req.QtyUsed) {
+		writeErr(w, http.StatusBadRequest, "validation_error", "qty_used must be between 0 and 1e12")
 		return
 	}
 	// the item must belong to the same user
@@ -220,6 +227,10 @@ func (s *Server) handlePatchProjectItem(w http.ResponseWriter, r *http.Request) 
 	}
 	var req projectItemReq
 	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.QtyUsed != nil && !validQtyUsed(*req.QtyUsed) {
+		writeErr(w, http.StatusBadRequest, "validation_error", "qty_used must be between 0 and 1e12")
 		return
 	}
 	// read current row to merge patch fields
@@ -268,10 +279,15 @@ func (s *Server) handleDeleteProjectItem(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid item id")
 		return
 	}
-	if err := s.q.DeleteProjectItem(r.Context(), dbpkg.DeleteProjectItemParams{
+	rows, err := s.q.DeleteProjectItem(r.Context(), dbpkg.DeleteProjectItemParams{
 		ProjectID: p.ID, ItemID: itemID,
-	}); err != nil {
+	})
+	if err != nil {
 		s.internalErr(w, err)
+		return
+	}
+	if rows == 0 {
+		writeErr(w, http.StatusNotFound, "not_found", "item not in project")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

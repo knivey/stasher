@@ -660,7 +660,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 	return err
 }
 
-const deleteProjectItem = `-- name: DeleteProjectItem :exec
+const deleteProjectItem = `-- name: DeleteProjectItem :execrows
 DELETE FROM project_items WHERE project_id = ? AND item_id = ?
 `
 
@@ -669,9 +669,13 @@ type DeleteProjectItemParams struct {
 	ItemID    int64 `json:"item_id"`
 }
 
-func (q *Queries) DeleteProjectItem(ctx context.Context, arg DeleteProjectItemParams) error {
-	_, err := q.db.ExecContext(ctx, deleteProjectItem, arg.ProjectID, arg.ItemID)
-	return err
+// execrows so the handler can 404 on absent rows (tags' post-fix semantics)
+func (q *Queries) DeleteProjectItem(ctx context.Context, arg DeleteProjectItemParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProjectItem, arg.ProjectID, arg.ItemID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteSession = `-- name: DeleteSession :exec
