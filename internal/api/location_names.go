@@ -38,29 +38,43 @@ func compactAxisLabel(dim, i int, single bool) string {
 	return spreadsheetLetters(i, true)
 }
 
-// verboseAxisLabel labels axis dim in words: dim0 "Row i", dim1 "Col j",
-// dim2 "Bin k". A single-dimension config labels its only axis "Slot i"
-// instead (there is no row/col distinction to make).
-func verboseAxisLabel(dim, i int, single bool) string {
+// verboseAxisWord returns the default label word for axis dim: "Slot"
+// for a single-dimension config's only axis (there is no row/col
+// distinction to make), else "Row"/"Col"/"Bin" by position.
+func verboseAxisWord(dim int, single bool) string {
 	if single {
-		return "Slot " + strconv.Itoa(i)
+		return "Slot"
 	}
-	names := [3]string{"Row ", "Col ", "Bin "}
+	names := [3]string{"Row", "Col", "Bin"}
 	if dim > 2 {
 		dim = 2
 	}
-	return names[dim] + strconv.Itoa(i)
+	return names[dim]
+}
+
+// verboseAxisLabel labels axis dim in words: the per-axis custom label
+// from labels (when one is present and non-empty) followed by the 1-based
+// index, else the default word ("Slot i" for a 1D config's only axis,
+// "Row/Col/Bin" otherwise). labels is expected pre-trimmed; an empty
+// entry means "use the default".
+func verboseAxisLabel(dim, i int, single bool, labels []string) string {
+	word := verboseAxisWord(dim, single)
+	if dim < len(labels) && labels[dim] != "" {
+		word = labels[dim]
+	}
+	return word + " " + strconv.Itoa(i)
 }
 
 // locationNodeName builds a generated location's name from its 1-based
 // axis indices (one per dimension covered, axes 0..len-1). compact
-// concatenates the axis labels ("A1", "A1c"); verbose space-joins them
-// ("Row 3 Col 2 Bin 1").
-func locationNodeName(indices []int, naming string, single bool) string {
+// concatenates the axis labels ("A1", "A1c") and ignores labels; verbose
+// space-joins them ("Row 3 Col 2 Bin 1"), substituting any non-empty
+// per-axis label for the default word.
+func locationNodeName(indices []int, naming string, single bool, labels []string) string {
 	parts := make([]string, len(indices))
 	for d, i := range indices {
 		if naming == "verbose" {
-			parts[d] = verboseAxisLabel(d, i, single)
+			parts[d] = verboseAxisLabel(d, i, single, labels)
 		} else {
 			parts[d] = compactAxisLabel(d, i, single)
 		}
@@ -89,14 +103,15 @@ type bulkLocationNode struct {
 	Parent string
 }
 
-// generateBulkLocations expands dims/structure/naming/prefix into the
-// ordered list of nodes to create under a fresh root. flat: one leaf per
-// combination, all direct children of the root, dim0 iterating outermost
-// so names sort naturally. nested: one level per dimension; a node at
-// depth d is parented to its axes-0..d-1 node (depth-first order keeps
-// every parent ahead of its children). The prefix, when set, prepends to
-// leaf names only.
-func generateBulkLocations(dims []int, structure, naming, prefix string) []bulkLocationNode {
+// generateBulkLocations expands dims/structure/naming/prefix/labels into
+// the ordered list of nodes to create under a fresh root. flat: one leaf
+// per combination, all direct children of the root, dim0 iterating
+// outermost so names sort naturally. nested: one level per dimension; a
+// node at depth d is parented to its axes-0..d-1 node (depth-first order
+// keeps every parent ahead of its children). The prefix, when set,
+// prepends to leaf names only. labels (verbose naming only) replaces the
+// default per-axis word; empty entries and nil keep the defaults.
+func generateBulkLocations(dims []int, structure, naming, prefix string, labels []string) []bulkLocationNode {
 	single := len(dims) == 1
 	out := []bulkLocationNode{}
 	idx := make([]int, len(dims))
@@ -114,7 +129,7 @@ func generateBulkLocations(dims []int, structure, naming, prefix string) []bulkL
 				rem /= dims[d]
 			}
 			out = append(out, bulkLocationNode{
-				Name:   prefixedLeaf(locationNodeName(idx, naming, single), prefix),
+				Name:   prefixedLeaf(locationNodeName(idx, naming, single, labels), prefix),
 				Path:   strings.Join(path, "."),
 				Parent: "",
 			})
@@ -130,7 +145,7 @@ func generateBulkLocations(dims []int, structure, naming, prefix string) []bulkL
 			if parentPath != "" {
 				path = parentPath + "." + path
 			}
-			name := locationNodeName(idx[:depth+1], naming, single)
+			name := locationNodeName(idx[:depth+1], naming, single, labels)
 			if leaf {
 				name = prefixedLeaf(name, prefix)
 			}

@@ -40,23 +40,31 @@ func TestLocationNodeName(t *testing.T) {
 		idx    []int
 		naming string
 		single bool
+		labels []string
 		want   string
 	}{
-		{"1d compact", []int{1}, "compact", true, "1"},
-		{"1d compact n", []int{12}, "compact", true, "12"},
-		{"1d verbose", []int{3}, "verbose", true, "Slot 3"},
-		{"2d compact", []int{3, 2}, "compact", false, "C2"},
-		{"2d compact past Z", []int{27, 1}, "compact", false, "AA1"},
-		{"2d verbose", []int{3, 2}, "verbose", false, "Row 3 Col 2"},
-		{"3d compact", []int{1, 2, 3}, "compact", false, "A2c"},
-		{"3d compact lower past z", []int{1, 1, 27}, "compact", false, "A1aa"},
-		{"3d verbose", []int{3, 2, 1}, "verbose", false, "Row 3 Col 2 Bin 1"},
-		{"nested intermediate compact", []int{2}, "compact", false, "B"},
-		{"nested intermediate verbose", []int{2}, "verbose", false, "Row 2"},
+		{"1d compact", []int{1}, "compact", true, nil, "1"},
+		{"1d compact n", []int{12}, "compact", true, nil, "12"},
+		{"1d verbose", []int{3}, "verbose", true, nil, "Slot 3"},
+		{"2d compact", []int{3, 2}, "compact", false, nil, "C2"},
+		{"2d compact past Z", []int{27, 1}, "compact", false, nil, "AA1"},
+		{"2d verbose", []int{3, 2}, "verbose", false, nil, "Row 3 Col 2"},
+		{"3d compact", []int{1, 2, 3}, "compact", false, nil, "A2c"},
+		{"3d compact lower past z", []int{1, 1, 27}, "compact", false, nil, "A1aa"},
+		{"3d verbose", []int{3, 2, 1}, "verbose", false, nil, "Row 3 Col 2 Bin 1"},
+		{"nested intermediate compact", []int{2}, "compact", false, nil, "B"},
+		{"nested intermediate verbose", []int{2}, "verbose", false, nil, "Row 2"},
+		// custom per-axis labels (verbose only; empty falls back to default)
+		{"1d verbose label", []int{3}, "verbose", true, []string{"Drawer"}, "Drawer 3"},
+		{"1d verbose empty label", []int{3}, "verbose", true, []string{""}, "Slot 3"},
+		{"2d verbose labels", []int{3, 2}, "verbose", false, []string{"Drawer", "Tray"}, "Drawer 3 Tray 2"},
+		{"2d verbose partial labels", []int{3, 2}, "verbose", false, []string{"", "Tray"}, "Row 3 Tray 2"},
+		{"3d verbose labels", []int{3, 2, 1}, "verbose", false, []string{"Drawer", "Tray", "Slot"}, "Drawer 3 Tray 2 Slot 1"},
+		{"compact ignores labels", []int{3, 2}, "compact", false, []string{"Drawer", "Tray"}, "C2"},
 	} {
-		if got := locationNodeName(tc.idx, tc.naming, tc.single); got != tc.want {
-			t.Errorf("%s: locationNodeName(%v, %q, %v) = %q, want %q",
-				tc.name, tc.idx, tc.naming, tc.single, got, tc.want)
+		if got := locationNodeName(tc.idx, tc.naming, tc.single, tc.labels); got != tc.want {
+			t.Errorf("%s: locationNodeName(%v, %q, %v, %v) = %q, want %q",
+				tc.name, tc.idx, tc.naming, tc.single, tc.labels, got, tc.want)
 		}
 	}
 }
@@ -78,47 +86,71 @@ func TestGenerateBulkLocations(t *testing.T) {
 		structure string
 		naming    string
 		prefix    string
+		labels    []string
 		want      string
 	}{
 		{
-			"flat 2d compact", []int{2, 3}, "flat", "compact", "",
+			"flat 2d compact", []int{2, 3}, "flat", "compact", "", nil,
 			"A1|; A2|; A3|; B1|; B2|; B3|",
 		},
 		{
-			"flat 2d compact prefixed", []int{2, 2}, "flat", "compact", "Bin",
+			"flat 2d compact prefixed", []int{2, 2}, "flat", "compact", "Bin", nil,
 			"Bin A1|; Bin A2|; Bin B1|; Bin B2|",
 		},
 		{
-			"flat 3d compact", []int{2, 2, 2}, "flat", "compact", "",
+			"flat 3d compact", []int{2, 2, 2}, "flat", "compact", "", nil,
 			"A1a|; A1b|; A2a|; A2b|; B1a|; B1b|; B2a|; B2b|",
 		},
 		{
-			"flat 1d compact", []int{3}, "flat", "compact", "",
+			"flat 1d compact", []int{3}, "flat", "compact", "", nil,
 			"1|; 2|; 3|",
 		},
 		{
-			"flat 1d verbose", []int{3}, "flat", "verbose", "",
+			"flat 1d verbose", []int{3}, "flat", "verbose", "", nil,
 			"Slot 1|; Slot 2|; Slot 3|",
 		},
 		{
-			"nested 2d compact", []int{2, 3}, "nested", "compact", "",
+			"nested 2d compact", []int{2, 3}, "nested", "compact", "", nil,
 			"A|; A1|1; A2|1; A3|1; B|; B1|2; B2|2; B3|2",
 		},
 		{
 			// prefix applies to LEAF names only - intermediates stay bare
-			"nested 2d compact prefixed", []int{2, 2}, "nested", "compact", "Bin",
+			"nested 2d compact prefixed", []int{2, 2}, "nested", "compact", "Bin", nil,
 			"A|; Bin A1|1; Bin A2|1; B|; Bin B1|2; Bin B2|2",
 		},
 		{
-			"nested 2d verbose prefixed", []int{2, 2}, "nested", "verbose", "Shelf",
+			"nested 2d verbose prefixed", []int{2, 2}, "nested", "verbose", "Shelf", nil,
 			"Row 1|; Shelf Row 1 Col 1|1; Shelf Row 1 Col 2|1; Row 2|; Shelf Row 2 Col 1|2; Shelf Row 2 Col 2|2",
 		},
 		{
-			"nested 3d compact", []int{2, 2, 2}, "nested", "compact", "",
+			"nested 3d compact", []int{2, 2, 2}, "nested", "compact", "", nil,
 			"A|; A1|1; A1a|1.1; A1b|1.1; A2|1; A2a|1.2; A2b|1.2; B|; B1|2; B1a|2.1; B1b|2.1; B2|2; B2a|2.2; B2b|2.2",
 		},
+		// custom labels: verbose flow-through, nested intermediates use
+		// their own axis word, empty label falls back to the axis default
+		{
+			"flat 2d verbose labels", []int{2, 2}, "flat", "verbose", "", []string{"Drawer", "Tray"},
+			"Drawer 1 Tray 1|; Drawer 1 Tray 2|; Drawer 2 Tray 1|; Drawer 2 Tray 2|",
+		},
+		{
+			"nested 2d verbose labels", []int{2, 2}, "nested", "verbose", "", []string{"Drawer", "Tray"},
+			"Drawer 1|; Drawer 1 Tray 1|1; Drawer 1 Tray 2|1; Drawer 2|; Drawer 2 Tray 1|2; Drawer 2 Tray 2|2",
+		},
+		{
+			"flat 2d verbose empty label", []int{2, 2}, "flat", "verbose", "", []string{"", "Tray"},
+			"Row 1 Tray 1|; Row 1 Tray 2|; Row 2 Tray 1|; Row 2 Tray 2|",
+		},
+		{
+			"flat 1d verbose label", []int{2}, "flat", "verbose", "", []string{"Drawer"},
+			"Drawer 1|; Drawer 2|",
+		},
+		{
+			// compact concatenation has no words - labels never apply
+			"flat 2d compact ignores labels", []int{2, 2}, "flat", "compact", "", []string{"Drawer", "Tray"},
+			"A1|; A2|; B1|; B2|",
+		},
 	} {
-		got := renderNodes(generateBulkLocations(tc.dims, tc.structure, tc.naming, tc.prefix))
+		got := renderNodes(generateBulkLocations(tc.dims, tc.structure, tc.naming, tc.prefix, tc.labels))
 		if got != tc.want {
 			t.Errorf("%s: generate =\n  %s\nwant\n  %s", tc.name, got, tc.want)
 		}
@@ -287,6 +319,53 @@ func TestBulkCreateLocationsNested(t *testing.T) {
 		[]string{"Row 1 Col 1", "Row 1 Col 2", "Row 1 Col 3"})
 }
 
+func TestBulkCreateLocationsCustomLabels(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "bulk-labels@test.dev", "longpassword1")
+
+	// flat verbose: labels replace the axis words in every leaf name
+	resp := doJSON(t, ts, "POST", "/api/v1/locations/bulk", map[string]any{
+		"name": "Toolbox", "dims": []int{2, 2},
+		"structure": "flat", "naming": "verbose", "labels": []string{"Drawer", "Tray"},
+	}, cookie)
+	var flat struct {
+		ID              int64 `json:"id"`
+		ChildrenCreated int   `json:"children_created"`
+	}
+	decodeBody(t, resp, &flat)
+	if resp.StatusCode != http.StatusCreated || flat.ChildrenCreated != 4 {
+		t.Fatalf("flat labels bulk = %d children=%d, want 201/4", resp.StatusCode, flat.ChildrenCreated)
+	}
+	namesEq(t, "flat labels children", rowNames(childRows(listLocRows(t, ts, cookie), flat.ID)),
+		[]string{"Drawer 1 Tray 1", "Drawer 1 Tray 2", "Drawer 2 Tray 1", "Drawer 2 Tray 2"})
+
+	// nested verbose: intermediates carry their own axis word; an
+	// empty-string label falls back to that axis's default
+	resp = doJSON(t, ts, "POST", "/api/v1/locations/bulk", map[string]any{
+		"name": "Cabinet", "dims": []int{2, 2},
+		"structure": "nested", "naming": "verbose", "labels": []string{"Drawer", ""},
+	}, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("nested labels bulk = %d, want 201", resp.StatusCode)
+	}
+	var nested struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &nested)
+	locs := listLocRows(t, ts, cookie)
+	drawers := childRows(locs, nested.ID)
+	namesEq(t, "nested labels drawers", rowNames(drawers), []string{"Drawer 1", "Drawer 2"})
+	var drawer1 int64
+	for _, l := range locs {
+		if l.Name == "Drawer 1" && l.ParentID != nil && *l.ParentID == nested.ID {
+			drawer1 = l.ID
+		}
+	}
+	// axis-1 label was empty -> "Col" default survives
+	namesEq(t, "nested labels trays", rowNames(childRows(locs, drawer1)),
+		[]string{"Drawer 1 Col 1", "Drawer 1 Col 2"})
+}
+
 func TestBulkCreateLocationsValidation(t *testing.T) {
 	_, ts := newTestServer(t, nil)
 	cookie := registerUser(t, ts, "bulk-val@test.dev", "longpassword1")
@@ -312,6 +391,13 @@ func TestBulkCreateLocationsValidation(t *testing.T) {
 		{"bad structure", func(b map[string]any) { b["structure"] = "matrix" }, "structure"},
 		{"bad naming", func(b map[string]any) { b["naming"] = "numbers" }, "naming"},
 		{"prefix 51", func(b map[string]any) { b["prefix"] = strings.Repeat("x", 51) }, "prefix"},
+		{"labels wrong length", func(b map[string]any) { b["labels"] = []string{"Drawer"} }, "labels must match dims length"},
+		{"labels too many", func(b map[string]any) { b["labels"] = []string{"A", "B", "C"} }, "labels must match dims length"},
+		{"labels with compact", func(b map[string]any) { b["labels"] = []string{"Drawer", "Tray"} }, "labels only apply to verbose naming"},
+		{"label 51 chars", func(b map[string]any) {
+			b["naming"] = "verbose"
+			b["labels"] = []string{"Drawer", strings.Repeat("y", 51)}
+		}, "labels must be at most 50 chars"},
 	} {
 		body := valid()
 		tc.mutate(body)

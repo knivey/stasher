@@ -131,6 +131,18 @@ thumbnail (thumb_key follows (sort_order, id)).
   `Row 3 Col 2`, `Row 3 Col 2 Bin 1`.
 - `prefix` prepends to **leaf names only** (with a space): `Bin A1`.
   Nested intermediate levels stay unprefixed.
+- **`labels`** (optional, verbose naming only): per-axis replacement
+  words for the verbose names, e.g. `["Drawer", "Tray"]` with
+  `dims [2,2]` → `Drawer 1 Tray 2`; nested intermediates use their own
+  axis's word (`Drawer 1` › `Drawer 1 Tray 2`). Rules (all `400
+  validation_error`): present `labels` must have exactly `len(dims)`
+  entries (`labels must match dims length`); each label is trimmed and
+  the trimmed length must be ≤ 50 (`labels must be at most 50 chars`);
+  an entry that is empty **after trimming falls back to that axis's
+  default word** (Slot/Row/Col/Bin by position) — it is not an error.
+  With `naming: "compact"` any non-empty label is rejected (`labels
+  only apply to verbose naming`); compact output never contains the
+  words. Absent `labels` behaves exactly as before.
 
 ## Layout copying (2026-10-22)
 

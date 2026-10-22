@@ -243,12 +243,13 @@ func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 }
 
 type bulkLocationReq struct {
-	Name      string `json:"name"`
-	ParentID  *int64 `json:"parent_id"` // 0 or absent = root
-	Dims      []int  `json:"dims"`
-	Structure string `json:"structure"`
-	Naming    string `json:"naming"`
-	Prefix    string `json:"prefix"`
+	Name      string   `json:"name"`
+	ParentID  *int64   `json:"parent_id"` // 0 or absent = root
+	Dims      []int    `json:"dims"`
+	Structure string   `json:"structure"`
+	Naming    string   `json:"naming"`
+	Prefix    string   `json:"prefix"`
+	Labels    []string `json:"labels"` // optional per-axis words, verbose only
 }
 
 // handleBulkCreateLocations creates a root location plus generated
@@ -294,6 +295,34 @@ func (s *Server) handleBulkCreateLocations(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusBadRequest, "validation_error", "prefix must be at most 50 chars")
 		return
 	}
+	// labels: optional per-axis words for verbose names. Present entries
+	// are trimmed here; empty-after-trim means "use the axis default"
+	// (handled by the naming helpers). Compact naming has no words, so
+	// any non-empty label is rejected to keep the contract honest.
+	labels := req.Labels
+	if labels != nil {
+		if len(labels) != len(req.Dims) {
+			writeErr(w, http.StatusBadRequest, "validation_error", "labels must match dims length")
+			return
+		}
+		trimmed := make([]string, len(labels))
+		for i, l := range labels {
+			trimmed[i] = strings.TrimSpace(l)
+			if len(trimmed[i]) > 50 {
+				writeErr(w, http.StatusBadRequest, "validation_error", "labels must be at most 50 chars")
+				return
+			}
+		}
+		if req.Naming == "compact" {
+			for _, l := range trimmed {
+				if l != "" {
+					writeErr(w, http.StatusBadRequest, "validation_error", "labels only apply to verbose naming")
+					return
+				}
+			}
+		}
+		labels = trimmed
+	}
 	parentID := req.ParentID
 	if parentID != nil && *parentID == 0 {
 		parentID = nil // 0 = root, same as absent
@@ -311,7 +340,7 @@ func (s *Server) handleBulkCreateLocations(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	nodes := generateBulkLocations(req.Dims, req.Structure, req.Naming, prefix)
+	nodes := generateBulkLocations(req.Dims, req.Structure, req.Naming, prefix, labels)
 	now := time.Now().UTC().Format(time.RFC3339) // one clock reading for root + children
 	tx, err := s.raw.BeginTx(r.Context(), nil)
 	if err != nil {
