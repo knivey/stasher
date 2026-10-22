@@ -42,9 +42,10 @@ make build      # go build -o stasher ./cmd/stasher
 make test       # go vet ./... && go test ./...
 make generate   # go tool sqlc generate (REQUIRED after editing internal/db/queries.sql)
 make run        # go run ./cmd/stasher
-make web        # cd web && npm ci && npm run build → internal/webfs/dist (commit result)
+make web        # build the SPA into internal/webfs/dist (deps via web-setup; commit result)
 make web-dev    # vite dev server on :5173 (pair with `make run` in another terminal)
-make web-test   # cd web && npm ci && npm run test (vitest)
+make web-test   # vitest + vue-tsc
+make check      # everything CI runs: go vet+tests, web tests+typecheck, SPA build
 
 go test ./internal/api/ -v -run TestItem    # focused
 ./stasher migrate                             # apply migrations, exit
@@ -148,9 +149,13 @@ Key decisions (each has history in docs/superpowers/):
 - `docs/backlog.md` is the accepted-as-is list from the final review —
   check it before "fixing" something that was deliberately deferred (or find
   it half-fixed).
-- PATCH pointer semantics: absent field = keep. For items, `location_id: 0`
+- PATCH semantics: absent field = keep. For items, `location_id: 0`
   clears (JSON null is indistinguishable from absent — documented wart).
-  Locations: parent cannot be cleared via PATCH.
+  Locations: parent cannot be cleared via PATCH. A provided **empty
+  `name` keeps the current name** on items AND locations (treated as
+  absent — the sentinel for "no change"). Error-precedence asymmetry:
+  create validates tags before location (invalid tags + foreign location
+  → 400); PATCH checks location first (→ 404).
 - Generated sqlc params may carry `_2` suffixes when a query repeats a column
   name — check the generated struct, don't guess.
 - goose prints migration lines to stderr during tests; expected noise.
