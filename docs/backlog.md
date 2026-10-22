@@ -6,35 +6,36 @@ File references are to the state at commit `60c61fe`.
 
 ## Security hardening
 
-- **Last-admin / self-demotion guard** — an admin can set `is_admin: false` on
-  themselves; the only admin on an invite-mode instance leaves it unmanageable
-  (recovery = raw SQLite). Mirror the `cannot_disable_self` guard.
-  (`internal/api/admin_handlers.go`)
-- **Rate-limit `/auth/register`** — in `registration: open` mode it is
-  unauthenticated Argon2 grinding + account spam on an internet-facing host.
-  Default invite mode is safe (code check precedes hashing).
-- **`X-Content-Type-Options: nosniff`** on `/files/*` responses — defense in
-  depth on top of explicit Content-Type. (`internal/api/files_handlers.go`)
-- **Login timing side-channel** — unknown email returns fast (no argon2), wrong
-  password slow. A dummy-hash verify equalizes. (`internal/api/auth_handlers.go`)
+- ~~Last-admin / self-demotion guard~~ — **done 2026-10-22** (cannot_demote_self
+  + cannot_demote_last_admin, disabled admins don't count).
+- ~~Rate-limit `/auth/register`~~ — **done 2026-10-22** (per-IP 10/min, before
+  any DB work).
+- ~~`X-Content-Type-Options: nosniff` on `/files/*`~~ — **done 2026-10-22**
+  (all serve paths + 404 variants; 401s from requireAuth still lack it —
+  JSON bodies, negligible).
+- ~~Login timing side-channel~~ — **done 2026-10-22** (dummy-hash verify on
+  unknown email, computed once at init).
 - **Huge-`m` stored-hash allocation** — a corrupted/hostile password_hash with
   `m≈4e9` attempts a giant allocation before failing; hashes are self-generated
   today. (`internal/auth/password.go`)
 
 ## API consistency
 
-- **`DELETE /projects/{id}/items/{itemId}` returns 204 for absent rows** —
-  diverges from tags' post-fix 404 semantics (`:exec` vs `:execrows`).
+- ~~`DELETE /projects/{id}/items/{itemId}` returns 204 for absent rows~~ —
+  **done 2026-10-22** (`:execrows` → 404, double-delete test).
 - **Project-item PATCH can't clear `qty_used`/`notes`** — pointer semantics;
   workaround is set 0/"". (`internal/api/projects_handlers.go`)
 - **`PATCH /items` with `name: ""` silently keeps the name** (sentinel for
-  "absent"); same for locations. Document or reject explicitly.
+  "absent"); same for locations. Documented in AGENTS.md/api-notes; rejecting
+  explicitly remains a v1.1 option.
 - **Tag rename 409-before-404** — foreign id + colliding name returns 409, not
   404. Documented in `docs/api-notes.md`; acceptable.
 - **`GET /items` empty page reports `total: 0`** — `count(*) OVER()` needs a
-  row; page-1 reads are unaffected. Documented in api-notes.
+  row; page-1 reads are unaffected. Documented in api-notes; trash view clamps.
 - **FTS whole-token semantics** — `q=rasp` doesn't match "raspberry" without
   `*`; consider prefix queries or frontend-side `*` appending.
+- ~~qty_used unbounded~~ — **done 2026-10-22** (0..1e12 on add + patch,
+  matching items.qty).
 
 ## Concurrency (all accepted: single-user windows, SQLite single-writer)
 
@@ -51,15 +52,17 @@ File references are to the state at commit `60c61fe`.
 
 ## Ops / QoL
 
-- **CLI**: unknown subcommand silently serves (`stasher serv` boots); flags
-  after the subcommand are ignored (`stasher migrate -config x` uses defaults).
-- **Shutdown error ignored** — a hung drain is indistinguishable from clean.
-- **`TouchSession` writes on every authed request** — write amplifier on the
-  single conn; throttle to ~60s per session.
+- ~~**CLI**: unknown subcommand silently serves; flags after the subcommand
+  ignored~~ — **done 2026-10-22** (usage + exit 2 for unknown subcommands and
+  flag-after-subcommand; `-h`/`--help` still uses flag's default output).
+- ~~**Shutdown error ignored**~~ — **done 2026-10-22** (slog.Warn on drain
+  failure).
+- ~~**`TouchSession` writes on every authed request**~~ — **done 2026-10-22**
+  (shouldTouch helper: skip writes < 60s, fail-safe on parse errors).
 - **Orphan files on failed deletes** — key-list query errors and
   `storage.Delete` errors are swallowed; add logging or a periodic sweep.
-- **goose log noise** — `goose.SetVerbose(false)` quiets migration lines in
-  every test run.
+- ~~**goose log noise**~~ — **done 2026-10-22** (`goose.SetLogger(NopLogger)`;
+  SetVerbose was a no-op in v3.29.0 — errors still propagate).
 - **Modernc DSN pragmas** — move WAL/foreign_keys/busy_timeout into the DSN so
   a silently-replaced pooled connection can't lose them.
 - **goose global API** — deprecated `SetBaseFS/SetDialect/Up`; migrate to
@@ -67,9 +70,10 @@ File references are to the state at commit `60c61fe`.
 
 ## Docs
 
-- `docs/api-notes.md`: locations `name` row should note provided-`""`-keeps
-  (items row documents the pattern); create-vs-PATCH tags/location error
-  precedence asymmetry (400-on-create, 404-on-PATCH) undocumented.
+- ~~locations `name` row should note provided-`""`-keeps; error-precedence
+  asymmetry undocumented~~ — **done 2026-10-22** (AGENTS.md + api-notes).
+- CI actions target Node 20 runtime (deprecation warning on runners) — bump
+  actions/checkout@v5+, setup-go@v6+, setup-node@v5+ when convenient.
 
 ## Frontend v1.1 (from the frontend final review, 2026-10-21)
 

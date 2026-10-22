@@ -18,7 +18,9 @@ Self-hosted home inventory: know what you own and where it is.
     ./stasher -config stasher.yaml
     ./stasher migrate          # apply migrations and exit
 
-Config: YAML file (`-config path`), env overrides `STASHER_*`
+Config: YAML file (`-config path`; see `stasher.yaml.example` for a
+documented example — copy to `stasher.yaml`, gitignored), env overrides
+`STASHER_*`
 (`LISTEN_ADDR`, `BASE_URL`, `DATA_DIR`, `REGISTRATION`, `LOG_LEVEL`).
 
 The first registered user becomes admin. In `registration: invite` mode the

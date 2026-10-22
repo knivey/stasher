@@ -53,9 +53,11 @@ go test ./internal/api/ -v -run TestItem    # focused
 ./scripts/smoke-web.sh                        # headless-chromium smoke (needs ./stasher)
 ```
 
-Config: YAML (`-config path`) + `STASHER_*` env overrides (LISTEN_ADDR,
-BASE_URL, DATA_DIR, REGISTRATION, LOG_LEVEL). Data lives in `data/`
-(stasher.db + uploads/) — gitignored, never commit it.
+Config: YAML (`-config path`, see `stasher.yaml.example` for a documented
+example — copy it to `stasher.yaml`, which is gitignored) + `STASHER_*` env
+overrides (LISTEN_ADDR, BASE_URL, DATA_DIR, REGISTRATION, LOG_LEVEL,
+TRASH_RETENTION_DAYS). Data lives in `data/` (stasher.db + uploads/) —
+gitignored, never commit it.
 
 Headless Chromium is available on this system for browser-side checks.
 

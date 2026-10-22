@@ -1,0 +1,33 @@
+# Stasher configuration example.
+# Copy to stasher.yaml and edit:  cp stasher.yaml.example stasher.yaml
+# Run with:                       ./stasher -config stasher.yaml
+#
+# Every key can be overridden by environment variables:
+#   STASHER_LISTEN_ADDR, STASHER_BASE_URL, STASHER_DATA_DIR,
+#   STASHER_REGISTRATION, STASHER_LOG_LEVEL, STASHER_TRASH_RETENTION_DAYS
+
+# Address the server listens on. Behind a reverse proxy (Caddy/nginx),
+# keep this on localhost and proxy to it.
+listen_addr: "127.0.0.1:8080"
+
+# Public URL of the deployment (used for external references/links).
+base_url: "https://stasher.example.com"
+
+# Where the SQLite database and uploaded files live. Back this up.
+data_dir: "./data"
+
+# Registration mode:
+#   invite - new accounts require an invite code created by an admin
+#            (default; recommended for internet-facing deployments)
+#   open   - anyone can register
+# The FIRST user to register becomes admin and never needs an invite code,
+# regardless of mode. Register the admin account immediately after first
+# start (see README "First-run security").
+registration: "invite"
+
+# Log level: debug | info (default) | warn | error
+log_level: "info"
+
+# How many days trashed items are kept before being purged permanently.
+# 0 disables automatic purging (trash keeps until manually emptied).
+trash_retention_days: 30
