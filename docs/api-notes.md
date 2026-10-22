@@ -140,9 +140,10 @@ thumbnail (thumb_key follows (sort_order, id)).
   the trimmed length must be ≤ 50 (`labels must be at most 50 chars`);
   an entry that is empty **after trimming falls back to that axis's
   default word** (Slot/Row/Col/Bin by position) — it is not an error.
-  With `naming: "compact"` any non-empty label is rejected (`labels
-  only apply to verbose naming`); compact output never contains the
-  words. Absent `labels` behaves exactly as before.
+  With `naming: "compact"` a label that is non-empty **after trimming**
+  is rejected (`labels only apply to verbose naming`) — whitespace-only
+  labels are the empty/default case, not an error. Compact output never
+  contains the words. Absent `labels` behaves exactly as before.
 
 ## Layout copying (2026-10-22)
 

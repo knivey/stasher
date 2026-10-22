@@ -16,16 +16,25 @@ const LOCATIONS = [
 interface Call { method: string; url: string; body?: string }
 
 // Mocks every /api/v1/locations verb. POST responses are configurable so a
-// test can simulate 409 location_exists / 400 cycle errors.
-function mockFetch(opts: { postStatus?: number; postBody?: unknown; patchStatus?: number } = {}) {
+// test can simulate 409 location_exists / 400 cycle errors. `locations`
+// swaps in a mutable list (GET reads it live, so a test can grow the tree
+// between the POST and the refetch); `onPost` fires inside the fetch mock,
+// before the POST response resolves — the hook to append created rows.
+function mockFetch(opts: {
+  postStatus?: number; postBody?: unknown; patchStatus?: number
+  locations?: Location[]; onPost?: (url: string, body?: string) => void
+} = {}) {
+  const locs = opts.locations ?? LOCATIONS
   const calls: Call[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
     calls.push({ method, url, body: init?.body as string | undefined })
     if (method === 'GET')
-      return new Response(JSON.stringify({ data: LOCATIONS, total: 3 }), { status: 200 })
-    if (method === 'POST')
+      return new Response(JSON.stringify({ data: locs, total: locs.length }), { status: 200 })
+    if (method === 'POST') {
+      opts.onPost?.(url, init?.body as string | undefined)
       return new Response(JSON.stringify(opts.postBody ?? {}), { status: opts.postStatus ?? 201 })
+    }
     if (method === 'PATCH')
       return new Response(JSON.stringify({}), { status: opts.patchStatus ?? 200 })
     return new Response('', { status: 204 }) // DELETE
@@ -50,6 +59,16 @@ async function mountView(calls: Call[]) {
   return w
 }
 
+// The tree renders collapsed by default; expand every collapsed chevron
+// until none remain (fresh chevrons appear as hidden parents are revealed).
+async function expandAll(w: ReturnType<typeof mount>) {
+  for (;;) {
+    const next = w.findAll('[data-expand]').find(b => b.attributes('aria-expanded') === 'false')
+    if (!next) return
+    await next.trigger('click')
+  }
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.unstubAllGlobals()
@@ -60,6 +79,7 @@ describe('LocationsView', () => {
   it('renders the tree in path order with increasing indentation by depth', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
+    await expandAll(w)
     const names = w.findAll('[data-loc-name]')
     expect(names.map(n => n.text())).toEqual(['House', 'Cabinet', 'Bin'])
     const pad = (i: number) => parseFloat((names[i].element as HTMLElement).style.paddingLeft)
@@ -71,6 +91,7 @@ describe('LocationsView', () => {
   it('offers one "Add item" link per row pointing at /items/new?location=<id>', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
+    await expandAll(w)
     const links = w.findAll('[data-add-item]')
     expect(links).toHaveLength(3) // one per location row
     expect(links.map(l => l.attributes('href'))).toEqual([
@@ -81,6 +102,7 @@ describe('LocationsView', () => {
   it('hides "Duplicate layout…" on childless locations (House and Cabinet keep it, Bin loses it)', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
+    await expandAll(w)
     const dupes = w.findAll('[data-duplicate]')
     expect(dupes).toHaveLength(2) // House (has Cabinet), Cabinet (has Bin); Bin is childless
     // the duplicate controls belong to the two parents, not to Bin's row
@@ -96,6 +118,7 @@ describe('LocationsView', () => {
     const store = useItemsStore()
     store.filters.page = 4 // the click must reset pagination
     const { w, router } = await mountViewWithRouter(calls)
+    await w.find('[data-expand]').trigger('click') // reveal Cabinet
     await w.findAll('[data-loc-name]')[1].trigger('click') // Cabinet, id 2
     await flushPromises()
     expect(store.filters.location_id).toBe(2)
@@ -107,6 +130,7 @@ describe('LocationsView', () => {
     const calls = mockFetch()
     const store = useItemsStore()
     const { w, router } = await mountViewWithRouter(calls)
+    await expandAll(w)
     await w.findAll('[data-edit]')[2].trigger('click') // Bin enters edit mode
     const input = w.find('[data-edit-name]')
     expect(input.exists()).toBe(true)
@@ -145,6 +169,7 @@ describe('LocationsView', () => {
   it('rename sends a name-only PATCH then refetches', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
+    await expandAll(w)
     await w.findAll('[data-edit]')[1].trigger('click') // Cabinet
     await w.find('[data-edit-name]').setValue('Drawer')
     await w.find('[data-save]').trigger('click')
@@ -158,6 +183,7 @@ describe('LocationsView', () => {
   it('notes are sent only when edited (dirty flag), with no other fields', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
+    await expandAll(w)
     await w.findAll('[data-edit]')[2].trigger('click') // Bin
     await w.find('[data-edit-notes]').setValue('Small parts')
     await w.find('[data-save]').trigger('click')
@@ -179,6 +205,86 @@ describe('LocationsView', () => {
     expect(calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/locations/1')).toBe(true)
     expect(toasts.some(t => t.message === 'Location deleted' && t.type === 'success')).toBe(true)
     expect(calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
+  })
+
+  // ---- Collapsible tree (collapsed by default) ----
+
+  it('renders only root locations by default (the tree starts collapsed)', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House'])
+  })
+
+  it('expanding a root reveals its children but NOT grandchildren until their chevron is clicked', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.find('[data-expand]').trigger('click') // House's chevron
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet'])
+    await w.findAll('[data-expand]')[1].trigger('click') // Cabinet's chevron (now visible)
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet', 'Bin'])
+  })
+
+  it('leaf rows get a same-width spacer instead of a chevron button', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await expandAll(w)
+    const rowOf = (name: string) =>
+      w.findAll('li').find(li => li.find('[data-loc-name]').text() === name)!
+    expect(rowOf('Bin').find('[data-expand]').exists()).toBe(false)
+    const spacer = rowOf('Bin').find('[data-expand-spacer]')
+    expect(spacer.exists()).toBe(true)
+    expect(spacer.attributes('aria-hidden')).toBe('true')
+    // the spacer matches the chevron's 2rem column so names stay depth-aligned
+    expect(spacer.classes()).toContain('w-8')
+    expect(rowOf('House').find('[data-expand]').classes()).toContain('min-w-8')
+  })
+
+  it("flips the chevron's aria-expanded and label with the toggle", async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    const chev = w.find('[data-expand]')
+    expect(chev.attributes('aria-expanded')).toBe('false')
+    expect(chev.attributes('aria-label')).toBe('Expand House')
+    expect(chev.text()).toBe('▶')
+    await chev.trigger('click')
+    expect(chev.attributes('aria-expanded')).toBe('true')
+    expect(chev.attributes('aria-label')).toBe('Collapse House')
+    expect(chev.text()).toBe('▼')
+    await chev.trigger('click') // and back
+    expect(chev.attributes('aria-expanded')).toBe('false')
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House'])
+  })
+
+  it('clicking a chevron never triggers the name navigation', async () => {
+    const calls = mockFetch()
+    const store = useItemsStore()
+    const { w, router } = await mountViewWithRouter(calls)
+    await w.find('[data-expand]').trigger('click')
+    await flushPromises()
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet']) // it toggled
+    expect(store.filters.location_id).toBe(0)
+    expect(router.currentRoute.value.path).toBe('/') // memory history starts at /
+  })
+
+  it('adding a child via the form auto-expands its parent so the new row appears', async () => {
+    const locs = [...LOCATIONS]
+    const calls = mockFetch({
+      locations: locs,
+      onPost: (url, body) => {
+        if (url !== '/api/v1/locations') return
+        const b = JSON.parse(body!) as { name: string; parent_id?: number }
+        locs.push({ id: 4, name: b.name, parent_id: b.parent_id ?? null, notes: '', created_at: '', updated_at: '' } as Location)
+      },
+    })
+    const w = await mountView(calls)
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House']) // House collapsed
+    await w.find('[data-add-name]').setValue('Shelf')
+    await w.find('form select[aria-label="Location"]').setValue('1') // parent House
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    // House was expanded by the add flow — Shelf is visible, Bin (under
+    // still-collapsed Cabinet) stays hidden
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet', 'Shelf'])
   })
 
   // ---- Sublocations section (bulk generation + layout copy) ----
@@ -378,6 +484,28 @@ describe('LocationsView', () => {
     expect(JSON.parse(post!.body!)).not.toHaveProperty('labels')
   })
 
+  it('labels typed in verbose mode, then a dimension removed, post labels matching the remaining dims', async () => {
+    const calls = mockFetch({ postBody: { children_created: 3 } })
+    const w = await mountView(calls)
+    await w.find('[data-add-name]').setValue('Toolbox')
+    await w.find('[data-sub-mode]').setValue('generate')
+    await w.find('input[type="radio"][value="verbose"]').setValue(true)
+    const labels = w.findAll('[data-gen-label]')
+    await labels[0].setValue('Drawer')
+    await labels[1].setValue('Tray')
+    await w.find('[data-remove-dim]').trigger('click') // drops dim 2 in lockstep with its label
+    expect(w.findAll('[data-gen-label]')).toHaveLength(1)
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    const post = calls.find(c => c.method === 'POST')
+    expect(post?.url).toBe('/api/v1/locations/bulk')
+    // the surviving label is kept (trimmed), the dropped dimension's label
+    // is gone — exactly len(dims) entries, so no 400
+    expect(JSON.parse(post!.body!)).toEqual({
+      name: 'Toolbox', dims: [3], structure: 'flat', naming: 'verbose', prefix: '', labels: ['Drawer'],
+    })
+  })
+
   it('copy mode picker lists depth-indented tree options', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
@@ -423,6 +551,7 @@ describe('LocationsView', () => {
   it('duplicate layout dialog prefills "{name} copy", posts copy-layout with the own parent, toasts', async () => {
     const calls = mockFetch({ postBody: { children_created: 1 } })
     const w = await mountView(calls)
+    await expandAll(w)
     await w.findAll('[data-duplicate]')[1].trigger('click') // Cabinet (parent House)
     const dialog = w.find('[role="dialog"]')
     expect(dialog.exists()).toBe(true)
@@ -436,9 +565,33 @@ describe('LocationsView', () => {
     expect(calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
   })
 
+  it('duplicate layout expands the row\'s parent so the copy is visible', async () => {
+    const locs = [...LOCATIONS]
+    const calls = mockFetch({
+      locations: locs,
+      postBody: { children_created: 1 },
+      onPost: (url, body) => {
+        if (!url.endsWith('/copy-layout')) return
+        const b = JSON.parse(body!) as { name: string; parent_id: number }
+        locs.push({ id: 4, name: b.name, parent_id: b.parent_id || null, notes: '', created_at: '', updated_at: '' } as Location)
+      },
+    })
+    const w = await mountView(calls)
+    await w.find('[data-expand]').trigger('click') // reveal Cabinet
+    await w.findAll('[data-duplicate]')[1].trigger('click') // Cabinet (copy lands under House)
+    // collapse House while the dialog is open — without the re-expand the
+    // copy would stay hidden after the POST
+    await w.find('[data-expand]').trigger('click')
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House'])
+    await w.find('[role="dialog"]').find('[data-dup-confirm]').trigger('click')
+    await flushPromises()
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet', 'Cabinet copy'])
+  })
+
   it('duplicate layout dialog closes on Escape without posting', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
+    await expandAll(w)
     await w.findAll('[data-duplicate]')[1].trigger('click')
     expect(w.find('[role="dialog"]').exists()).toBe(true)
     await w.find('[role="dialog"]').trigger('keydown', { key: 'Escape' })

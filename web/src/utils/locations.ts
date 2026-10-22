@@ -11,7 +11,12 @@ export interface LocationRow { loc: Location; depth: number }
 // (first member at depth 0, the rest nested beneath it), while a cycle
 // reached through a tail under a real root is walked in place. Either way
 // every location renders exactly once.
-export function locationTreeRows(locations: Location[]): LocationRow[] {
+//
+// `expanded` (optional) collapses the management list: a node whose id is
+// NOT in the set contributes its row but none of its descendants — they are
+// still marked visited, so the fallback pass cannot resurrect them as fake
+// roots. Undefined = the full walk (the select options path).
+export function locationTreeRows(locations: Location[], expanded?: Set<number>): LocationRow[] {
   const byId = new Map(locations.map(l => [l.id, l]))
   const childrenOf = new Map<number, Location[]>()
   const roots: Location[] = []
@@ -23,14 +28,17 @@ export function locationTreeRows(locations: Location[]): LocationRow[] {
   const byName = (a: Location, b: Location) => a.name.localeCompare(b.name)
   const rows: LocationRow[] = []
   const visited = new Set<number>()
-  const walk = (loc: Location, depth: number) => {
+  const walk = (loc: Location, depth: number, emit: boolean) => {
     if (visited.has(loc.id)) return
     visited.add(loc.id)
-    rows.push({ loc, depth })
-    for (const child of (childrenOf.get(loc.id) ?? []).sort(byName)) walk(child, depth + 1)
+    if (emit) rows.push({ loc, depth })
+    // Collapsed stops the descent: children are still walked (so they count
+    // as visited and never leak into the fallback pass) but emit nothing.
+    const descend = emit && (!expanded || expanded.has(loc.id))
+    for (const child of (childrenOf.get(loc.id) ?? []).sort(byName)) walk(child, depth + 1, descend)
   }
-  for (const r of [...roots].sort(byName)) walk(r, 0)
-  for (const l of locations.filter(l => !visited.has(l.id)).sort(byName)) walk(l, 0)
+  for (const r of [...roots].sort(byName)) walk(r, 0, true)
+  for (const l of locations.filter(l => !visited.has(l.id)).sort(byName)) walk(l, 0, true)
   return rows
 }
 

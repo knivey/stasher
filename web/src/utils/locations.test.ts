@@ -41,3 +41,32 @@ describe('locationDepthOptions', () => {
       .toEqual(locationTreeRows(locations).map(r => r.loc.id))
   })
 })
+
+describe('locationTreeRows with an expanded set (management list)', () => {
+  const tree = [
+    loc(1, 'House', null),
+    loc(2, 'Cabinet', 1),
+    loc(3, 'Bin', 2),
+    loc(4, 'Shed', null),
+  ]
+
+  it('emits only roots when nothing is expanded', () => {
+    expect(locationTreeRows(tree, new Set()).map(r => r.loc.name)).toEqual(['House', 'Shed'])
+  })
+
+  it('descends only into expanded nodes — children yes, grandchildren no', () => {
+    const rows = locationTreeRows(tree, new Set([1]))
+    expect(rows.map(r => r.loc.name)).toEqual(['House', 'Cabinet', 'Shed'])
+    expect(rows.map(r => r.depth)).toEqual([0, 1, 0])
+  })
+
+  it('never resurrects hidden descendants as fallback roots', () => {
+    // Cabinet and Bin are hidden (House collapsed) — the corrupt-cycle
+    // fallback pass must not re-append them at depth 0.
+    expect(locationTreeRows(tree, new Set()).map(r => r.loc.id)).toEqual([1, 4])
+  })
+
+  it('without a set, keeps the legacy full walk (select options path)', () => {
+    expect(locationTreeRows(tree).map(r => r.loc.name)).toEqual(['House', 'Cabinet', 'Bin', 'Shed'])
+  })
+})

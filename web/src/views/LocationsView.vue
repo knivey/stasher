@@ -14,8 +14,19 @@ const router = useRouter()
 const itemsStore = useItemsStore()
 
 const locations = ref<Location[]>([])
+// Collapsed by default: bulk generation can create hundreds of nodes, so
+// the list starts as just the roots and each chevron expands one node.
+// (Vue 3 tracks Set has/add/delete on the reactive proxy directly.)
+const expanded = ref(new Set<number>())
 // The tree indentation IS the hierarchy display here — no breadcrumb fetch.
-const rows = computed<LocationRow[]>(() => locationTreeRows(locations.value))
+// Rows stop at collapsed nodes; fully expanded, every location renders
+// exactly once (same walk the select options use).
+const rows = computed<LocationRow[]>(() => locationTreeRows(locations.value, expanded.value))
+
+function toggleExpand(id: number) {
+  if (expanded.value.has(id)) expanded.value.delete(id)
+  else expanded.value.add(id)
+}
 
 // Which locations have sublocations — drives the per-row "Duplicate
 // layout…" action (copying an empty layout is pointless).
@@ -128,6 +139,9 @@ async function addLocation() {
     addName.value = ''
     addError.value = ''
     genPrefix.value = ''
+    // Reveal the new location: a non-root addition lands under addParent,
+    // so expand it to make the fresh child visible immediately.
+    if (addParent.value) expanded.value.add(addParent.value)
     await fetchLocations()
   } catch (e) {
     // 409 location_exists lands here; show the backend message inline too.
@@ -161,6 +175,9 @@ async function duplicateLayout() {
     })
     dupTarget.value = null
     toast(`Created ${name} + ${res.children_created} sublocations`, 'success')
+    // The copy lands beside the target, under its parent — expand that
+    // parent so the new subtree is visible.
+    if (target.parent_id !== null) expanded.value.add(target.parent_id)
     await fetchLocations()
   } catch (e) {
     dupError.value = (e as Error).message
@@ -360,15 +377,26 @@ async function deleteLocation() {
     <ul v-else class="bg-white dark:bg-slate-800 rounded-xl shadow divide-y dark:divide-slate-700 text-sm">
       <li v-for="r in rows" :key="r.loc.id" class="px-4 py-2">
         <div v-if="editingId !== r.loc.id" class="flex items-center justify-between gap-2">
-          <div class="min-w-0">
-            <!-- A real button (keyboard-focusable) styled like a link; it
-                 cannot fire in edit mode because this whole branch is
-                 replaced by the name input below. -->
-            <button data-loc-name type="button" @click="filterByLocation(r.loc.id)"
-              :style="{ paddingLeft: r.depth * 1.5 + 'rem' }"
-              class="font-medium dark:text-slate-100 hover:underline cursor-pointer text-left py-1.5"
-              :title="`Show items in ${r.loc.name}`">{{ r.loc.name }}</button>
-            <p v-if="r.loc.notes" class="text-slate-500 dark:text-slate-400 whitespace-pre-wrap" :style="{ paddingLeft: r.depth * 1.5 + 'rem' }">{{ r.loc.notes }}</p>
+          <div class="flex min-w-0 items-center">
+            <!-- Chevron toggle on parents (real button, comfortable tap
+                 target); leaf rows keep a same-width spacer so names stay
+                 depth-aligned across levels. -->
+            <button v-if="(childCounts.get(r.loc.id) ?? 0) > 0" data-expand type="button"
+              :aria-expanded="expanded.has(r.loc.id)"
+              :aria-label="(expanded.has(r.loc.id) ? 'Collapse ' : 'Expand ') + r.loc.name"
+              class="shrink-0 min-w-8 min-h-8 inline-flex items-center justify-center rounded text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              @click="toggleExpand(r.loc.id)">{{ expanded.has(r.loc.id) ? '▼' : '▶' }}</button>
+            <span v-else data-expand-spacer aria-hidden="true" class="shrink-0 inline-block w-8"></span>
+            <div class="min-w-0">
+              <!-- A real button (keyboard-focusable) styled like a link; it
+                   cannot fire in edit mode because this whole branch is
+                   replaced by the name input below. -->
+              <button data-loc-name type="button" @click="filterByLocation(r.loc.id)"
+                :style="{ paddingLeft: r.depth * 1.5 + 'rem' }"
+                class="font-medium dark:text-slate-100 hover:underline cursor-pointer text-left py-1.5"
+                :title="`Show items in ${r.loc.name}`">{{ r.loc.name }}</button>
+              <p v-if="r.loc.notes" class="text-slate-500 dark:text-slate-400 whitespace-pre-wrap" :style="{ paddingLeft: r.depth * 1.5 + 'rem' }">{{ r.loc.notes }}</p>
+            </div>
           </div>
           <span class="flex gap-2 shrink-0">
             <router-link :to="`/items/new?location=${r.loc.id}`" data-add-item
