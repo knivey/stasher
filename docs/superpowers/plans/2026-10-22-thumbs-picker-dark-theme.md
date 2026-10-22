@@ -203,10 +203,9 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
-	"io"
 
 	"github.com/rwcarlsen/goexif/exif"
-	"golang.org/x/image/draw"
+	xdraw "golang.org/x/image/draw"
 
 	_ "golang.org/x/image/webp" // register webp decoding
 )
@@ -374,15 +373,10 @@ func fitLongSide(img image.Image, max int) image.Image {
 		dh = 1
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
-	draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Src, nil)
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), img, b, xdraw.Src, nil)
 	return dst
 }
-
-// ensure io import is used only if needed; drop it if go vet complains.
-var _ = io.Discard
 ```
-
-(If `go vet` flags the unused `io` import, delete the import and the `var _` line.)
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1385,7 +1379,10 @@ git commit -m "feat(web): make-main control and hero image on item detail"
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useTheme } from './theme'
+
+// The composable initializes from localStorage/matchMedia at module import
+// time, so each test sets the mock FIRST and then dynamically imports a
+// fresh module instance.
 
 function mockMatchMedia(dark: boolean) {
   const listeners: Array<(e: { matches: boolean }) => void> = []
@@ -1398,18 +1395,25 @@ function mockMatchMedia(dark: boolean) {
   return (dark2: boolean) => listeners.forEach(cb => cb({ matches: dark2 }))
 }
 
+async function freshTheme() {
+  vi.resetModules()
+  return await import('./theme')
+}
+
 describe('useTheme', () => {
   beforeEach(() => { localStorage.clear(); document.documentElement.className = '' })
 
-  it('defaults to system preference', () => {
+  it('defaults to system preference', async () => {
     mockMatchMedia(true)
+    const { useTheme } = await freshTheme()
     const { isDark } = useTheme()
     expect(isDark.value).toBe(true)
     expect(document.documentElement.classList.contains('dark')).toBe(true)
   })
 
-  it('toggle persists an explicit choice', () => {
+  it('toggle persists an explicit choice', async () => {
     mockMatchMedia(true)
+    const { useTheme } = await freshTheme()
     const { isDark, toggle } = useTheme()
     toggle()
     expect(isDark.value).toBe(false)
@@ -1417,8 +1421,9 @@ describe('useTheme', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(false)
   })
 
-  it('follows live system changes while no explicit choice stored', () => {
+  it('follows live system changes while no explicit choice stored', async () => {
     const flip = mockMatchMedia(false)
+    const { useTheme } = await freshTheme()
     const { isDark } = useTheme()
     expect(isDark.value).toBe(false)
     flip(true)
