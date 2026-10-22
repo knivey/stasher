@@ -35,6 +35,7 @@ type trashSnapshot struct {
 
 type trashSnapshotPhoto struct {
 	StorageKey string `json:"storage_key"`
+	ThumbKey   string `json:"thumb_key,omitempty"` // "" in old snapshots = no thumb
 	Caption    string `json:"caption"`
 	SortOrder  int64  `json:"sort_order"`
 }
@@ -90,7 +91,8 @@ func buildTrashSnapshot(ctx context.Context, q *dbpkg.Queries, item dbpkg.Item) 
 	snap.Photos = make([]trashSnapshotPhoto, 0, len(photos))
 	for _, p := range photos {
 		snap.Photos = append(snap.Photos, trashSnapshotPhoto{
-			StorageKey: p.StorageKey, Caption: p.Caption, SortOrder: p.SortOrder,
+			StorageKey: p.StorageKey, ThumbKey: p.ThumbKey.String, // "" when invalid
+			Caption: p.Caption, SortOrder: p.SortOrder,
 		})
 	}
 	docs, err := q.ListItemDocuments(ctx, item.ID)
@@ -140,11 +142,15 @@ func buildTrashSnapshot(ctx context.Context, q *dbpkg.Queries, item dbpkg.Item) 
 	return snap, nil
 }
 
-// deleteSnapshotFiles removes every file a trash snapshot references.
-// Missing files are not an error (Storage.Delete treats them as no-ops).
+// deleteSnapshotFiles removes every file a trash snapshot references,
+// including derived thumbnails. Missing files are not an error
+// (Storage.Delete treats them as no-ops).
 func (s *Server) deleteSnapshotFiles(snap trashSnapshot) {
 	for _, p := range snap.Photos {
 		s.st.Delete(p.StorageKey)
+		if p.ThumbKey != "" {
+			s.st.Delete(p.ThumbKey)
+		}
 	}
 	for _, d := range snap.Documents {
 		s.st.Delete(d.StorageKey)
@@ -174,9 +180,14 @@ func trashRowJSON(e dbpkg.ListTrashRow) (map[string]any, error) {
 	if err := json.Unmarshal([]byte(e.Snapshot), &snap); err != nil {
 		return nil, err
 	}
-	var thumb any // first photo (snapshot order = sort_order, id)
+	var thumb any // first photo (snapshot order = sort_order, id); derived
+	// thumb when the snapshot has one, else the original (legacy snapshots)
 	if len(snap.Photos) > 0 {
-		thumb = snap.Photos[0].StorageKey
+		k := snap.Photos[0].ThumbKey
+		if k == "" {
+			k = snap.Photos[0].StorageKey
+		}
+		thumb = k
 	}
 	var purges any // '' (never purge) renders as JSON null
 	if e.PurgesAt != "" {
@@ -308,8 +319,9 @@ func (s *Server) handleRestoreTrashEntry(w http.ResponseWriter, r *http.Request)
 	}
 	for _, p := range snap.Photos { // same storage keys: files never moved
 		if _, err := qtx.AddItemPhoto(r.Context(), dbpkg.AddItemPhotoParams{
-			ItemID: item.ID, StorageKey: p.StorageKey, ThumbKey: sql.NullString{}, Caption: p.Caption,
-			SortOrder: p.SortOrder, CreatedAt: now,
+			ItemID: item.ID, StorageKey: p.StorageKey,
+			ThumbKey: sql.NullString{String: p.ThumbKey, Valid: p.ThumbKey != ""},
+			Caption:  p.Caption, SortOrder: p.SortOrder, CreatedAt: now,
 		}); err != nil {
 			s.internalErr(w, err)
 			return

@@ -117,11 +117,22 @@ func (s *Server) handleCopyItem(w http.ResponseWriter, r *http.Request) {
 			s.internalErr(w, err)
 			return
 		}
+		var newThumb sql.NullString
+		if ph.ThumbKey.Valid {
+			tk, err := s.st.Copy(ph.ThumbKey.String)
+			if err != nil {
+				s.st.Delete(newKey)
+				s.internalErr(w, err)
+				return
+			}
+			newThumb = sql.NullString{String: tk, Valid: true}
+		}
 		if _, err := s.q.AddItemPhoto(r.Context(), dbpkg.AddItemPhotoParams{
-			ItemID: newItem.ID, StorageKey: newKey, ThumbKey: sql.NullString{}, Caption: ph.Caption,
-			SortOrder: ph.SortOrder, CreatedAt: now,
+			ItemID: newItem.ID, StorageKey: newKey, ThumbKey: newThumb,
+			Caption: ph.Caption, SortOrder: ph.SortOrder, CreatedAt: now,
 		}); err != nil {
 			s.st.Delete(newKey)
+			s.st.Delete(newThumb.String) // no-op when empty
 			s.internalErr(w, err)
 			return
 		}

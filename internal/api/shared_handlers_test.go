@@ -175,3 +175,55 @@ func TestCopyOwnItem(t *testing.T) {
 		t.Fatal("duplicate missing")
 	}
 }
+
+// TestCopyDuplicatesThumb: copying an item duplicates the derived thumb
+// FILE under a fresh key (both openable independently, source untouched).
+func TestCopyDuplicatesThumb(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "copy-thumb@test.dev", "longpassword1")
+
+	created := doJSON(t, ts, "POST", "/api/v1/items",
+		map[string]any{"name": "thumb source"}, cookie)
+	var item struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, created, &item)
+	postFile(t, ts, "/api/v1/items/"+fmtInt64(item.ID)+"/photos",
+		"file", "src.png", png1x1, cookie)
+
+	src, err := s.Queries().ListItemPhotos(context.Background(), item.ID)
+	if err != nil || len(src) != 1 || !src[0].ThumbKey.Valid {
+		t.Fatalf("source photos: %v %+v", err, src)
+	}
+	srcThumb := src[0].ThumbKey.String
+
+	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(item.ID)+"/copy", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("copy = %d", resp.StatusCode)
+	}
+	var copy struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &copy)
+
+	copied, err := s.Queries().ListItemPhotos(context.Background(), copy.ID)
+	if err != nil || len(copied) != 1 {
+		t.Fatalf("copied photos: %v %d", err, len(copied))
+	}
+	if !copied[0].ThumbKey.Valid {
+		t.Fatal("copied photo has no thumb_key")
+	}
+	newThumb := copied[0].ThumbKey.String
+	if newThumb == srcThumb || newThumb == copied[0].StorageKey {
+		t.Fatalf("copied thumb_key = %q (source thumb %q, copy storage %q), want a fresh key",
+			newThumb, srcThumb, copied[0].StorageKey)
+	}
+	// both thumb FILES exist independently; the source thumb is intact
+	for _, key := range []string{srcThumb, newThumb} {
+		f, err := s.st.Open(key)
+		if err != nil {
+			t.Fatalf("thumb %q not openable: %v", key, err)
+		}
+		f.Close()
+	}
+}

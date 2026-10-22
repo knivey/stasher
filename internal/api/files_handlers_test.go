@@ -249,6 +249,43 @@ func TestUploadPhotoCorruptStillSavesOriginal(t *testing.T) {
 	}
 }
 
+// TestDeletePhotoRemovesThumb: deleting a photo removes BOTH the original
+// and the derived thumbnail file from disk.
+func TestDeletePhotoRemovesThumb(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "del-thumb@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "deletable"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	resp := postFile(t, ts, "/api/v1/items/"+fmtInt64(created.ID)+"/photos",
+		"file", "pic.png", png1x1, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("photo upload = %d", resp.StatusCode)
+	}
+	var photo struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &photo)
+	photos, err := s.Queries().ListItemPhotos(context.Background(), created.ID)
+	if err != nil || len(photos) != 1 || !photos[0].ThumbKey.Valid {
+		t.Fatalf("photos: %v %+v", err, photos)
+	}
+
+	if r := doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(created.ID)+"/photos/"+fmtInt64(photo.ID),
+		nil, cookie); r.StatusCode != http.StatusNoContent {
+		t.Fatalf("photo delete = %d", r.StatusCode)
+	}
+	for _, key := range []string{photos[0].StorageKey, photos[0].ThumbKey.String} {
+		if f, err := s.st.Open(key); err == nil {
+			f.Close()
+			t.Fatalf("file %q still on disk after photo delete", key)
+		}
+	}
+}
+
 func TestPhotoRejectsNonImage(t *testing.T) {
 	_, ts := newTestServer(t, nil)
 	cookie := registerUser(t, ts, "notimg@test.dev", "longpassword1")

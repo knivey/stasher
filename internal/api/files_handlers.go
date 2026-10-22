@@ -194,10 +194,13 @@ func (s *Server) handleDeletePhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	photos, _ := s.q.ListItemPhotos(r.Context(), item.ID)
-	var key string
+	var key, thumbKey string
 	for _, p := range photos {
 		if p.ID == photoID {
 			key = p.StorageKey
+			if p.ThumbKey.Valid {
+				thumbKey = p.ThumbKey.String
+			}
 			break
 		}
 	}
@@ -210,6 +213,7 @@ func (s *Server) handleDeletePhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.st.Delete(key)
+	s.st.Delete(thumbKey) // no-op when the photo had no derived thumb
 	w.WriteHeader(http.StatusNoContent)
 }
 

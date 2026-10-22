@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -96,6 +98,13 @@ func TestTrashFullCycle(t *testing.T) {
 
 	itemID, photoKey, docKey := createItemWithFiles(t, ts, cookie, "widget")
 
+	// uploads derive thumbs; the trash row must surface the DERIVED key
+	photos, err := s.Queries().ListItemPhotos(context.Background(), itemID)
+	if err != nil || len(photos) != 1 || !photos[0].ThumbKey.Valid {
+		t.Fatalf("widget photos: %v %+v", err, photos)
+	}
+	derivedThumb := photos[0].ThumbKey.String
+
 	// one project link and one usage entry on top of the baseline ledger
 	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "bench"}, cookie)
 	var project struct {
@@ -130,8 +139,9 @@ func TestTrashFullCycle(t *testing.T) {
 	if e.Name != "widget" || e.Qty != 7 {
 		t.Fatalf("trash entry = %+v, want widget qty 7", e)
 	}
-	if e.PhotoCount != 1 || e.ThumbKey == nil || *e.ThumbKey != photoKey {
-		t.Fatalf("trash entry thumb = %+v, want photo key %q", e, photoKey)
+	if e.PhotoCount != 1 || e.ThumbKey == nil || *e.ThumbKey != derivedThumb {
+		t.Fatalf("trash entry thumb = %+v, want derived thumb %q (not the original %q)",
+			e, derivedThumb, photoKey)
 	}
 	if e.TrashedAt == "" {
 		t.Fatal("trashed_at empty")
@@ -382,6 +392,132 @@ func TestTrashAutoPurge(t *testing.T) {
 	// purges_at '' renders as JSON null
 	if entries[0].PurgesAt != nil {
 		t.Fatalf("purges_at = %v, want null", *entries[0].PurgesAt)
+	}
+}
+
+// uploadPhotoWithThumb creates an item with one photo and returns the item
+// id plus the photo's storage and derived thumb keys read from its row
+// (png1x1 is decodable, so uploads derive a real thumb).
+func uploadPhotoWithThumb(t *testing.T, s *Server, ts *httptest.Server, cookie *http.Cookie, name string) (itemID int64, storageKey, thumbKey string) {
+	t.Helper()
+	resp := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": name}, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create item = %d", resp.StatusCode)
+	}
+	var item struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &item)
+	resp = postFile(t, ts, "/api/v1/items/"+fmtInt64(item.ID)+"/photos",
+		"file", name+".png", png1x1, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("photo upload = %d", resp.StatusCode)
+	}
+	photos, err := s.Queries().ListItemPhotos(context.Background(), item.ID)
+	if err != nil || len(photos) != 1 || !photos[0].ThumbKey.Valid {
+		t.Fatalf("photos: %v %+v", err, photos)
+	}
+	return item.ID, photos[0].StorageKey, photos[0].ThumbKey.String
+}
+
+// TestPurgeDeletesThumbFiles: sweeping an expired entry removes BOTH the
+// original and the derived thumbnail from disk (no orphan thumb files).
+func TestPurgeDeletesThumbFiles(t *testing.T) {
+	s, ts := newTestServer(t, func(c *config.Config) { c.TrashRetentionDays = 30 })
+	cookie := registerUser(t, ts, "trash-purge-thumb@test.dev", "longpassword1")
+
+	itemID, photoKey, thumbKey := uploadPhotoWithThumb(t, s, ts, cookie, "thumbful")
+	doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(itemID), nil, cookie)
+
+	// force the entry over the retention horizon (convention from
+	// TestTrashAutoPurge), then run the startup purge
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	mustExec(t, s, `UPDATE trash SET purges_at = ? WHERE snapshot LIKE '%"thumbful"%'`, past)
+	if err := s.PurgeExpiredTrash(context.Background()); err != nil {
+		t.Fatalf("purge expired trash: %v", err)
+	}
+	fileGone(t, s, ts, photoKey, cookie)
+	fileGone(t, s, ts, thumbKey, cookie)
+}
+
+// stripThumbKeysFromSnapshot rewrites a trash row's snapshot JSON without
+// the photos' thumb_key fields, simulating an entry stored before thumbs
+// existed (old snapshots unmarshal with ThumbKey == "").
+func stripThumbKeysFromSnapshot(t *testing.T, s *Server, trashID int64) {
+	t.Helper()
+	var blob string
+	if err := s.raw.QueryRow("SELECT snapshot FROM trash WHERE id = ?", trashID).Scan(&blob); err != nil {
+		t.Fatal(err)
+	}
+	var snap map[string]any
+	if err := json.Unmarshal([]byte(blob), &snap); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range snap["photos"].([]any) {
+		delete(p.(map[string]any), "thumb_key")
+	}
+	out, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s, "UPDATE trash SET snapshot = ? WHERE id = ?", string(out), trashID)
+}
+
+// TestRestoreCarriesThumbKey: restore recreates photo rows WITH their
+// derived thumb keys (same keys - files never move); snapshots stored
+// before thumbs existed restore with a NULL thumb.
+func TestRestoreCarriesThumbKey(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "trash-restore-thumb@test.dev", "longpassword1")
+
+	// modern snapshot: the restored row keeps its derived thumb key
+	itemID, photoKey, thumbKey := uploadPhotoWithThumb(t, s, ts, cookie, "modern")
+	doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(itemID), nil, cookie)
+	entries, _ := listTrash(t, ts, cookie)
+	if len(entries) != 1 {
+		t.Fatalf("trash entries = %d, want 1", len(entries))
+	}
+	resp := doJSON(t, ts, "POST", "/api/v1/trash/"+fmtInt64(entries[0].ID)+"/restore", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("restore = %d", resp.StatusCode)
+	}
+	var restored struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &restored)
+	photos, err := s.Queries().ListItemPhotos(context.Background(), restored.ID)
+	if err != nil || len(photos) != 1 {
+		t.Fatalf("restored photos: %v %d", err, len(photos))
+	}
+	if photos[0].StorageKey != photoKey {
+		t.Fatalf("restored storage_key = %q, want %q (files never move)", photos[0].StorageKey, photoKey)
+	}
+	if !photos[0].ThumbKey.Valid || photos[0].ThumbKey.String != thumbKey {
+		t.Fatalf("restored thumb_key = %+v, want %q", photos[0].ThumbKey, thumbKey)
+	}
+
+	// legacy snapshot (no thumb_key in the stored JSON) restores with NULL
+	itemID, photoKey, _ = uploadPhotoWithThumb(t, s, ts, cookie, "legacy")
+	doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(itemID), nil, cookie)
+	entries, _ = listTrash(t, ts, cookie)
+	if len(entries) != 1 {
+		t.Fatalf("trash entries = %d, want 1", len(entries))
+	}
+	stripThumbKeysFromSnapshot(t, s, entries[0].ID)
+	resp = doJSON(t, ts, "POST", "/api/v1/trash/"+fmtInt64(entries[0].ID)+"/restore", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("legacy restore = %d", resp.StatusCode)
+	}
+	decodeBody(t, resp, &restored)
+	photos, err = s.Queries().ListItemPhotos(context.Background(), restored.ID)
+	if err != nil || len(photos) != 1 {
+		t.Fatalf("legacy restored photos: %v %d", err, len(photos))
+	}
+	if photos[0].StorageKey != photoKey {
+		t.Fatalf("legacy storage_key = %q, want %q", photos[0].StorageKey, photoKey)
+	}
+	if photos[0].ThumbKey.Valid {
+		t.Fatalf("legacy thumb_key = %q, want NULL", photos[0].ThumbKey.String)
 	}
 }
 
