@@ -15,9 +15,8 @@ File references are to the state at commit `60c61fe`.
   JSON bodies, negligible).
 - ~~Login timing side-channel~~ — **done 2026-10-22** (dummy-hash verify on
   unknown email, computed once at init).
-- **Huge-`m` stored-hash allocation** — a corrupted/hostile password_hash with
-  `m≈4e9` attempts a giant allocation before failing; hashes are self-generated
-  today. (`internal/auth/password.go`)
+- ~~Huge-`m` stored-hash allocation~~ — **done 2026-10-22** (VerifyPassword
+  bounds-checks m ≤ 1 GiB / t ≤ 64 / p ≤ 16 before the KDF runs).
 
 ## API consistency
 
@@ -37,14 +36,21 @@ File references are to the state at commit `60c61fe`.
   matching for terms ≥ 3 chars; shorter terms return empty — see api-notes).
 - ~~qty_used unbounded~~ — **done 2026-10-22** (0..1e12 on add + patch,
   matching items.qty).
+- ~~Usage rows carry no project name~~ — **done 2026-10-22** (LEFT JOIN,
+  `project_name` on rows + 201 body; frontend prefers it, `project #id`
+  fallback kept).
+- ~~Disposing a 0-qty item logs a delta-0 entry~~ — **done 2026-10-22**
+  (idempotent 204, no ledger write, no updated_at bump).
 
 ## Concurrency (all accepted: single-user windows, SQLite single-writer)
 
 - Bootstrap-admin race (two concurrent first registrations both admin).
 - Invite double-consume race (`GetInvite` → `MarkInviteUsed` not atomic).
-- Location PATCH cycle-check/uniqueness outside the write tx (a formed cycle
-  would make the breadcrumbs CTE recurse unboundedly — consider wrapping PATCH
-  in a tx like DELETE already is, or a depth guard).
+- ~~Location PATCH cycle-check/uniqueness outside the write tx~~ —
+  **mitigated 2026-10-22**: both recursive CTEs are depth-capped (< 50), so a
+  formed cycle can no longer hang the breadcrumbs/descendants queries. The
+  PATCH itself remains non-tx (cycle formation still possible under
+  concurrent same-user PATCHes, now harmless to query).
 - Tag create check-then-insert race (UNIQUE backstop surfaces as 500 not 409).
 - Item copy half-apply without rollback (partial duplicate on mid-copy failure;
   retry-safe, user can delete).
@@ -60,12 +66,17 @@ File references are to the state at commit `60c61fe`.
   failure).
 - ~~**`TouchSession` writes on every authed request**~~ — **done 2026-10-22**
   (shouldTouch helper: skip writes < 60s, fail-safe on parse errors).
-- **Orphan files on failed deletes** — key-list query errors and
-  `storage.Delete` errors are swallowed; add logging or a periodic sweep.
+- ~~**Orphan files on failed deletes**~~ — **partially done 2026-10-22**:
+  photo/trash-delete failures now `slog.Warn` instead of silent, backfill
+  deletes its orphaned thumb when the row vanished mid-loop, and single-entry
+  purge deletes the row BEFORE files. Still unlogged: document-upload rollback
+  delete and `handleDeleteDocument` (files_handlers.go:375/:412). A periodic
+  orphan sweep remains unimplemented.
 - ~~**goose log noise**~~ — **done 2026-10-22** (`goose.SetLogger(NopLogger)`;
   SetVerbose was a no-op in v3.29.0 — errors still propagate).
-- **Modernc DSN pragmas** — move WAL/foreign_keys/busy_timeout into the DSN so
-  a silently-replaced pooled connection can't lose them.
+- ~~**Modernc DSN pragmas**~~ — **done 2026-10-22** (WAL/foreign_keys/
+  busy_timeout in the DSN so any pooled connection gets them; post-open loop
+  kept as belt-and-suspenders).
 - **goose global API** — deprecated `SetBaseFS/SetDialect/Up`; migrate to
   `goose.NewProvider` when convenient.
 
@@ -73,8 +84,8 @@ File references are to the state at commit `60c61fe`.
 
 - ~~locations `name` row should note provided-`""`-keeps; error-precedence
   asymmetry undocumented~~ — **done 2026-10-22** (AGENTS.md + api-notes).
-- CI actions target Node 20 runtime (deprecation warning on runners) — bump
-  actions/checkout@v5+, setup-go@v6+, setup-node@v5+ when convenient.
+- ~~CI actions target Node 20 runtime~~ — **done 2026-10-22**
+  (checkout@v5, setup-go@v6, setup-node@v5).
 
 ## Frontend v1.1 (from the frontend final review, 2026-10-21)
 
@@ -89,18 +100,28 @@ File references are to the state at commit `60c61fe`.
 - ~~**Negative `qty_used` savable**~~ — **done 2026-10-22** (backend bounds
   0..1e12 on add + patch).
 - ~~Tap-target size for the mobile header's emoji links~~ — **done 2026-10-22**
-  (44px targets); 5-char bottom-nav label truncation and the
-  `locations.ts` cycle-comment nit remain.
-- **Usage ledger leftovers** (2026-10-21): disposing a 0-qty item logs a
-  delta-0 entry (consider 400 or idempotent no-op); ledger rows carry no
-  project name (frontend falls back to `project #id` — backend could join
-  it); ~~`found`/`restock` badges share a color~~ **done 2026-10-22**;
-  history pager has no in-flight guard (matches the app-wide pagination
-  pattern).
+  (44px targets); ~~5-char bottom-nav label truncation~~ **done 2026-10-22**
+  (full labels, 11px); the `locations.ts` cycle-comment operative claims were
+  corrected 2026-10-22 — one illustrative clause (tail-reached cycle) describes
+  an impossible state and may be pruned someday.
+- **Usage ledger leftovers** (2026-10-21): ~~disposing a 0-qty item logs a
+  delta-0 entry~~ **done 2026-10-22**; ~~ledger rows carry no project
+  name~~ **done 2026-10-22**; ~~`found`/`restock` badges share a color~~
+  **done 2026-10-22**; history pager has no in-flight guard (matches the
+  app-wide pagination pattern).
 - **Trash leftovers** (2026-10-21): ~~purge-404 path is toast-only~~ **done
-  2026-10-22** (refetches like restore); disposed-item restore branch
-  untested; post-commit detail-fetch 500 window on restore; purge deletes
-  files before row (failure order); trash sweep on GET is global not
-  per-user; no snapshot size cap; item timestamps reset on restore (ledger
-  timestamps preserved); weak count pin in empty-trash test.
+  2026-10-22** (refetches like restore); ~~disposed-item restore branch
+  untested~~ **done 2026-10-22**; post-commit detail-fetch 500 window on
+  restore; ~~purge deletes files before row (failure order)~~ **done
+  2026-10-22** (row first now); trash sweep on GET is global not per-user; no
+  snapshot size cap; item timestamps reset on restore (ledger/note timestamps
+  preserved); ~~weak count pin in empty-trash test~~ **judged fine 2026-10-22**
+  (page-1 leak surfaces in count).
 
+## Notes feature review minors (2026-10-22)
+
+- Note body cap counts bytes not runes (consistent with other limits; client
+  maxlength counts chars — CJK edge mismatch documented in api-notes).
+- No cap on notes per item (scale target: fine).
+- Fetch-in-flight at ItemsView unmount repopulates the cleared list (narrow
+  stale-flash window; needs request cancellation to fully fix).
