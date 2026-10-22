@@ -90,9 +90,11 @@ full image — as fallback.
 
 ### Serving & config
 
-Unchanged — thumbs are ordinary files behind the same owner-or-shared
-`/files/{key}` gate, inline image policy, nosniff. No new config knobs
-(fixed 480px; YAGNI).
+Thumbs are served by the existing `/files/{key}` route behind the same
+owner-or-shared gate — the gate query (`GetPhotoByKey`) matches
+`storage_key = key OR thumb_key = key` so a thumb key resolves to its
+item's owner/visibility. Inline image policy and nosniff are unchanged.
+No new config knobs (fixed 480px; YAGNI).
 
 ### New dependencies (both pure Go)
 
