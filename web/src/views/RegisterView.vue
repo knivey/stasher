@@ -9,7 +9,7 @@
       <input v-model="password" type="password" required autocomplete="new-password" placeholder="Password"
         class="w-full rounded-lg border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 px-3 py-2" />
       <input v-model="invite" type="text" placeholder="Invite code (if required)"
-        class="w-full rounded-lg border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 px-3 py-2"
+        class="w-full rounded-lg border dark:bg-slate-800 dark:text-slate-100 px-3 py-2"
         :class="inviteError ? 'border-red-500 dark:border-red-400' : 'border-slate-300 dark:border-slate-700'" />
       <p v-if="inviteError" class="text-sm text-red-600 dark:text-red-400">{{ inviteError }}</p>
       <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
