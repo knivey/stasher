@@ -2,6 +2,10 @@ package api
 
 import (
 	"bytes"
+	"context"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -138,6 +142,101 @@ func TestPhotoUploadAndServe(t *testing.T) {
 	}
 	if r := getURL(photo.StorageKey, owner); r.StatusCode != 404 {
 		t.Fatalf("deleted photo file get = %d, want 404", r.StatusCode)
+	}
+}
+
+// jpegBytes encodes a real w×h JPEG via image/jpeg, for tests that need
+// decodeable (or truncatable) photo bytes.
+func jpegBytes(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 0x80, A: 0xff})
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestUploadPhotoGeneratesThumb(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "thumbgen@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "widget"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	resp := postFile(t, ts, "/api/v1/items/"+fmtInt64(created.ID)+"/photos",
+		"file", "big.jpg", jpegBytes(t, 1200, 800), cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("upload = %d", resp.StatusCode)
+	}
+
+	photos, err := s.Queries().ListItemPhotos(context.Background(), created.ID)
+	if err != nil || len(photos) != 1 {
+		t.Fatalf("photos: %v %d", err, len(photos))
+	}
+	if !photos[0].ThumbKey.Valid || photos[0].ThumbKey.String == "" {
+		t.Fatal("thumb_key not set on upload")
+	}
+	if photos[0].ThumbKey.String == photos[0].StorageKey {
+		t.Fatal("thumb_key must be a derived file, not the original")
+	}
+	tf, err := s.Storage().Open(photos[0].ThumbKey.String)
+	if err != nil {
+		t.Fatalf("thumb file missing: %v", err)
+	}
+	defer tf.Close()
+	cfg, _, err := image.DecodeConfig(tf)
+	if err != nil {
+		t.Fatalf("thumb undecodable: %v", err)
+	}
+	if cfg.Width > 480 || cfg.Height > 480 {
+		t.Fatalf("thumb %dx%d exceeds 480", cfg.Width, cfg.Height)
+	}
+}
+
+func TestUploadPhotoCorruptStillSavesOriginal(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "corrupt@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "corrupt"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	// Sniffable-as-jpeg bytes that fail full decode: a valid JPEG prefix
+	// followed by truncation.
+	full := jpegBytes(t, 100, 100)
+	trunc := full[:len(full)/2]
+	resp := postFile(t, ts, "/api/v1/items/"+fmtInt64(created.ID)+"/photos",
+		"file", "trunc.jpg", trunc, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("corrupt photo upload = %d, want 201", resp.StatusCode)
+	}
+
+	photos, err := s.Queries().ListItemPhotos(context.Background(), created.ID)
+	if err != nil || len(photos) != 1 {
+		t.Fatalf("photos: %v %d", err, len(photos))
+	}
+	// generation failure degrades to null thumb (lists COALESCE to original)
+	if photos[0].ThumbKey.Valid {
+		t.Fatalf("thumb_key = %q, want null", photos[0].ThumbKey.String)
+	}
+	// the original (corrupt-but-sniffable) file must still be stored
+	f, err := s.Storage().Open(photos[0].StorageKey)
+	if err != nil {
+		t.Fatalf("original missing after failed thumb generation: %v", err)
+	}
+	defer f.Close()
+	orig, err := io.ReadAll(f)
+	if err != nil || !bytes.Equal(orig, trunc) {
+		t.Fatalf("stored original mismatch: %v (%d vs %d bytes)", err, len(orig), len(trunc))
 	}
 }
 

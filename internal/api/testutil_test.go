@@ -33,6 +33,13 @@ func timeNow(t *testing.T) string {
 	return time.Now().UTC().Format(time.RFC3339)
 }
 
+// Queries exposes the query layer to tests (same package, but call sites
+// read like the public surface instead of poking unexported fields).
+func (s *Server) Queries() *db.Queries { return s.q }
+
+// Storage exposes the file storage to tests.
+func (s *Server) Storage() *files.Storage { return s.st }
+
 // lastUserID returns the highest user id (test convenience).
 func (s *Server) lastUserID(t *testing.T) int64 {
 	t.Helper()

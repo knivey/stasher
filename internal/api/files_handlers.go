@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"io"
+	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	dbpkg "stasher/internal/db"
 	"stasher/internal/files"
+	"stasher/internal/thumbs"
 )
 
 var allowedPhotoTypes = map[string]bool{
@@ -84,19 +86,38 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 			"photos must be jpeg, png, webp, or gif")
 		return
 	}
-	// re-feed the sniffed head, then the rest of the file from where the
-	// head-read left f positioned (Seek(0) here would duplicate the head)
-	key, _, err := s.st.Save(io.MultiReader(bytes.NewReader(head), f), extForMime(ct))
+	// buffer the rest (bounded by maxPhotoBytes) so the thumb generator can
+	// re-read the bytes
+	rest, err := io.ReadAll(f)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_upload", "bad multipart body or file too large")
+		return
+	}
+	buf := append(head, rest...)
+
+	key, _, err := s.st.Save(bytes.NewReader(buf), extForMime(ct))
 	if err != nil {
 		s.internalErr(w, err)
 		return
 	}
+
+	// derived thumbnail; failure degrades to null (lists COALESCE to original)
+	var thumbKey sql.NullString
+	if tb, ext, err := thumbs.Generate(buf); err != nil {
+		slog.Warn("thumb generation failed", "err", err)
+	} else if tkey, _, err := s.st.Save(bytes.NewReader(tb), ext); err != nil {
+		slog.Warn("thumb save failed", "err", err)
+	} else {
+		thumbKey = sql.NullString{String: tkey, Valid: true}
+	}
+
 	photo, err := s.q.AddItemPhoto(r.Context(), dbpkg.AddItemPhotoParams{
-		ItemID: item.ID, StorageKey: key, ThumbKey: sql.NullString{}, Caption: "", SortOrder: 0,
+		ItemID: item.ID, StorageKey: key, ThumbKey: thumbKey, Caption: "", SortOrder: 0,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
 		s.st.Delete(key)
+		s.st.Delete(thumbKey.String)
 		s.internalErr(w, err)
 		return
 	}
