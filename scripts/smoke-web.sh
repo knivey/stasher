@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-DATA=$(mktemp -d /tmp/opencode/stasher-smoke.XXXX)
+DATA=$(mktemp -d "${TMPDIR:-/tmp}/stasher-smoke.XXXX")
 STASHER_DATA_DIR="$DATA" STASHER_LISTEN_ADDR=127.0.0.1:18097 ./stasher &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; rm -rf "$DATA"' EXIT
