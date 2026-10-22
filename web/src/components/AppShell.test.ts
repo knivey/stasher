@@ -62,6 +62,19 @@ describe('AppShell navigation', () => {
   })
 })
 
+describe('AppShell theme toggle', () => {
+  it('renders toggles in mobile header and desktop sidebar; clicking adds dark to <html>', async () => {
+    localStorage.removeItem('stasher-theme')
+    document.documentElement.classList.remove('dark')
+    const { w } = await mountShell()
+    const toggles = w.findAll('button')
+      .filter(b => (b.attributes('aria-label') ?? '').startsWith('Switch to'))
+    expect(toggles.length).toBe(2) // one in the mobile header nav, one in the desktop aside
+    await toggles[0].trigger('click')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+  })
+})
+
 describe('AppShell logout', () => {
   it('toasts and still navigates to /login when the logout request fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network down') }))

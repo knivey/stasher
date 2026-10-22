@@ -12,6 +12,8 @@
         <div class="px-3 py-2 truncate">{{ auth.user?.display_name }}</div>
         <button class="w-full text-left rounded-lg px-3 py-2 hover:bg-slate-700" @click="logout">Sign out</button>
       </div>
+      <button @click="theme.toggle()" :aria-label="theme.isDark.value ? 'Switch to light theme' : 'Switch to dark theme'"
+        class="mt-auto inline-flex min-w-11 min-h-11 items-center justify-center rounded-lg hover:bg-slate-700">{{ theme.isDark.value ? '☀️' : '🌙' }}</button>
     </aside>
     <!-- mobile top bar + bottom nav. Settings/Shared/Trash live as compact
          icon-links in the top bar (Admin too, for admins) so every
@@ -31,6 +33,8 @@
           class="inline-flex min-w-11 min-h-11 items-center justify-center">⚙️</router-link>
         <router-link v-if="auth.user?.is_admin" to="/admin" aria-label="Admin" title="Admin"
           class="inline-flex min-w-11 min-h-11 items-center justify-center">🛡️</router-link>
+        <button @click="theme.toggle()" :aria-label="theme.isDark.value ? 'Switch to light theme' : 'Switch to dark theme'"
+          class="inline-flex min-w-11 min-h-11 items-center justify-center">{{ theme.isDark.value ? '☀️' : '🌙' }}</button>
         <button @click="logout">Sign out</button>
       </nav>
     </header>
@@ -48,8 +52,10 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { toast } from '../utils/toast'
+import { useTheme } from '../composables/theme'
 
 const auth = useAuthStore(), route = useRoute(), router = useRouter()
+const theme = useTheme()
 const nav = computed(() => {
   const base = [
     { to: '/', label: 'Dashboard' }, { to: '/items', label: 'Items' },
