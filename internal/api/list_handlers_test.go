@@ -15,11 +15,13 @@ import (
 	"stasher/internal/db"
 )
 
-func listItems(t *testing.T, ts *httptest.Server, cookie *http.Cookie, query string) (names []string, total int64) {
+// listByPath is THE list helper: GETs an arbitrary list path (/api/v1/…)
+// and returns the item names + total. listItems is its /items shorthand.
+func listByPath(t *testing.T, ts *httptest.Server, cookie *http.Cookie, path string) (names []string, total int64) {
 	t.Helper()
-	resp := doJSON(t, ts, "GET", "/api/v1/items"+query, nil, cookie)
+	resp := doJSON(t, ts, "GET", path, nil, cookie)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list %s = %d", query, resp.StatusCode)
+		t.Fatalf("GET %s = %d", path, resp.StatusCode)
 	}
 	var body struct {
 		Data []struct {
@@ -32,6 +34,11 @@ func listItems(t *testing.T, ts *httptest.Server, cookie *http.Cookie, query str
 		names = append(names, d.Name)
 	}
 	return names, body.Total
+}
+
+func listItems(t *testing.T, ts *httptest.Server, cookie *http.Cookie, query string) (names []string, total int64) {
+	t.Helper()
+	return listByPath(t, ts, cookie, "/api/v1/items"+query)
 }
 
 func TestItemListSearchAndFilters(t *testing.T) {
@@ -207,32 +214,12 @@ func TestSharedListSearchPartialMatch(t *testing.T) {
 	doJSON(t, ts, "POST", "/api/v1/items",
 		map[string]any{"name": "secret jig", "visibility": "private"}, alice)
 
-	if _, total := listItems2(t, ts, bob, "/api/v1/shared?q=widg"); total != 1 {
+	if _, total := listByPath(t, ts, bob, "/api/v1/shared?q=widg"); total != 1 {
 		t.Fatalf("shared q=widg (partial) -> %d matches, want 1", total)
 	}
-	if _, total := listItems2(t, ts, bob, "/api/v1/shared?q=abc"); total != 0 {
+	if _, total := listByPath(t, ts, bob, "/api/v1/shared?q=abc"); total != 0 {
 		t.Fatalf("shared q=abc -> %d matches, want 0", total)
 	}
-}
-
-// listItems2 is listItems for an arbitrary path (shared list has its own route).
-func listItems2(t *testing.T, ts *httptest.Server, cookie *http.Cookie, path string) (names []string, total int64) {
-	t.Helper()
-	resp := doJSON(t, ts, "GET", path, nil, cookie)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET %s = %d", path, resp.StatusCode)
-	}
-	var body struct {
-		Data []struct {
-			Name string `json:"name"`
-		} `json:"data"`
-		Total int64 `json:"total"`
-	}
-	decodeBody(t, resp, &body)
-	for _, d := range body.Data {
-		names = append(names, d.Name)
-	}
-	return names, body.Total
 }
 
 func TestItemListPaginationClamps(t *testing.T) {

@@ -180,10 +180,12 @@ Facts discovered by the frontend round, kept here so they survive:
 ## Item notes (2026-10-22)
 
 - `POST /api/v1/items/{id}/notes` `{body}` — owner only. The body is
-  **trimmed** and must be **1-2000 chars after the trim** (whitespace-only
-  = empty → `400 validation_error`, message `note must be 1-2000
-  characters`). 201 returns `{id, body, created_at}` with the TRIMMED body
-  and an RFC3339 UTC `created_at` set by the server.
+  **trimmed** and must be **1-2000 bytes after the trim** (the cap is
+  measured in BYTES, like the other length limits — a multibyte note hits
+  it sooner than 2000 characters; whitespace-only = empty → `400
+  validation_error`, message `note must be 1-2000 characters`). 201
+  returns `{id, body, created_at}` with the TRIMMED body and an RFC3339
+  UTC `created_at` set by the server.
 - `DELETE /api/v1/items/{id}/notes/{noteId}` — owner only. 204 on success;
   a non-numeric `noteId` → `400 invalid_id`; absent/foreign note → `404
   not_found` (execrows). No edit endpoint — notes are add + delete only.

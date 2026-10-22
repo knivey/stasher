@@ -609,6 +609,49 @@ func TestTrashRestoreSameSecondNoteOrder(t *testing.T) {
 	}
 }
 
+// TestTrashRestoreDisposedItem: a DISPOSED item (qty 0, flag set) trash+
+// restore round-trip must come back still disposed at qty 0 — restore's
+// disposed branch (snapshot Disposed -> UpdateItem disposed=1) has no
+// other coverage (api-notes "Flag rule": restore preserves the flag).
+func TestTrashRestoreDisposedItem(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "trash-disposed@test.dev", "longpassword1")
+	id := createQtyItem(t, ts, cookie, "e-waste", 5)
+	if resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/usage",
+		map[string]any{"kind": "disposed"}, cookie); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("dispose = %d", resp.StatusCode)
+	}
+
+	doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(id), nil, cookie)
+	entries, total := listTrash(t, ts, cookie)
+	if total != 1 || len(entries) != 1 {
+		t.Fatalf("trash = %d/%d, want 1/1", len(entries), total)
+	}
+	// the trash row already reflects the snapshot's qty 0
+	if entries[0].Qty != 0 {
+		t.Fatalf("trash row qty = %v, want 0", entries[0].Qty)
+	}
+	resp := doJSON(t, ts, "POST", "/api/v1/trash/"+fmtInt64(entries[0].ID)+"/restore", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("restore = %d", resp.StatusCode)
+	}
+	var restored struct {
+		ID       int64   `json:"id"`
+		Qty      float64 `json:"qty"`
+		Disposed bool    `json:"disposed"`
+	}
+	decodeBody(t, resp, &restored)
+	if restored.Qty != 0 || !restored.Disposed {
+		t.Fatalf("restored = qty %v disposed %v, want 0/true", restored.Qty, restored.Disposed)
+	}
+	// and a second dispose on the restored item is the idempotent 204 no-op
+	resp = doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(restored.ID)+"/usage",
+		map[string]any{"kind": "disposed"}, cookie)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("re-dispose of restored item = %d, want 204", resp.StatusCode)
+	}
+}
+
 // TestTrashRestorePreservesNotes: notes ride the trash snapshot and come
 // back on restore with their ORIGINAL created_at (ledger precedent); the
 // trash LISTING stays note-free (no notes payload in the row envelope).
