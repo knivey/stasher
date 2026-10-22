@@ -111,11 +111,15 @@ onMounted(async () => {
   }
 })
 
+// Focus target for "Save & add another": after the reset, typing continues
+// straight into Name without a click.
+const nameInput = ref<HTMLInputElement | null>(null)
+
 // Double-submit guard: one POST (+ queued uploads) per Save click. A second
 // click during the run would re-create the item and duplicate its uploads.
 const saving = ref(false)
 
-async function save() {
+async function save(again: boolean = false) {
   if (saving.value) return
   saving.value = true
   try {
@@ -142,7 +146,26 @@ async function save() {
       await drainPendingEncodes()
       await uploadQueued(created.id)
       toast('Saved', 'success')
-      router?.push(`/items/${created.id}`)
+      if (!again) {
+        router?.push(`/items/${created.id}`)
+        return
+      }
+      // "Save & add another": reset for the next item, keeping the location.
+      // The queues clear only now — uploadQueued above has flushed them.
+      form.name = ''
+      form.description = ''
+      form.qty = 1
+      form.unit = ''
+      form.visibility = useAuthStore().user?.default_item_visibility ?? 'private'
+      form.tags = []
+      initial = snapshot()
+      initialTags = []
+      queuedPhotos.value = []
+      queuedDocs.value = []
+      // replace, not push: no history entry per item, and a reload keeps the
+      // location prefill via applyLocationPrefill.
+      router?.replace(`/items/new${form.location_id ? `?location=${form.location_id}` : ''}`)
+      nameInput.value?.focus()
     }
   } catch (e) {
     toast((e as Error).message, 'error')
@@ -219,9 +242,9 @@ defineExpose({ form, save, tagsEqual })
 <template>
   <div class="max-w-xl space-y-4">
     <h1 class="text-2xl font-bold dark:text-slate-100">{{ editing ? 'Edit item' : 'New item' }}</h1>
-    <form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-4" @submit.prevent="save">
+    <form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-4" @submit.prevent="save(false)">
       <label class="block text-sm font-medium dark:text-slate-100">Name
-        <input v-model="form.name" required class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
+        <input ref="nameInput" v-model="form.name" required class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
       </label>
       <label class="block text-sm font-medium dark:text-slate-100">Description
         <textarea v-model="form.description" rows="3" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal"></textarea>
@@ -268,6 +291,12 @@ defineExpose({ form, save, tagsEqual })
       </div>
       <div class="flex justify-end gap-2">
         <button type="button" class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm" @click="cancel">Cancel</button>
+        <!-- Outlined sibling of Save's scheme; type="button" so Enter keeps
+             submitting via the form (@submit → save(false)). min-h-10 keeps a
+             40px tap target. Create mode only — edit navigates on save. -->
+        <button v-if="!editing" type="button" :disabled="saving" @click="save(true)"
+          class="rounded-lg min-h-10 border border-slate-900 dark:border-slate-100 text-slate-900 dark:text-slate-100 px-3 text-sm font-medium whitespace-nowrap disabled:opacity-50">
+          Save &amp; add another</button>
         <button type="submit" :disabled="saving"
           class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50">
           {{ saving ? 'Saving…' : 'Save' }}</button>

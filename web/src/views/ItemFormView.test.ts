@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import ItemFormView from './ItemFormView.vue'
+import { useAuthStore } from '../stores/auth'
 import { toasts } from '../utils/toast'
 
 beforeEach(() => { setActivePinia(createPinia()); vi.unstubAllGlobals(); vi.restoreAllMocks(); toasts.splice(0) })
@@ -292,6 +293,185 @@ describe('ItemFormView create', () => {
     await flushPromises()
     expect(posts).toBe(1) // still exactly one item POST
     expect(router.currentRoute.value.path).toBe('/items/42')
+  })
+})
+
+describe('ItemFormView save & add another', () => {
+  function newRouter(): Router {
+    return createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/items', component: { template: '<div>items</div>' } },
+        { path: '/items/new', component: ItemFormView },
+        { path: '/items/:id', component: { template: '<div>detail</div>' } },
+      ],
+    })
+  }
+
+  async function mountCreate(router: Router) {
+    await router.push('/items/new')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    return w
+  }
+
+  function againButton(w: { findAll: (s: string) => { text: () => string; attributes: (a: string) => unknown; trigger: (e: string) => Promise<void> }[] }) {
+    return w.findAll('button').find(b => b.text() === 'Save & add another')!
+  }
+
+  it('renders "Save & add another" in create mode only', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
+    const w = await mountCreate(newRouter())
+    expect(againButton(w)).toBeTruthy()
+
+    const item = { id: 9, name: 'Widget', description: 'd', qty: 2, unit: 'pcs', location_id: 3,
+      visibility: 'private', created_at: '', updated_at: '', tags: [], photos: [], documents: [], projects: [] }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url.includes('/locations')
+        ? new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+        : new Response(JSON.stringify(item), { status: 200 })))
+    const we = mount(ItemFormView, { props: { id: '9' } })
+    await flushPromises()
+    expect(we.findAll('button').some(b => b.text() === 'Save & add another')).toBe(false)
+  })
+
+  it('creates + uploads the queue, then resets the form but keeps the location; never pushes', async () => {
+    useAuthStore().user = { id: 1, email: 'a@b.c', display_name: 'A', default_item_visibility: 'shared', is_admin: false }
+    const uploads: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST')
+        return new Response(JSON.stringify({ id: 42 }), { status: 200 })
+      if (url.includes('/items/42/photos')) { uploads.push(url); return new Response(null, { status: 204 }) }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    const w = await mountCreate(router)
+    const pushSpy = vi.spyOn(router, 'push')
+    const replaceSpy = vi.spyOn(router, 'replace')
+    const vm = w.vm as any
+    vm.form.name = 'First'
+    vm.form.qty = 3
+    vm.form.tags = ['x']
+    vm.form.location_id = 7
+    vm.form.visibility = 'private' // differs from the user default: proves the reset re-reads the store
+
+    // queue one photo before saving
+    const ctx = { drawImage: vi.fn() }
+    const canvas = { width: 0, height: 0, getContext: () => ctx,
+      toBlob: (cb: (b: Blob) => void) => cb(new Blob(['j'], { type: 'image/jpeg' })) }
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 4000, height: 2000, close() {} }))
+    const realCreate = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) =>
+      tag === 'canvas' ? canvas as unknown as HTMLCanvasElement : realCreate(tag as keyof HTMLElementTagNameMap))
+    const big = new File(['x'], 'big.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(big, 'size', { value: 9_000_000 })
+    const photoInput = w.find('input[accept="image/*"]')
+    Object.defineProperty(photoInput.element, 'files', { value: [big] })
+    await photoInput.trigger('change')
+    await flushPromises()
+    expect(w.text()).toContain('1 photo, 0 documents will be added after saving')
+
+    await againButton(w).trigger('click')
+    await flushPromises()
+
+    expect(uploads).toEqual(['/api/v1/items/42/photos']) // upload ran with the created id
+    expect(toasts.some(t => t.message === 'Saved' && t.type === 'success')).toBe(true)
+    expect(vm.form.name).toBe('')
+    expect(vm.form.qty).toBe(1)
+    expect(vm.form.tags).toEqual([])
+    expect(vm.form.visibility).toBe('shared') // reset re-read the user default
+    expect(vm.form.location_id).toBe(7) // the whole point: the location is kept
+    expect(pushSpy).not.toHaveBeenCalled() // stays on the form for the next item
+    expect(replaceSpy).toHaveBeenCalledWith('/items/new?location=7')
+    expect(router.currentRoute.value.query.location).toBe('7')
+    expect(w.text()).not.toContain('will be added after saving') // queue cleared after upload
+  })
+
+  it('loops: two sequential clicks POST twice, the second with the retained location', async () => {
+    const bodies: any[] = []
+    let nextId = 42
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST') {
+        bodies.push(JSON.parse(init.body))
+        return new Response(JSON.stringify({ id: nextId++ }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    const w = await mountCreate(router)
+    const pushSpy = vi.spyOn(router, 'push')
+    const replaceSpy = vi.spyOn(router, 'replace')
+    const vm = w.vm as any
+    vm.form.name = 'First'
+    vm.form.location_id = 7
+    await againButton(w).trigger('click')
+    await flushPromises()
+    vm.form.name = 'Second'
+    await againButton(w).trigger('click')
+    await flushPromises()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).toMatchObject({ name: 'First', location_id: 7 })
+    expect(bodies[1]).toMatchObject({ name: 'Second', location_id: 7 })
+    expect(replaceSpy).toHaveBeenCalledTimes(2)
+    expect(replaceSpy).toHaveBeenCalledWith('/items/new?location=7')
+    expect(pushSpy).not.toHaveBeenCalled()
+  })
+
+  it('keeps the form intact and toasts the error when the POST fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST')
+        return new Response(JSON.stringify({ error: { code: 'internal', message: 'boom' } }), { status: 500 })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    const replaceSpy = vi.spyOn(router, 'replace')
+    const w = await mountCreate(router)
+    const vm = w.vm as any
+    vm.form.name = 'Precious'
+    vm.form.tags = ['keep']
+    vm.form.location_id = 7
+    await againButton(w).trigger('click')
+    await flushPromises()
+    expect(vm.form.name).toBe('Precious') // typing survives the failed save
+    expect(vm.form.tags).toEqual(['keep'])
+    expect(vm.form.location_id).toBe(7)
+    expect(replaceSpy).not.toHaveBeenCalled()
+    expect(toasts.some(t => t.message === 'boom' && t.type === 'error')).toBe(true)
+  })
+
+  it('replaces to bare /items/new when no location is set', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST')
+        return new Response(JSON.stringify({ id: 42 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    const replaceSpy = vi.spyOn(router, 'replace')
+    const w = await mountCreate(router)
+    ;(w.vm as any).form.name = 'Loose'
+    await againButton(w).trigger('click')
+    await flushPromises()
+    expect(replaceSpy).toHaveBeenCalledWith('/items/new')
+    expect(router.currentRoute.value.query.location).toBeUndefined()
+  })
+
+  it('disables both buttons while a save is in flight', async () => {
+    let releasePost!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST')
+        return new Promise<Response>(res => { releasePost = res })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const w = await mountCreate(newRouter())
+    ;(w.vm as any).form.name = 'Held'
+    const saving = (w.vm as any).save(true)
+    await flushPromises()
+    expect(againButton(w).attributes('disabled')).toBeDefined()
+    expect(w.find('button[type="submit"]').attributes('disabled')).toBeDefined()
+    releasePost(new Response(JSON.stringify({ id: 42 }), { status: 200 }))
+    await saving
+    await flushPromises()
+    expect(againButton(w).attributes('disabled')).toBeUndefined()
   })
 })
 
