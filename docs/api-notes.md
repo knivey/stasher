@@ -99,6 +99,54 @@ id) order) in one transaction. Always 204 (already-first is a no-op);
 thumbnail (thumb_key follows (sort_order, id)).
 ```
 
+## Bulk location generation (2026-10-22)
+
+`POST /api/v1/locations/bulk` — body:
+
+```json
+{ "name": "Cabinet", "parent_id": 0, "dims": [12, 6],
+  "structure": "flat", "naming": "compact", "prefix": "Bin" }
+```
+
+- Creates the root location plus generated sublocations in **one
+  transaction** — all or nothing. `201` returns the root location JSON
+  (same shape as `POST /locations`) plus `"children_created": <int>`.
+- Validation (all `400 validation_error`, specific messages) runs before
+  any write: `name` trimmed 1-200 chars; `dims` 1–3 entries, each 1–100,
+  product ≤ 1000; `structure` exactly `flat`|`nested`; `naming` exactly
+  `compact`|`verbose`; `prefix` trimmed ≤ 50 chars.
+- `parent_id` 0 or absent = root; a provided id must be yours (else 404).
+  A root-name collision under the parent is `409 location_exists`.
+- **flat**: every axis combination is a direct child of the new root,
+  dim0 iterating outermost so names sort naturally (A1, A2 … B1 …).
+  **nested**: one level per dimension; a node at depth d is parented to
+  its axes-0..d-1 node.
+- **Naming** — compact concatenates axis labels: dim0 uppercase
+  spreadsheet letters (1→A, 26→Z, 27→AA), dim1 numbers, dim2 lowercase
+  letters (a, b, … aa). Verbose space-joins `Row {i} Col {j} Bin {k}`.
+  A 1D config collapses to plain numbers (compact `1..N`) / `Slot 1..N`
+  (verbose). Examples: 2D `A1`, `B3`; 3D `A1c`; verbose `Row 3`,
+  `Row 3 Col 2`, `Row 3 Col 2 Bin 1`.
+- `prefix` prepends to **leaf names only** (with a space): `Bin A1`.
+  Nested intermediate levels stay unprefixed.
+
+## Layout copying (2026-10-22)
+
+`POST /api/v1/locations/{id}/copy-layout` — body
+`{ "name": "Cabinet copy", "parent_id": 0 }`.
+
+- Copies the source's ENTIRE subtree (names + shape only — **items and
+  notes are never copied**) under a NEW location in one transaction.
+  `201` returns the new location JSON + `"children_created": <int>`
+  (descendants copied, excluding the new root).
+- Source must be yours (else 404). `name` trimmed 1-200; `parent_id` 0
+  or absent = root, else must be yours (404). Copying a subtree INTO
+  itself is `400 validation_error`
+  (`cannot copy a location into its own subtree`) — the new parent may
+  not be the source or any descendant of it. Subtrees over 1000 nodes
+  (source + descendants) are rejected `400`. Root-name collision under
+  the parent is `409 location_exists`.
+
 ## Frontend notes
 
 Facts discovered by the frontend round, kept here so they survive:

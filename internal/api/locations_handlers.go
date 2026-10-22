@@ -3,7 +3,9 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -238,4 +240,244 @@ func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type bulkLocationReq struct {
+	Name      string `json:"name"`
+	ParentID  *int64 `json:"parent_id"` // 0 or absent = root
+	Dims      []int  `json:"dims"`
+	Structure string `json:"structure"`
+	Naming    string `json:"naming"`
+	Prefix    string `json:"prefix"`
+}
+
+// handleBulkCreateLocations creates a root location plus generated
+// sublocations in ONE transaction - all or nothing. Every validation runs
+// before the first write, so an invalid request leaves nothing behind.
+func (s *Server) handleBulkCreateLocations(w http.ResponseWriter, r *http.Request) {
+	u, _ := currentUser(r.Context())
+	var req bulkLocationReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || len(name) > 200 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "name must be 1-200 chars")
+		return
+	}
+	if len(req.Dims) < 1 || len(req.Dims) > 3 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "dims must contain 1 to 3 entries")
+		return
+	}
+	product := 1
+	for _, d := range req.Dims {
+		if d < 1 || d > 100 {
+			writeErr(w, http.StatusBadRequest, "validation_error", "each dim must be between 1 and 100")
+			return
+		}
+		product *= d
+	}
+	if product > 1000 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "product of dims must be at most 1000")
+		return
+	}
+	if req.Structure != "flat" && req.Structure != "nested" {
+		writeErr(w, http.StatusBadRequest, "validation_error", `structure must be "flat" or "nested"`)
+		return
+	}
+	if req.Naming != "compact" && req.Naming != "verbose" {
+		writeErr(w, http.StatusBadRequest, "validation_error", `naming must be "compact" or "verbose"`)
+		return
+	}
+	prefix := strings.TrimSpace(req.Prefix)
+	if len(prefix) > 50 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "prefix must be at most 50 chars")
+		return
+	}
+	parentID := req.ParentID
+	if parentID != nil && *parentID == 0 {
+		parentID = nil // 0 = root, same as absent
+	}
+	parent, ok := s.checkParent(w, r, u, parentID)
+	if !ok {
+		return
+	}
+	// app-logic uniqueness for the new root (mirrors handleCreateLocation)
+	if existing, err := s.q.GetLocationByName(r.Context(), dbpkg.GetLocationByNameParams{
+		UserID: u.ID, Name: name, ParentID: parent,
+	}); err == nil && existing.ID != 0 {
+		writeErr(w, http.StatusConflict, "location_exists",
+			"a location with this name already exists under this parent")
+		return
+	}
+
+	nodes := generateBulkLocations(req.Dims, req.Structure, req.Naming, prefix)
+	now := time.Now().UTC().Format(time.RFC3339) // one clock reading for root + children
+	tx, err := s.raw.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	defer tx.Rollback()
+	qtx := dbpkg.New(tx)
+	root, err := qtx.CreateLocation(r.Context(), dbpkg.CreateLocationParams{
+		UserID: u.ID, Name: name, ParentID: parent, Notes: "",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	created := map[string]int64{"": root.ID}
+	for _, n := range nodes {
+		child, err := qtx.CreateLocation(r.Context(), dbpkg.CreateLocationParams{
+			UserID: u.ID, Name: n.Name, ParentID: sqlNullInt64(created[n.Parent]),
+			Notes: "", CreatedAt: now, UpdatedAt: now,
+		})
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		created[n.Path] = child.ID
+	}
+	if err := tx.Commit(); err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	out := locationJSON(root)
+	out["children_created"] = len(nodes)
+	writeJSON(w, http.StatusCreated, out)
+}
+
+type copyLayoutReq struct {
+	Name     string `json:"name"`
+	ParentID *int64 `json:"parent_id"` // 0 or absent = root
+}
+
+// handleCopyLocationLayout duplicates a location's entire subtree (names
+// + shape only - items and notes never ride along) under a NEW location
+// in one transaction. The copy may not land inside the source's own
+// subtree.
+func (s *Server) handleCopyLocationLayout(w http.ResponseWriter, r *http.Request) {
+	u, _ := currentUser(r.Context())
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid location id")
+		return
+	}
+	var req copyLayoutReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	src, err := s.q.GetLocation(r.Context(), dbpkg.GetLocationParams{ID: id, UserID: u.ID})
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "location not found")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || len(name) > 200 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "name must be 1-200 chars")
+		return
+	}
+	parentID := req.ParentID
+	if parentID != nil && *parentID == 0 {
+		parentID = nil // 0 = root, same as absent
+	}
+	parent, ok := s.checkParent(w, r, u, parentID)
+	if !ok {
+		return
+	}
+	if parent.Valid { // a copy cannot land in the source's own subtree
+		desc, err := s.q.LocationDescendants(r.Context(), dbpkg.LocationDescendantsParams{
+			ID: id, UserID: u.ID, UserID_2: u.ID,
+		})
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		for _, d := range desc {
+			if d == parent.Int64 {
+				writeErr(w, http.StatusBadRequest, "validation_error",
+					"cannot copy a location into its own subtree")
+				return
+			}
+		}
+	}
+
+	// read the full tree once, then walk the source subtree in name order
+	locs, err := s.q.ListLocations(r.Context(), u.ID)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	sort.Slice(locs, func(i, j int) bool { return locs[i].Name < locs[j].Name })
+	childrenOf := make(map[int64][]dbpkg.Location, len(locs))
+	for _, l := range locs {
+		if l.ParentID.Valid {
+			childrenOf[l.ParentID.Int64] = append(childrenOf[l.ParentID.Int64], l)
+		}
+	}
+	type copyNode struct {
+		Name      string
+		SrcID     int64
+		SrcParent int64
+	}
+	plan := make([]copyNode, 0, len(childrenOf[src.ID]))
+	var walk func(parent int64)
+	walk = func(parent int64) { // pre-order: parents insert before children
+		for _, l := range childrenOf[parent] {
+			plan = append(plan, copyNode{Name: l.Name, SrcID: l.ID, SrcParent: parent})
+			walk(l.ID)
+		}
+	}
+	walk(src.ID)
+	if len(plan)+1 > 1000 { // subtree incl. the new root
+		writeErr(w, http.StatusBadRequest, "validation_error",
+			"cannot copy a subtree with more than 1000 locations")
+		return
+	}
+	// app-logic uniqueness for the new root (mirrors handleCreateLocation)
+	if existing, err := s.q.GetLocationByName(r.Context(), dbpkg.GetLocationByNameParams{
+		UserID: u.ID, Name: name, ParentID: parent,
+	}); err == nil && existing.ID != 0 {
+		writeErr(w, http.StatusConflict, "location_exists",
+			"a location with this name already exists under this parent")
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := s.raw.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	defer tx.Rollback()
+	qtx := dbpkg.New(tx)
+	root, err := qtx.CreateLocation(r.Context(), dbpkg.CreateLocationParams{
+		UserID: u.ID, Name: name, ParentID: parent, Notes: "",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	newID := map[int64]int64{src.ID: root.ID}
+	for _, n := range plan {
+		child, err := qtx.CreateLocation(r.Context(), dbpkg.CreateLocationParams{
+			UserID: u.ID, Name: n.Name, ParentID: sqlNullInt64(newID[n.SrcParent]),
+			Notes: "", CreatedAt: now, UpdatedAt: now,
+		})
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		newID[n.SrcID] = child.ID
+	}
+	if err := tx.Commit(); err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	out := locationJSON(root)
+	out["children_created"] = len(plan)
+	writeJSON(w, http.StatusCreated, out)
 }

@@ -66,9 +66,11 @@ func (s *Server) Router() chi.Router {
 
 			r.Get("/locations", s.handleListLocations)
 			r.Post("/locations", s.handleCreateLocation)
+			r.Post("/locations/bulk", s.handleBulkCreateLocations)
 			r.Get("/locations/{id}", s.handleGetLocation)
 			r.Patch("/locations/{id}", s.handleUpdateLocation)
 			r.Delete("/locations/{id}", s.handleDeleteLocation)
+			r.Post("/locations/{id}/copy-layout", s.handleCopyLocationLayout)
 
 			r.Get("/tags", s.handleListTags)
 			r.Post("/tags", s.handleCreateTag)
