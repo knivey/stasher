@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createMemoryHistory, createRouter, type Router } from 'vue-router'
+import { createPinia, setActivePinia } from 'pinia'
 import LocationsView from './LocationsView.vue'
 import type { Location } from '../api/types'
 import { toasts } from '../utils/toast'
+import { useItemsStore } from '../stores/items'
 
 const LOCATIONS = [
   { id: 1, name: 'House', parent_id: null, notes: '', created_at: '', updated_at: '' },
@@ -31,7 +33,7 @@ function mockFetch(opts: { postStatus?: number; postBody?: unknown; patchStatus?
   return calls
 }
 
-async function mountView(calls: Call[]) {
+async function mountViewWithRouter(calls: Call[]): Promise<{ w: ReturnType<typeof mount>; router: Router }> {
   // router so per-row router-links resolve to real anchors
   const router = createRouter({
     history: createMemoryHistory(),
@@ -40,10 +42,16 @@ async function mountView(calls: Call[]) {
   const w = mount(LocationsView, { global: { plugins: [router] } })
   await flushPromises()
   expect(calls.length).toBeGreaterThan(0) // initial list fetch happened
+  return { w, router }
+}
+
+async function mountView(calls: Call[]) {
+  const { w } = await mountViewWithRouter(calls)
   return w
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.unstubAllGlobals()
   toasts.splice(0, toasts.length)
 })
@@ -68,6 +76,45 @@ describe('LocationsView', () => {
     expect(links.map(l => l.attributes('href'))).toEqual([
       '/items/new?location=1', '/items/new?location=2', '/items/new?location=3',
     ])
+  })
+
+  it('hides "Duplicate layout…" on childless locations (House and Cabinet keep it, Bin loses it)', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    const dupes = w.findAll('[data-duplicate]')
+    expect(dupes).toHaveLength(2) // House (has Cabinet), Cabinet (has Bin); Bin is childless
+    // the duplicate controls belong to the two parents, not to Bin's row
+    const rowOf = (name: string) =>
+      w.findAll('li').find(li => li.find('[data-loc-name]').text() === name)!
+    expect(rowOf('House').find('[data-duplicate]').exists()).toBe(true)
+    expect(rowOf('Cabinet').find('[data-duplicate]').exists()).toBe(true)
+    expect(rowOf('Bin').find('[data-duplicate]').exists()).toBe(false)
+  })
+
+  it('clicking a location name seeds the items location filter and navigates to /items', async () => {
+    const calls = mockFetch()
+    const store = useItemsStore()
+    store.filters.page = 4 // the click must reset pagination
+    const { w, router } = await mountViewWithRouter(calls)
+    await w.findAll('[data-loc-name]')[1].trigger('click') // Cabinet, id 2
+    await flushPromises()
+    expect(store.filters.location_id).toBe(2)
+    expect(store.filters.page).toBe(1)
+    expect(router.currentRoute.value.path).toBe('/items')
+  })
+
+  it('the edit-mode name input never navigates or filters (the click target is gone)', async () => {
+    const calls = mockFetch()
+    const store = useItemsStore()
+    const { w, router } = await mountViewWithRouter(calls)
+    await w.findAll('[data-edit]')[2].trigger('click') // Bin enters edit mode
+    const input = w.find('[data-edit-name]')
+    expect(input.exists()).toBe(true)
+    expect(w.findAll('[data-loc-name]')).toHaveLength(2) // Bin's name button is replaced
+    await input.trigger('click')
+    await flushPromises()
+    expect(store.filters.location_id).toBe(0)
+    expect(router.currentRoute.value.path).toBe('/') // memory history starts at /
   })
 
   it('Add posts {name} without parent_id for a root location', async () => {
@@ -260,6 +307,75 @@ describe('LocationsView', () => {
     })
     expect(toasts.some(t => t.message === 'Created Shelves + 72 sublocations' && t.type === 'success')).toBe(true)
     expect(calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
+  })
+
+  // ---- custom verbose labels ----
+
+  it('label inputs render only for verbose naming, one per dimension, with default-word placeholders', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.find('[data-sub-mode]').setValue('generate')
+    expect(w.findAll('[data-gen-label]')).toHaveLength(0) // compact default
+    await w.find('input[type="radio"][value="verbose"]').setValue(true)
+    let inputs = w.findAll('[data-gen-label]')
+    expect(inputs).toHaveLength(2) // dims default [3, 3]
+    expect(inputs.map(i => i.attributes('placeholder'))).toEqual(['Row', 'Col'])
+    // 1D: the only axis defaults to "Slot"; 3D adds "Bin"
+    await w.find('[data-remove-dim]').trigger('click')
+    inputs = w.findAll('[data-gen-label]')
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0].attributes('placeholder')).toBe('Slot')
+    await w.find('[data-add-dim]').trigger('click')
+    await w.find('[data-add-dim]').trigger('click')
+    inputs = w.findAll('[data-gen-label]')
+    expect(inputs.map(i => i.attributes('placeholder'))).toEqual(['Row', 'Col', 'Bin'])
+  })
+
+  it('typing labels retargets the preview names (flat and nested)', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.find('[data-sub-mode]').setValue('generate')
+    await w.find('input[type="radio"][value="verbose"]').setValue(true)
+    const dims = w.findAll('[data-dim]')
+    await dims[0].setValue('2')
+    await dims[1].setValue('2')
+    let labels = w.findAll('[data-gen-label]')
+    await labels[0].setValue('Drawer')
+    await labels[1].setValue('Tray')
+    expect(w.find('[data-preview]').text())
+      .toContain('Drawer 1 Tray 1, Drawer 1 Tray 2, Drawer 2 Tray 1, Drawer 2 Tray 2')
+    // nested intermediates use their own axis word
+    await w.find('input[type="radio"][value="nested"]').setValue(true)
+    expect(w.findAll('[data-preview-tree-row]').map(r => r.text()))
+      .toEqual(['Drawer 1', 'Drawer 1 Tray 1', 'Drawer 1 Tray 2', 'Drawer 2', 'Drawer 2 Tray 1', 'Drawer 2 Tray 2'])
+  })
+
+  it('verbose posts trimmed labels; switching to compact hides the inputs and posts without labels', async () => {
+    const calls = mockFetch({ postBody: { children_created: 4 } })
+    const w = await mountView(calls)
+    await w.find('[data-add-name]').setValue('Toolbox')
+    await w.find('[data-sub-mode]').setValue('generate')
+    await w.find('input[type="radio"][value="verbose"]').setValue(true)
+    const dims = w.findAll('[data-dim]')
+    await dims[0].setValue('2')
+    await dims[1].setValue('2')
+    const labels = w.findAll('[data-gen-label]')
+    await labels[0].setValue('  Drawer  ') // trimmed before the POST
+    await labels[1].setValue('Tray')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    let post = calls.find(c => c.method === 'POST')
+    expect(JSON.parse(post!.body!).labels).toEqual(['Drawer', 'Tray'])
+
+    // back to compact: inputs disappear and the body carries no labels key
+    calls.length = 0
+    await w.find('[data-add-name]').setValue('Toolbox 2') // first POST cleared the field
+    await w.find('input[type="radio"][value="compact"]').setValue(true)
+    expect(w.findAll('[data-gen-label]')).toHaveLength(0)
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    post = calls.find(c => c.method === 'POST')
+    expect(JSON.parse(post!.body!)).not.toHaveProperty('labels')
   })
 
   it('copy mode picker lists depth-indented tree options', async () => {

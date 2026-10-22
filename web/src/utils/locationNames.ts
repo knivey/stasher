@@ -31,15 +31,26 @@ function compactAxisLabel(dim: number, i: number, single: boolean): string {
   return spreadsheetLetters(i, true)
 }
 
-function verboseAxisLabel(dim: number, i: number, single: boolean): string {
-  if (single) return `Slot ${i}`
-  const names = ['Row', 'Col', 'Bin']
-  return `${names[Math.min(dim, 2)]} ${i}`
+// Default label word for axis dim: "Slot" for a single-dimension
+// config's only axis, else "Row"/"Col"/"Bin" by position. Mirrors Go's
+// verboseAxisWord.
+export function defaultAxisLabel(dim: number, single: boolean): string {
+  if (single) return 'Slot'
+  return ['Row', 'Col', 'Bin'][Math.min(dim, 2)]
 }
 
-export function locationNodeName(indices: number[], naming: BulkNaming, single: boolean): string {
+// Verbose axis word: the per-axis custom label when present and
+// non-empty, else the default. labels is expected pre-trimmed; an empty
+// entry means "use the default".
+function verboseAxisLabel(dim: number, i: number, single: boolean, labels?: string[]): string {
+  const custom = labels?.[dim] ?? ''
+  const word = custom !== '' ? custom : defaultAxisLabel(dim, single)
+  return `${word} ${i}`
+}
+
+export function locationNodeName(indices: number[], naming: BulkNaming, single: boolean, labels?: string[]): string {
   const parts = indices.map((i, d) =>
-    naming === 'verbose' ? verboseAxisLabel(d, i, single) : compactAxisLabel(d, i, single))
+    naming === 'verbose' ? verboseAxisLabel(d, i, single, labels) : compactAxisLabel(d, i, single))
   return parts.join(naming === 'verbose' ? ' ' : '')
 }
 
@@ -47,8 +58,11 @@ function prefixedLeaf(name: string, prefix: string): string {
   return prefix ? `${prefix} ${name}` : name
 }
 
+// Mirrors the Go generator (internal/api/location_names.go): labels
+// (verbose naming only) replace the default per-axis word; empty entries
+// and undefined keep the defaults. Compact ignores labels entirely.
 export function generateBulkLocations(
-  dims: number[], structure: BulkStructure, naming: BulkNaming, prefix: string,
+  dims: number[], structure: BulkStructure, naming: BulkNaming, prefix: string, labels?: string[],
 ): BulkLocationNode[] {
   const single = dims.length === 1
   const out: BulkLocationNode[] = []
@@ -65,7 +79,7 @@ export function generateBulkLocations(
         rem = Math.floor(rem / dims[d])
       }
       out.push({
-        name: prefixedLeaf(locationNodeName(idx, naming, single), prefix),
+        name: prefixedLeaf(locationNodeName(idx, naming, single, labels), prefix),
         path: path.join('.'), parent: '', depth: dims.length,
       })
     }
@@ -77,7 +91,7 @@ export function generateBulkLocations(
     for (let i = 1; i <= dims[depth]; i++) {
       idx[depth] = i
       const path = parentPath ? `${parentPath}.${i}` : String(i)
-      let name = locationNodeName(idx.slice(0, depth + 1), naming, single)
+      let name = locationNodeName(idx.slice(0, depth + 1), naming, single, labels)
       if (leaf) name = prefixedLeaf(name, prefix)
       out.push({ name, path, parent: parentPath, depth: depth + 1 })
       if (!leaf) rec(depth + 1, path)
@@ -121,11 +135,11 @@ export interface BulkPreview {
 // names, whether any leaves are hidden beyond those five, and the full
 // node list for the indented tree preview.
 export function bulkPreview(
-  dims: number[], structure: BulkStructure, naming: BulkNaming, prefix: string,
+  dims: number[], structure: BulkStructure, naming: BulkNaming, prefix: string, labels?: string[],
 ): BulkPreview {
   const error = validateBulkDims(dims)
   if (error) return { count: 0, first: [], more: false, rows: [], error }
-  const nodes = generateBulkLocations(dims, structure, naming, prefix.trim())
+  const nodes = generateBulkLocations(dims, structure, naming, prefix.trim(), labels)
   const leaves = nodes.filter(n => n.depth === dims.length)
   return {
     count: nodes.length,

@@ -1,16 +1,31 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import type { ListResponse, Location } from '../api/types'
 import { toast } from '../utils/toast'
+import { useItemsStore } from '../stores/items'
 import { locationTreeRows, type LocationRow } from '../utils/locations'
-import { bulkPreview, type BulkNaming, type BulkStructure } from '../utils/locationNames'
+import { bulkPreview, defaultAxisLabel, type BulkNaming, type BulkStructure } from '../utils/locationNames'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import LocationSelect from '../components/LocationSelect.vue'
+
+const router = useRouter()
+const itemsStore = useItemsStore()
 
 const locations = ref<Location[]>([])
 // The tree indentation IS the hierarchy display here — no breadcrumb fetch.
 const rows = computed<LocationRow[]>(() => locationTreeRows(locations.value))
+
+// Which locations have sublocations — drives the per-row "Duplicate
+// layout…" action (copying an empty layout is pointless).
+const childCounts = computed(() => {
+  const counts = new Map<number, number>()
+  for (const l of locations.value) {
+    if (l.parent_id !== null) counts.set(l.parent_id, (counts.get(l.parent_id) ?? 0) + 1)
+  }
+  return counts
+})
 
 async function fetchLocations() {
   try {
@@ -38,10 +53,20 @@ const genDims = ref<number[]>([3, 3])
 const genStructure = ref<BulkStructure>('flat')
 const genNaming = ref<BulkNaming>('compact')
 const genPrefix = ref('')
+// One custom axis word per dimension (verbose naming only). Empty string
+// = "use the default" (Slot/Row/Col/Bin). Kept in lockstep with genDims
+// so adding/removing a dimension never leaves a stale label behind.
+const genLabels = ref<string[]>(['', ''])
 const copySource = ref(0)
+// Labels only exist in verbose mode; trimmed so the preview shows exactly
+// what the backend will receive (and the POST stays within 50 chars).
+const trimmedLabels = computed(() =>
+  genNaming.value === 'verbose'
+    ? genLabels.value.slice(0, genDims.value.length).map(l => l.trim())
+    : undefined)
 const preview = computed(() =>
   subMode.value === 'generate'
-    ? bulkPreview(genDims.value, genStructure.value, genNaming.value, genPrefix.value)
+    ? bulkPreview(genDims.value, genStructure.value, genNaming.value, genPrefix.value, trimmedLabels.value)
     : null)
 
 // The nested tree render is capped so a max-size grid (1000 nodes) can't
@@ -52,10 +77,16 @@ const previewTree = computed(() => preview.value?.rows.slice(0, PREVIEW_TREE_CAP
 const previewHidden = computed(() => Math.max(0, (preview.value?.rows.length ?? 0) - PREVIEW_TREE_CAP))
 
 function addDimension() {
-  if (genDims.value.length < 3) genDims.value.push(2)
+  if (genDims.value.length < 3) {
+    genDims.value.push(2)
+    genLabels.value.push('')
+  }
 }
 function removeDimension() {
-  if (genDims.value.length > 1) genDims.value.pop()
+  if (genDims.value.length > 1) {
+    genDims.value.pop()
+    genLabels.value.pop() // drop the extra label so the POST never trips the 400
+  }
 }
 
 // While copying, the new location's parent may not fall inside the
@@ -72,9 +103,14 @@ async function addLocation() {
   const name = addName.value.trim()
   try {
     if (subMode.value === 'generate') {
+      // Labels ride along only when verbose naming is on and the user
+      // typed at least one — compact with labels is a 400, and all-empty
+      // labels are just the defaults.
+      const postLabels = trimmedLabels.value?.some(l => l !== '') ? trimmedLabels.value : undefined
       const res = await api.post<{ children_created: number }>('/api/v1/locations/bulk', {
         name, dims: genDims.value, structure: genStructure.value,
         naming: genNaming.value, prefix: genPrefix.value.trim(),
+        ...(postLabels ? { labels: postLabels } : {}),
         ...(addParent.value ? { parent_id: addParent.value } : {}),
       })
       toast(`Created ${name} + ${res.children_created} sublocations`, 'success')
@@ -132,6 +168,16 @@ async function duplicateLayout() {
   } finally {
     duplicating.value = false
   }
+}
+
+// Clicking a location name is programmatic navigation with a store
+// mutation (the filterByTag pattern from ItemDetailView): seed the
+// shared items filter, then navigate. ItemsView's unmount reset runs
+// before this filter is applied, so the flow survives round trips.
+function filterByLocation(id: number) {
+  itemsStore.filters.location_id = id
+  itemsStore.filters.page = 1
+  router.push('/items')
 }
 
 // ---- Inline edit (rename + move + notes) ----
@@ -273,6 +319,16 @@ async function deleteLocation() {
           </p>
           <input v-model="genPrefix" data-gen-prefix maxlength="50" placeholder="Prefix (optional, leaves only)"
             class="w-full max-w-xs border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm" />
+          <!-- Custom axis words exist only in verbose naming (compact with
+               labels is a backend 400); the placeholder shows the default
+               word each empty label falls back to. -->
+          <div v-if="genNaming === 'verbose'" class="flex flex-wrap items-end gap-2">
+            <label v-for="(_, i) in genDims" :key="i" class="text-xs text-slate-500 dark:text-slate-400">Label {{ i + 1 }}
+              <input v-model="genLabels[i]" :data-gen-label="i" maxlength="50"
+                :placeholder="defaultAxisLabel(i, genDims.length === 1)"
+                class="mt-0.5 block w-24 border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1" />
+            </label>
+          </div>
           <p v-if="preview?.error" data-preview-error class="text-xs text-red-600 dark:text-red-400">{{ preview.error }}</p>
           <div v-else-if="preview" data-preview class="text-xs text-slate-500 dark:text-slate-400">
             <p v-if="genStructure === 'flat'">
@@ -305,14 +361,21 @@ async function deleteLocation() {
       <li v-for="r in rows" :key="r.loc.id" class="px-4 py-2">
         <div v-if="editingId !== r.loc.id" class="flex items-center justify-between gap-2">
           <div class="min-w-0">
-            <span data-loc-name class="font-medium dark:text-slate-100" :style="{ paddingLeft: r.depth * 1.5 + 'rem' }">{{ r.loc.name }}</span>
+            <!-- A real button (keyboard-focusable) styled like a link; it
+                 cannot fire in edit mode because this whole branch is
+                 replaced by the name input below. -->
+            <button data-loc-name type="button" @click="filterByLocation(r.loc.id)"
+              :style="{ paddingLeft: r.depth * 1.5 + 'rem' }"
+              class="font-medium dark:text-slate-100 hover:underline cursor-pointer text-left py-1.5"
+              :title="`Show items in ${r.loc.name}`">{{ r.loc.name }}</button>
             <p v-if="r.loc.notes" class="text-slate-500 dark:text-slate-400 whitespace-pre-wrap" :style="{ paddingLeft: r.depth * 1.5 + 'rem' }">{{ r.loc.notes }}</p>
           </div>
           <span class="flex gap-2 shrink-0">
             <router-link :to="`/items/new?location=${r.loc.id}`" data-add-item
               class="text-slate-600 dark:text-slate-300 hover:underline">Add item</router-link>
             <button data-edit class="text-slate-600 dark:text-slate-300 hover:underline" @click="startEdit(r)">Edit</button>
-            <button data-duplicate class="text-slate-600 dark:text-slate-300 hover:underline" @click="startDuplicate(r.loc)">Duplicate layout…</button>
+            <button v-if="(childCounts.get(r.loc.id) ?? 0) > 0" data-duplicate
+              class="text-slate-600 dark:text-slate-300 hover:underline" @click="startDuplicate(r.loc)">Duplicate layout…</button>
             <button data-delete class="text-red-600 dark:text-red-400 hover:underline" @click="deleteTarget = r.loc">Delete</button>
           </span>
         </div>

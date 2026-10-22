@@ -43,6 +43,14 @@ describe('locationNodeName', () => {
     expect(locationNodeName([2], 'compact', false)).toBe('B')
     expect(locationNodeName([2], 'verbose', false)).toBe('Row 2')
   })
+
+  it('custom labels replace the default words; empty falls back; compact ignores them', () => {
+    expect(locationNodeName([3], 'verbose', true, ['Drawer'])).toBe('Drawer 3')
+    expect(locationNodeName([3], 'verbose', true, [''])).toBe('Slot 3')
+    expect(locationNodeName([3, 2], 'verbose', false, ['Drawer', 'Tray'])).toBe('Drawer 3 Tray 2')
+    expect(locationNodeName([3, 2], 'verbose', false, ['', 'Tray'])).toBe('Row 3 Tray 2')
+    expect(locationNodeName([3, 2], 'compact', false, ['Drawer', 'Tray'])).toBe('C2')
+  })
 })
 
 describe('generateBulkLocations', () => {
@@ -71,6 +79,26 @@ describe('generateBulkLocations', () => {
   it('1d compact is plain numbers and verbose is Slot n', () => {
     expect(generateBulkLocations([3], 'flat', 'compact', '').map(n => n.name)).toEqual(['1', '2', '3'])
     expect(generateBulkLocations([3], 'flat', 'verbose', '').map(n => n.name)).toEqual(['Slot 1', 'Slot 2', 'Slot 3'])
+  })
+
+  it('custom labels flow through verbose names; empty falls back to the axis default', () => {
+    expect(generateBulkLocations([2, 2], 'flat', 'verbose', '', ['Drawer', 'Tray']).map(n => n.name))
+      .toEqual(['Drawer 1 Tray 1', 'Drawer 1 Tray 2', 'Drawer 2 Tray 1', 'Drawer 2 Tray 2'])
+    expect(generateBulkLocations([2, 2], 'flat', 'verbose', '', ['', 'Tray']).map(n => n.name))
+      .toEqual(['Row 1 Tray 1', 'Row 1 Tray 2', 'Row 2 Tray 1', 'Row 2 Tray 2'])
+    expect(generateBulkLocations([2], 'flat', 'verbose', '', ['Drawer']).map(n => n.name))
+      .toEqual(['Drawer 1', 'Drawer 2'])
+  })
+
+  it('nested verbose labels: intermediates use their own axis word', () => {
+    const got = generateBulkLocations([2, 2], 'nested', 'verbose', '', ['Drawer', 'Tray'])
+      .map(n => `${n.name}|${n.parent}`).join('; ')
+    expect(got).toBe('Drawer 1|; Drawer 1 Tray 1|1; Drawer 1 Tray 2|1; Drawer 2|; Drawer 2 Tray 1|2; Drawer 2 Tray 2|2')
+  })
+
+  it('compact output never contains the labels', () => {
+    expect(generateBulkLocations([2, 2], 'flat', 'compact', '', ['Drawer', 'Tray']).map(n => n.name))
+      .toEqual(['A1', 'A2', 'B1', 'B2'])
   })
 })
 
@@ -142,5 +170,14 @@ describe('bulkPreview', () => {
     const p = bulkPreview([100, 100], 'nested', 'compact', '')
     expect(p.error).toContain('1000')
     expect(p.rows).toEqual([])
+  })
+
+  it('preview reflects custom verbose labels', () => {
+    const p = bulkPreview([2, 2], 'flat', 'verbose', '', ['Drawer', 'Tray'])
+    expect(p.error).toBeNull()
+    expect(p.first).toEqual(['Drawer 1 Tray 1', 'Drawer 1 Tray 2', 'Drawer 2 Tray 1', 'Drawer 2 Tray 2'])
+    // labels never leak into a compact preview
+    expect(bulkPreview([2, 2], 'flat', 'compact', '', ['Drawer', 'Tray']).first)
+      .toEqual(['A1', 'A2', 'B1', 'B2'])
   })
 })
