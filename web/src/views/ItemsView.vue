@@ -98,6 +98,7 @@ onMounted(() => {
       <table class="hidden md:table w-full bg-white rounded-xl shadow text-sm">
         <thead>
           <tr class="text-left text-slate-500 border-b">
+            <th class="w-12 px-3 py-2"></th>
             <th class="px-3 py-2 font-medium">Name</th>
             <th class="px-3 py-2 font-medium">Qty</th>
             <th class="px-3 py-2 font-medium">Location</th>
@@ -108,6 +109,11 @@ onMounted(() => {
         </thead>
         <tbody class="divide-y">
           <tr v-for="i in store.items" :key="i.id" @click="router.push(`/items/${i.id}`)" class="cursor-pointer hover:bg-slate-50">
+            <td class="px-3 py-2">
+              <img v-if="i.thumb_key" :src="`/files/${i.thumb_key}`" loading="lazy" alt=""
+                class="w-10 h-10 object-cover rounded-lg" />
+              <span v-else class="text-slate-400">—</span>
+            </td>
             <td class="px-3 py-2"><router-link :to="`/items/${i.id}`" class="hover:underline">{{ i.name }}</router-link><span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 text-gray-500 px-1.5 py-0.5 text-xs align-middle">disposed</span></td>
             <td class="px-3 py-2">{{ i.qty }}{{ i.unit ? ` ${i.unit}` : '' }}</td>
             <td class="px-3 py-2">{{ i.location_id && locationName.get(i.location_id) || '—' }}</td>
