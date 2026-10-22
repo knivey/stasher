@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"io"
 	"log/slog"
@@ -319,6 +320,57 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	s.st.Delete(key)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// BackfillThumbs generates derived thumbnails for photos uploaded before
+// thumb generation existed. Safe to run repeatedly; per-photo failures are
+// logged and skipped (lists fall back to the original image).
+func (s *Server) BackfillThumbs(ctx context.Context) {
+	rows, err := s.q.ListPhotosMissingThumbs(ctx)
+	if err != nil {
+		slog.Error("thumb backfill: list failed", "err", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	slog.Info("thumb backfill started", "photos", len(rows))
+	done := 0
+	for _, p := range rows {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		f, err := s.st.Open(p.StorageKey)
+		if err != nil {
+			slog.Warn("thumb backfill: open failed", "photo", p.ID, "err", err)
+			continue
+		}
+		src, err := io.ReadAll(f)
+		f.Close()
+		if err != nil {
+			slog.Warn("thumb backfill: read failed", "photo", p.ID, "err", err)
+			continue
+		}
+		tb, ext, err := thumbs.Generate(src)
+		if err != nil {
+			slog.Warn("thumb backfill: generate failed", "photo", p.ID, "err", err)
+			continue
+		}
+		tkey, _, err := s.st.Save(bytes.NewReader(tb), ext)
+		if err != nil {
+			slog.Warn("thumb backfill: save failed", "photo", p.ID, "err", err)
+			continue
+		}
+		if err := s.q.SetItemPhotoThumb(ctx, dbpkg.SetItemPhotoThumbParams{
+			ThumbKey: sql.NullString{String: tkey, Valid: true}, ID: p.ID,
+		}); err != nil {
+			slog.Warn("thumb backfill: update failed", "photo", p.ID, "err", err)
+			s.st.Delete(tkey)
+			continue
+		}
+		done++
+	}
+	slog.Info("thumb backfill done", "generated", done, "skipped", len(rows)-done)
 }
 
 // isSafeInline reports whether ct may be rendered inline without scripting risk.

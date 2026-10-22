@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"image"
 	"image/color"
@@ -13,6 +14,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"stasher/internal/db"
 )
 
 // png1x1 is a minimal valid PNG (sniffs as image/png).
@@ -382,6 +385,161 @@ func TestDocumentUploadAndDelete(t *testing.T) {
 // TestDocumentActiveContentNotInline covers R15: a shared document that
 // sniffs as text/html must be served as a download, never rendered inline
 // on the app origin (stored-XSS guard).
+// TestBackfillThumbs: photos uploaded before thumb generation existed (row
+// with NULL thumb_key, real file on disk) get a derived thumbnail on the
+// startup backfill; a second run is a no-op.
+func TestBackfillThumbs(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "backfill@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "old photo item"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	// simulate a pre-migration photo: file on disk, row with NULL thumb
+	src := jpegBytes(t, 900, 700)
+	key, _, err := s.Storage().Save(bytes.NewReader(src), "jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Queries().AddItemPhoto(context.Background(), db.AddItemPhotoParams{
+		ItemID: created.ID, StorageKey: key, ThumbKey: sql.NullString{},
+		Caption: "", SortOrder: 0, CreatedAt: timeNow(t),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s.BackfillThumbs(context.Background())
+
+	photos, err := s.Queries().ListItemPhotos(context.Background(), created.ID)
+	if err != nil || len(photos) != 1 {
+		t.Fatalf("photos: %v %d", err, len(photos))
+	}
+	if !photos[0].ThumbKey.Valid || photos[0].ThumbKey.String == "" {
+		t.Fatal("backfill did not set thumb_key")
+	}
+	if photos[0].ThumbKey.String == photos[0].StorageKey {
+		t.Fatal("thumb_key must be a derived file, not the original")
+	}
+	tf, err := s.Storage().Open(photos[0].ThumbKey.String)
+	if err != nil {
+		t.Fatalf("thumb file missing: %v", err)
+	}
+	defer tf.Close()
+	cfg, _, err := image.DecodeConfig(tf)
+	if err != nil {
+		t.Fatalf("thumb undecodable: %v", err)
+	}
+	if cfg.Width > 480 || cfg.Height > 480 {
+		t.Fatalf("thumb %dx%d exceeds 480", cfg.Width, cfg.Height)
+	}
+
+	// second run is a no-op: nothing missing, thumb key unchanged
+	first := photos[0].ThumbKey.String
+	s.BackfillThumbs(context.Background())
+	missing, err := s.Queries().ListPhotosMissingThumbs(context.Background())
+	if err != nil || len(missing) != 0 {
+		t.Fatalf("missing after second run: %v %d", err, len(missing))
+	}
+	photos, _ = s.Queries().ListItemPhotos(context.Background(), created.ID)
+	if len(photos) != 1 || photos[0].ThumbKey.String != first {
+		t.Fatalf("second run changed thumb: %+v", photos)
+	}
+}
+
+// TestBackfillThumbsSkipsCorrupt: a photo whose stored bytes are undecodable
+// keeps its NULL thumb (lists COALESCE to the original), the run does not
+// panic, and other rows are still processed.
+func TestBackfillThumbsSkipsCorrupt(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "backfill-corrupt@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "mixed"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	addLegacyPhoto := func(content []byte) int64 {
+		t.Helper()
+		key, _, err := s.Storage().Save(bytes.NewReader(content), "jpg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := s.Queries().AddItemPhoto(context.Background(), db.AddItemPhotoParams{
+			ItemID: created.ID, StorageKey: key, ThumbKey: sql.NullString{},
+			Caption: "", SortOrder: 0, CreatedAt: timeNow(t),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.ID
+	}
+	// corrupt first (lower id: processed first, must not stop the loop)
+	badID := addLegacyPhoto([]byte("definitely not a jpeg, just garbage bytes"))
+	goodID := addLegacyPhoto(jpegBytes(t, 1200, 300))
+
+	s.BackfillThumbs(context.Background())
+
+	photos, err := s.Queries().ListItemPhotos(context.Background(), created.ID)
+	if err != nil || len(photos) != 2 {
+		t.Fatalf("photos: %v %d", err, len(photos))
+	}
+	byID := map[int64]db.ItemPhoto{}
+	for _, p := range photos {
+		byID[p.ID] = p
+	}
+	if byID[badID].ThumbKey.Valid {
+		t.Fatalf("corrupt photo got thumb_key %q, want NULL", byID[badID].ThumbKey.String)
+	}
+	if !byID[goodID].ThumbKey.Valid {
+		t.Fatal("corrupt row prevented processing of the good row")
+	}
+	// still true after another pass (idempotent skip, no panic)
+	s.BackfillThumbs(context.Background())
+	photos, _ = s.Queries().ListItemPhotos(context.Background(), created.ID)
+	for _, p := range photos {
+		if p.ID == badID && p.ThumbKey.Valid {
+			t.Fatal("corrupt photo gained a thumb on the second run")
+		}
+	}
+}
+
+// TestBackfillThumbsCanceledContext: a canceled context leaves rows untouched
+// (the backfill bails out instead of doing work or panicking).
+func TestBackfillThumbsCanceledContext(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "backfill-cancel@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "cancel"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	key, _, err := s.Storage().Save(bytes.NewReader(jpegBytes(t, 900, 700)), "jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Queries().AddItemPhoto(context.Background(), db.AddItemPhotoParams{
+		ItemID: created.ID, StorageKey: key, ThumbKey: sql.NullString{},
+		Caption: "", SortOrder: 0, CreatedAt: timeNow(t),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.BackfillThumbs(ctx)
+
+	photos, err := s.Queries().ListItemPhotos(context.Background(), created.ID)
+	if err != nil || len(photos) != 1 {
+		t.Fatalf("photos: %v %d", err, len(photos))
+	}
+	if photos[0].ThumbKey.Valid {
+		t.Fatal("canceled context must not produce thumbs")
+	}
+}
+
 func TestDocumentActiveContentNotInline(t *testing.T) {
 	_, ts := newTestServer(t, nil)
 	owner := registerUser(t, ts, "xsstest@test.dev", "longpassword1")

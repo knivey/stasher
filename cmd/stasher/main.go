@@ -94,6 +94,9 @@ func main() {
 		slog.Error("startup trash purge failed", "err", err)
 	}
 
+	// derive thumbnails for photos uploaded before thumb generation existed
+	go srv.BackfillThumbs(context.Background())
+
 	dist, err := fs.Sub(webfs.FS, "dist")
 	if err != nil {
 		fatal(err)
