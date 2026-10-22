@@ -75,7 +75,14 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 
 	head := make([]byte, 512)
-	n, _ := f.Read(head)
+	// io.ReadFull instead of a bare Read: one short read is fine (small
+	// files), but an actual read error must not silently produce a
+	// truncated sniff buffer
+	n, err := io.ReadFull(f, head)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		writeErr(w, http.StatusBadRequest, "invalid_upload", "bad multipart body or file too large")
+		return
+	}
 	head = head[:n]
 	if n == 0 {
 		writeErr(w, http.StatusBadRequest, "empty_file", "file is empty")
@@ -213,8 +220,14 @@ func (s *Server) handleDeletePhoto(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
-	s.st.Delete(key)
-	s.st.Delete(thumbKey) // no-op when the photo had no derived thumb
+	// row is already gone: a failed file delete only leaks bytes, so log
+	// and keep the 204 rather than 500ing on storage trouble
+	if err := s.st.Delete(key); err != nil {
+		slog.Warn("file delete failed", "key", key, "err", err)
+	}
+	if err := s.st.Delete(thumbKey); err != nil { // no-op when no derived thumb
+		slog.Warn("file delete failed", "key", thumbKey, "err", err)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -316,7 +329,13 @@ func (s *Server) handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 		ext = "bin"
 	}
 	head := make([]byte, 512)
-	n, _ := f.Read(head)
+	// same hardening as the photo path: short reads (small files) are
+	// fine, real read errors 400 instead of sniffing a truncated buffer
+	n, err := io.ReadFull(f, head)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		writeErr(w, http.StatusBadRequest, "invalid_upload", "bad multipart body or file too large")
+		return
+	}
 	if n == 0 {
 		writeErr(w, http.StatusBadRequest, "empty_file", "file is empty")
 		return
@@ -426,10 +445,16 @@ func (s *Server) BackfillThumbs(ctx context.Context) {
 			slog.Warn("thumb backfill: save failed", "photo", p.ID, "err", err)
 			continue
 		}
-		if err := s.q.SetItemPhotoThumb(ctx, dbpkg.SetItemPhotoThumbParams{
+		if n, err := s.q.SetItemPhotoThumb(ctx, dbpkg.SetItemPhotoThumbParams{
 			ThumbKey: sql.NullString{String: tkey, Valid: true}, ID: p.ID,
 		}); err != nil {
 			slog.Warn("thumb backfill: update failed", "photo", p.ID, "err", err)
+			s.st.Delete(tkey)
+			continue
+		} else if n == 0 {
+			// the photo row was cascade-deleted between the list and the
+			// update — don't orphan the just-saved thumb file
+			slog.Warn("thumb backfill: photo row vanished, discarding thumb", "photo", p.ID)
 			s.st.Delete(tkey)
 			continue
 		}

@@ -232,7 +232,9 @@ UPDATE item_photos SET caption = ?, sort_order = ? WHERE id = ? AND item_id = ?;
 -- name: DeleteItemPhoto :exec
 DELETE FROM item_photos WHERE id = ? AND item_id = ?;
 
--- name: SetItemPhotoThumb :exec
+-- name: SetItemPhotoThumb :execrows
+-- execrows so BackfillThumbs can detect a photo row that was
+-- cascade-deleted mid-loop (rows == 0) and avoid orphaning the thumb file.
 UPDATE item_photos SET thumb_key = ? WHERE id = ?;
 
 -- name: ListPhotosMissingThumbs :many

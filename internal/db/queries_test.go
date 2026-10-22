@@ -153,3 +153,47 @@ func TestUserSessionInviteQueries(t *testing.T) {
 		t.Fatalf("invite = %+v err=%v", gotInv, err)
 	}
 }
+
+// TestSetItemPhotoThumbRowsAffected pins the :execrows contract the thumb
+// backfill's orphan guard relies on: the update reports HOW MANY rows it
+// touched, so a photo row cascade-deleted mid-backfill surfaces as
+// rows == 0 (no error) and the caller can avoid orphaning the thumb file.
+func TestSetItemPhotoThumbRowsAffected(t *testing.T) {
+	d := newMigratedTestDB(t)
+	q := New(d)
+	ctx := context.Background()
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// seed user -> item -> photo
+	u, err := q.CreateUser(ctx, CreateUserParams{
+		Email: "thumb@b.c", PasswordHash: "h", DisplayName: "A",
+		DefaultItemVisibility: "private", CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := q.CreateItem(ctx, CreateItemParams{
+		UserID: u.ID, Name: "x", Qty: 1, Visibility: "private",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	photo, err := q.AddItemPhoto(ctx, AddItemPhotoParams{
+		ItemID: item.ID, StorageKey: "2026/01/aaa.png", CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	set := sql.NullString{String: "2026/01/bbb.jpg", Valid: true}
+	n, err := q.SetItemPhotoThumb(ctx, SetItemPhotoThumbParams{ThumbKey: set, ID: photo.ID})
+	if err != nil || n != 1 {
+		t.Fatalf("SetItemPhotoThumb(existing) = %d, %v; want 1, nil", n, err)
+	}
+	// the actual guard case: a nonexistent (cascade-deleted) photo id
+	n, err = q.SetItemPhotoThumb(ctx, SetItemPhotoThumbParams{ThumbKey: set, ID: photo.ID + 1000})
+	if err != nil || n != 0 {
+		t.Fatalf("SetItemPhotoThumb(missing) = %d, %v; want 0, nil", n, err)
+	}
+}

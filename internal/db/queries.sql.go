@@ -2050,7 +2050,7 @@ func (q *Queries) ReparentChildren(ctx context.Context, arg ReparentChildrenPara
 	return err
 }
 
-const setItemPhotoThumb = `-- name: SetItemPhotoThumb :exec
+const setItemPhotoThumb = `-- name: SetItemPhotoThumb :execrows
 UPDATE item_photos SET thumb_key = ? WHERE id = ?
 `
 
@@ -2059,9 +2059,14 @@ type SetItemPhotoThumbParams struct {
 	ID       int64          `json:"id"`
 }
 
-func (q *Queries) SetItemPhotoThumb(ctx context.Context, arg SetItemPhotoThumbParams) error {
-	_, err := q.db.ExecContext(ctx, setItemPhotoThumb, arg.ThumbKey, arg.ID)
-	return err
+// execrows so BackfillThumbs can detect a photo row that was
+// cascade-deleted mid-loop (rows == 0) and avoid orphaning the thumb file.
+func (q *Queries) SetItemPhotoThumb(ctx context.Context, arg SetItemPhotoThumbParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setItemPhotoThumb, arg.ThumbKey, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setUserAdmin = `-- name: SetUserAdmin :exec
