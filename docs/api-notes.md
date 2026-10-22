@@ -159,9 +159,14 @@ Facts discovered by the frontend round, kept here so they survive:
   `adjustment`. `delta` is required and non-zero for all kinds except
   `disposed`, which forces delta = −current qty, sets qty 0, and marks the
   item `disposed`. Resulting qty can never go below 0 (400). `project_id`
-  is optional and must be owned. 201 returns the entry.
+  is optional and must be owned. 201 returns the entry (with
+  `project_name` when a project is linked). **Dispose is idempotent**:
+  disposing an item that is already `disposed` at qty 0 is a no-op — 204,
+  no ledger entry, no item rewrite.
 - `GET /api/v1/items/{id}/usage` — paginated ledger, newest first; rows
-  `{id, delta, resulting_qty, kind, project_id, note, created_at}`.
+  `{id, delta, resulting_qty, kind, project_id, project_name, note,
+  created_at}`. `project_name` is the linked project's **current** name
+  (it follows renames) or `null` when the entry has no project.
 - **Auto-logging**: item create and copy write an initial `adjustment`
   entry (note `initial`); any PATCH that *changes* qty writes an
   `adjustment` entry (delta = new − old) in the same transaction. No-op

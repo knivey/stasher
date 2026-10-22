@@ -26,16 +26,17 @@ type usageReq struct {
 	ProjectID *int64   `json:"project_id"`
 }
 
-// ledgerEntryJSON shapes one item_ledger row; project_id is null when unset.
-func ledgerEntryJSON(e dbpkg.ItemLedger) map[string]any {
+// ledgerEntryJSON shapes one item_ledger row; project_id and project_name
+// are null when the entry is not linked to a project.
+func ledgerEntryJSON(e dbpkg.ItemLedger, projectName any) map[string]any {
 	var proj any
 	if e.ProjectID.Valid {
 		proj = e.ProjectID.Int64
 	}
 	return map[string]any{
 		"id": e.ID, "delta": e.Delta, "resulting_qty": e.ResultingQty,
-		"kind": e.Kind, "project_id": proj, "note": e.Note,
-		"created_at": e.CreatedAt,
+		"kind": e.Kind, "project_id": proj, "project_name": projectName,
+		"note": e.Note, "created_at": e.CreatedAt,
 	}
 }
 
@@ -76,12 +77,15 @@ func (s *Server) handleAddItemUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var proj sql.NullInt64
+	var projName any // JSON null unless a project is linked
 	if req.ProjectID != nil {
-		if _, err := s.q.GetProject(r.Context(), dbpkg.GetProjectParams{ID: *req.ProjectID, UserID: u.ID}); err != nil {
+		p, err := s.q.GetProject(r.Context(), dbpkg.GetProjectParams{ID: *req.ProjectID, UserID: u.ID})
+		if err != nil {
 			writeErr(w, http.StatusNotFound, "not_found", "project not found")
 			return
 		}
 		proj = sqlNullInt64(*req.ProjectID)
+		projName = p.Name
 	}
 	note := ""
 	if req.Note != nil {
@@ -105,6 +109,12 @@ func (s *Server) handleAddItemUsage(w http.ResponseWriter, r *http.Request) {
 	var delta, resulting float64
 	disposed := item.Disposed
 	if req.Kind == "disposed" {
+		// already fully disposed: idempotent no-op — no delta-0 ledger
+		// entry, no item rewrite (204)
+		if item.Disposed == 1 && item.Qty == 0 {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		// forced drain: delta = -current qty, resulting 0, flag set
 		delta = -item.Qty
 		resulting = 0
@@ -149,7 +159,7 @@ func (s *Server) handleAddItemUsage(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, ledgerEntryJSON(entry))
+	writeJSON(w, http.StatusCreated, ledgerEntryJSON(entry, projName))
 }
 
 // handleListItemUsage returns the item's ledger, newest first, in the
@@ -180,7 +190,7 @@ func (s *Server) handleListItemUsage(w http.ResponseWriter, r *http.Request) {
 			ID: row.ID, ItemID: row.ItemID, UserID: row.UserID, Delta: row.Delta,
 			ResultingQty: row.ResultingQty, Kind: row.Kind, ProjectID: row.ProjectID,
 			Note: row.Note, CreatedAt: row.CreatedAt,
-		}))
+		}, row.ProjectName))
 	}
 	if len(rows) > 0 {
 		total = rows[0].TotalCount

@@ -1270,8 +1270,9 @@ func (q *Queries) ListItemDocuments(ctx context.Context, itemID int64) ([]ItemDo
 }
 
 const listItemLedger = `-- name: ListItemLedger :many
-SELECT l.id, l.item_id, l.user_id, l.delta, l.resulting_qty, l.kind, l.project_id, l.note, l.created_at, count(*) OVER () AS total_count
+SELECT l.id, l.item_id, l.user_id, l.delta, l.resulting_qty, l.kind, l.project_id, l.note, l.created_at, NULLIF(p.name, '') AS project_name, count(*) OVER () AS total_count
 FROM item_ledger l
+LEFT JOIN projects p ON p.id = l.project_id
 WHERE l.item_id = ? AND l.user_id = ?
 ORDER BY l.id DESC
 LIMIT ? OFFSET ?
@@ -1294,9 +1295,14 @@ type ListItemLedgerRow struct {
 	ProjectID    sql.NullInt64 `json:"project_id"`
 	Note         string        `json:"note"`
 	CreatedAt    string        `json:"created_at"`
+	ProjectName  interface{}   `json:"project_name"`
 	TotalCount   int64         `json:"total_count"`
 }
 
+// p.name rides along via LEFT JOIN so the API can surface project_name
+// next to project_id; NULLIF keeps sqlc's nullability inference honest on
+// the LEFT JOIN miss (projects.name is NOT NULL, a bare p.name would be
+// inferred NOT NULL and the no-project NULL would fail to Scan).
 func (q *Queries) ListItemLedger(ctx context.Context, arg ListItemLedgerParams) ([]ListItemLedgerRow, error) {
 	rows, err := q.db.QueryContext(ctx, listItemLedger,
 		arg.ItemID,
@@ -1321,6 +1327,7 @@ func (q *Queries) ListItemLedger(ctx context.Context, arg ListItemLedgerParams) 
 			&i.ProjectID,
 			&i.Note,
 			&i.CreatedAt,
+			&i.ProjectName,
 			&i.TotalCount,
 		); err != nil {
 			return nil, err

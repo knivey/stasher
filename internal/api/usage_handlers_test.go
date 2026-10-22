@@ -30,6 +30,7 @@ type usageEntry struct {
 	ResultingQty float64 `json:"resulting_qty"`
 	Kind         string  `json:"kind"`
 	ProjectID    *int64  `json:"project_id"`
+	ProjectName  *string `json:"project_name"`
 	Note         string  `json:"note"`
 	CreatedAt    string  `json:"created_at"`
 }
@@ -46,6 +47,76 @@ func listUsage(t *testing.T, ts *httptest.Server, cookie *http.Cookie, itemID in
 	}
 	decodeBody(t, resp, &body)
 	return body.Data, body.Total
+}
+
+// TestDisposeAtZeroIdempotent: disposing an item that is ALREADY disposed
+// at qty 0 is a no-op — 204, no ledger entry, no item rewrite (previously
+// it wrote a delta-0 ledger entry every time).
+func TestDisposeAtZeroIdempotent(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "dispose-idem@test.dev", "longpassword1")
+	id := createQtyItem(t, ts, cookie, "dead battery", 5)
+
+	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/usage",
+		map[string]any{"kind": "disposed"}, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("first dispose = %d, want 201", resp.StatusCode)
+	}
+	_, total := listUsage(t, ts, cookie, id)
+	if total != 2 { // initial + disposed
+		t.Fatalf("ledger after first dispose = %d, want 2", total)
+	}
+
+	// second dispose at qty 0: 204 and the ledger must not grow
+	resp = doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/usage",
+		map[string]any{"kind": "disposed"}, cookie)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("second dispose = %d, want 204 no-op", resp.StatusCode)
+	}
+	entries, total := listUsage(t, ts, cookie, id)
+	if total != 2 || len(entries) != 2 {
+		t.Fatalf("ledger after repeat dispose = %d/%d, want 2/2 (no delta-0 entry)", total, len(entries))
+	}
+	// the item is untouched: still disposed, still qty 0
+	var d struct {
+		Qty      float64 `json:"qty"`
+		Disposed bool    `json:"disposed"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id), nil, cookie), &d)
+	if d.Qty != 0 || !d.Disposed {
+		t.Fatalf("after repeat dispose: qty=%v disposed=%v, want 0/true", d.Qty, d.Disposed)
+	}
+}
+
+// TestUsageRowsCarryProjectName: GET /items/{id}/usage rows include
+// project_name resolved from the ledger's project_id (null when unset).
+func TestUsageRowsCarryProjectName(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "usage-pname@test.dev", "longpassword1")
+
+	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "speaker repair"}, cookie)
+	var proj struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &proj)
+
+	id := createQtyItem(t, ts, cookie, "solder", 3)
+	if resp = doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/usage",
+		map[string]any{"kind": "used", "delta": -1, "project_id": proj.ID}, cookie); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("usage = %d", resp.StatusCode)
+	}
+
+	entries, _ := listUsage(t, ts, cookie, id)
+	if len(entries) != 2 {
+		t.Fatalf("usage rows = %d, want 2", len(entries))
+	}
+	linked, baseline := entries[0], entries[1]
+	if linked.ProjectID == nil || linked.ProjectName == nil || *linked.ProjectName != "speaker repair" {
+		t.Fatalf("linked row = %+v, want project_id + project_name \"speaker repair\"", linked)
+	}
+	if baseline.ProjectID != nil || baseline.ProjectName != nil {
+		t.Fatalf("baseline row = %+v, want null project_id AND null project_name", baseline)
+	}
 }
 
 func TestItemUsageLifecycle(t *testing.T) {

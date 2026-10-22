@@ -311,8 +311,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: ListItemLedger :many
-SELECT l.*, count(*) OVER () AS total_count
+-- p.name rides along via LEFT JOIN so the API can surface project_name
+-- next to project_id; NULLIF keeps sqlc's nullability inference honest on
+-- the LEFT JOIN miss (projects.name is NOT NULL, a bare p.name would be
+-- inferred NOT NULL and the no-project NULL would fail to Scan).
+SELECT l.*, NULLIF(p.name, '') AS project_name, count(*) OVER () AS total_count
 FROM item_ledger l
+LEFT JOIN projects p ON p.id = l.project_id
 WHERE l.item_id = ? AND l.user_id = ?
 ORDER BY l.id DESC
 LIMIT ? OFFSET ?;
