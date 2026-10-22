@@ -175,7 +175,9 @@ thumbnail (thumb_key follows (sort_order, id)).
   returns `{"moved": <n>}` where `moved` counts rows that actually
   matched — ids belonging to **other users or to no item are silently not
   counted**, never an error (the list view can pass a selection spanning
-  a filter change and only owned items move).
+  a filter change and only owned items move). Duplicate ids in
+  `item_ids` are harmless: the IN-list dedups and each matching row is
+  counted once.
 - Validation (all `400 validation_error`, specific messages, before any
   write): `item_ids` must have **1–200 entries**; each entry must be a
   **positive integer**; `location_id` is **REQUIRED** (an absent field

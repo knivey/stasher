@@ -79,7 +79,10 @@ async function moveSelected() {
       item_ids: [...selected.value],
       location_id: moveTarget.value,
     })
-    toast(`Moved ${res.moved} items`, 'success')
+    // server count, not selection size; a shortfall (stale selection: some
+    // ids vanished or belong to another user) is called out explicitly
+    const note = res.moved < selected.value.size ? ` (of ${selected.value.size} selected)` : ''
+    toast(`Moved ${res.moved} item${res.moved === 1 ? '' : 's'}${note}`, 'success')
     clearSelection()
     await fetch()
   } catch (e) {
@@ -192,7 +195,11 @@ function showPopup(key: string, name: string, el: EventTarget | null) {
     <div v-if="selected.size" data-selection-bar
       class="bg-white dark:bg-slate-800 rounded-xl shadow p-3 flex flex-wrap gap-2 items-center">
       <span data-selection-count class="text-sm font-medium dark:text-slate-100">{{ selected.size }} selected</span>
-      <LocationSelect v-model="moveTarget" :locations="locations" placeholder="Move to…" class="w-52" />
+      <!-- w-52 WRAPPER: the select's own w-full then bounds to it (a class
+           merged onto the root would fight w-full by stylesheet order) -->
+      <div class="w-52">
+        <LocationSelect v-model="moveTarget" :locations="locations" placeholder="Move to…" />
+      </div>
       <button data-move-btn :disabled="moving || moveTarget < 0 || overCap" @click="moveSelected"
         class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
         {{ moving ? 'Moving…' : 'Move' }}

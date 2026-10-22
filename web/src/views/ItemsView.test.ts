@@ -414,7 +414,9 @@ describe('ItemsView', () => {
   })
 
   it('Move POSTs the exact {item_ids, location_id} body, toasts success, refetches, clears selection', async () => {
-    const { w, calls } = await mountWithRouter()
+    // moved=1 while 2 are selected: pins that the toast reports the SERVER's
+    // count (plus the shortfall note), not a client-side selection count
+    const { w, calls } = await mountWithRouter(ITEMS3, { moveMoved: 1 })
     await w.findAll('[data-select-row]')[0].setValue(true) // id 1
     await w.findAll('[data-select-row]')[2].setValue(true) // id 3
     const bar = w.find('[data-selection-bar]')
@@ -426,7 +428,7 @@ describe('ItemsView', () => {
     const post = calls.find(c => c.method === 'POST' && c.url.includes('/items/bulk-move'))
     expect(post).toBeTruthy()
     expect(JSON.parse(post!.body!)).toEqual({ item_ids: [1, 3], location_id: 8 })
-    expect(toasts.some(t => t.message === 'Moved 2 items' && t.type === 'success')).toBe(true)
+    expect(toasts.some(t => t.message === 'Moved 1 item (of 2 selected)' && t.type === 'success')).toBe(true)
     expect(w.find('[data-selection-bar]').exists()).toBe(false) // selection cleared
     // refetched the list after the move (initial fetch + refetch)
     expect(calls.filter(c => c.method === 'GET' && c.url.includes('/items?')).length).toBe(2)
