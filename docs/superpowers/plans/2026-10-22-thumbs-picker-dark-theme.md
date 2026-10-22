@@ -275,11 +275,11 @@ func applyOrientation(img image.Image, o int) image.Image {
 	case 4:
 		return flipV(img)
 	case 5:
-		return rotate90(flipH(img))
+		return flipH(rotate90(img)) // transpose
 	case 6:
 		return rotate90(img)
 	case 7:
-		return rotate270(flipH(img))
+		return flipH(rotate270(img)) // anti-transpose
 	case 8:
 		return rotate270(img)
 	}
