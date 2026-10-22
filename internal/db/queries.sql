@@ -103,19 +103,24 @@ UPDATE items SET location_id = NULL, updated_at = ? WHERE location_id = ? AND us
 -- name: LocationDescendants :many
 -- CTE named "d" not "desc": DESC is a reserved SQLite keyword that breaks sqlc's
 -- analyzer; anchor columns are table-qualified for the same reason.
-WITH RECURSIVE d(id) AS (
-    SELECT locations.id FROM locations WHERE locations.id = ? AND locations.user_id = ?
+-- The depth column plus "d.depth < 50" in the recursive arm caps recursion
+-- if a parent cycle ever forms (defense-in-depth: the PATCH cycle check is
+-- what normally prevents cycles).
+WITH RECURSIVE d(id, depth) AS (
+    SELECT locations.id, 0 AS depth FROM locations WHERE locations.id = ? AND locations.user_id = ?
     UNION ALL
-    SELECT l.id FROM locations l JOIN d ON l.parent_id = d.id WHERE l.user_id = ?
+    SELECT l.id, d.depth + 1 FROM locations l JOIN d ON l.parent_id = d.id WHERE l.user_id = ? AND d.depth < 50
 ) SELECT id FROM d;
 
 -- name: LocationBreadcrumbs :many
+-- "up.depth < 50" caps recursion the same way LocationDescendants does
+-- (parent-cycle defense-in-depth).
 WITH RECURSIVE up(id, name, parent_id, depth) AS (
     SELECT locations.id, locations.name, locations.parent_id, 0 AS depth
     FROM locations WHERE locations.id = ? AND locations.user_id = ?
     UNION ALL
     SELECT l.id, l.name, l.parent_id, up.depth + 1
-    FROM locations l JOIN up ON l.id = up.parent_id WHERE l.user_id = ?
+    FROM locations l JOIN up ON l.id = up.parent_id WHERE l.user_id = ? AND up.depth < 50
 ) SELECT id, name, depth FROM up ORDER BY depth DESC;
 
 -- name: GetLocationByName :one

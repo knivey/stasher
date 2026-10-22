@@ -13,11 +13,20 @@ import (
 
 // Open opens the SQLite database at path and applies required pragmas.
 func Open(path string) (*sql.DB, error) {
-	d, err := sql.Open("sqlite", path)
+	// modernc.org/sqlite executes _pragma DSN values verbatim per connection,
+	// so every pooled connection starts with WAL + FK enforcement + a busy
+	// timeout (function-call pragma form avoids "=" escaping in the query
+	// string). The post-open loop below stays as a belt-and-suspenders
+	// re-apply (idempotent) and as the error-reporting path.
+	dsn := "file:" + path +
+		"?_pragma=journal_mode(WAL)" +
+		"&_pragma=foreign_keys(1)" +
+		"&_pragma=busy_timeout(5000)"
+	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
-	// modernc sqlite: set pragmas via DSN-free execution; single writer conn avoids SQLITE_BUSY.
+	// single writer conn avoids SQLITE_BUSY
 	d.SetMaxOpenConns(1)
 	for _, pragma := range []string{
 		"PRAGMA journal_mode=WAL;",
