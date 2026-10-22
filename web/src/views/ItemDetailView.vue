@@ -211,7 +211,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <img v-if="mainPhoto" :src="`/files/${mainPhoto.storage_key}`" alt="" data-hero
+    <img v-if="mainPhoto" :src="`/files/${mainPhoto.storage_key}`" :alt="item.name" data-hero
       class="w-full max-h-80 object-contain rounded-xl bg-slate-100 cursor-zoom-in"
       @click="heroZoom = true" />
     <div v-if="heroZoom" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" @click="heroZoom = false">

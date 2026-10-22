@@ -7,7 +7,7 @@
         <span v-if="i === 0" aria-label="Main photo" title="Main photo"
           class="absolute bottom-1 left-1 text-xs bg-slate-900/80 text-white rounded px-1 py-0.5">★</span>
         <button v-if="canEdit && i > 0" @click.stop="emit('main', p)" title="Make main" aria-label="Make main"
-          class="absolute bottom-1 right-1 bg-slate-900/80 text-white rounded px-1.5 py-0.5 text-xs min-w-9 min-h-9 inline-flex items-center justify-center">★</button>
+          class="absolute bottom-1 right-1 bg-slate-900/80 text-white rounded px-1.5 py-0.5 text-xs min-w-11 min-h-11 inline-flex items-center justify-center">★</button>
         <button v-if="canEdit" @click.stop="emit('delete', p)"
           class="absolute top-1 right-1 bg-red-600 text-white rounded px-1 text-xs opacity-100 md:opacity-0 md:group-hover:opacity-100">✕</button>
       </div>

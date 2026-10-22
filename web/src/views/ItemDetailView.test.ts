@@ -68,7 +68,11 @@ describe('ItemDetailView', () => {
     expect(w.text()).toContain('250 pcs')
     expect(w.text()).toContain('House › Cabinet › Bin')
     expect(w.text()).toContain('Shared')
-    expect(w.find('img').attributes('src')).toBe('/files/2026/10/abc.jpg')
+    // scope to the Photos section: the hero is the first img in the document,
+    // this test pins the gallery thumbnail
+    const photos = w.findAll('section').find(s => s.text().includes('Photos'))
+    expect(photos).toBeTruthy()
+    expect(photos!.find('img').attributes('src')).toBe('/files/2026/10/abc.jpg')
     const docLink = w.find('a[href="/files/2026/10/doc.pdf"]')
     expect(docLink.exists()).toBe(true)
     expect(docLink.attributes('target')).toBe('_blank')
@@ -89,10 +93,12 @@ describe('ItemDetailView', () => {
     expect(w.text()).not.toContain('›')
   })
 
-  it('opens the lightbox on photo click and closes it again', async () => {
+  it('opens the lightbox on gallery photo click and closes it again', async () => {
     vi.stubGlobal('fetch', okItemFetch())
     const { w } = await mountView()
-    await w.find('img').trigger('click')
+    // target the gallery thumbnail, not the hero (first img in the document)
+    const thumb = w.findAll('section').find(s => s.text().includes('Photos'))!.find('img')
+    await thumb.trigger('click')
     const overlay = w.find('.fixed.inset-0')
     expect(overlay.exists()).toBe(true)
     expect(overlay.find('img').attributes('src')).toBe('/files/2026/10/abc.jpg')
