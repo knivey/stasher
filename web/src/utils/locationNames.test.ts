@@ -121,4 +121,26 @@ describe('bulkPreview', () => {
     expect(p.first).toEqual([])
     expect(p.more).toBe(false)
   })
+
+  it('exposes every generated node as a row: flat leaves at depth 0', () => {
+    const p = bulkPreview([2, 2], 'flat', 'compact', '')
+    expect(p.rows).toEqual([
+      { name: 'A1', depth: 0 }, { name: 'A2', depth: 0 },
+      { name: 'B1', depth: 0 }, { name: 'B2', depth: 0 },
+    ])
+  })
+
+  it('exposes nested intermediates and leaves in creation order, 0-based depth', () => {
+    const p = bulkPreview([2, 2], 'nested', 'compact', '')
+    expect(p.rows).toEqual([
+      { name: 'A', depth: 0 }, { name: 'A1', depth: 1 }, { name: 'A2', depth: 1 },
+      { name: 'B', depth: 0 }, { name: 'B1', depth: 1 }, { name: 'B2', depth: 1 },
+    ])
+  })
+
+  it('preview rows are empty when the config is invalid', () => {
+    const p = bulkPreview([100, 100], 'nested', 'compact', '')
+    expect(p.error).toContain('1000')
+    expect(p.rows).toEqual([])
+  })
 })

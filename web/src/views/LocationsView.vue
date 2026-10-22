@@ -44,6 +44,13 @@ const preview = computed(() =>
     ? bulkPreview(genDims.value, genStructure.value, genNaming.value, genPrefix.value)
     : null)
 
+// The nested tree render is capped so a max-size grid (1000 nodes) can't
+// dump a wall of rows into the form; the remainder shows as one muted
+// "… and N more" line.
+const PREVIEW_TREE_CAP = 12
+const previewTree = computed(() => preview.value?.rows.slice(0, PREVIEW_TREE_CAP) ?? [])
+const previewHidden = computed(() => Math.max(0, (preview.value?.rows.length ?? 0) - PREVIEW_TREE_CAP))
+
 function addDimension() {
   if (genDims.value.length < 3) genDims.value.push(2)
 }
@@ -261,12 +268,25 @@ async function deleteLocation() {
               <label><input type="radio" value="verbose" v-model="genNaming" /> verbose (Row 1 Col 1)</label>
             </span>
           </div>
+          <p data-structure-hint class="text-xs text-slate-500 dark:text-slate-400">
+            flat: one level of children (A1, A2…) · nested: a level per dimension (A › A1 › A1a)
+          </p>
           <input v-model="genPrefix" data-gen-prefix maxlength="50" placeholder="Prefix (optional, leaves only)"
             class="w-full max-w-xs border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm" />
           <p v-if="preview?.error" data-preview-error class="text-xs text-red-600 dark:text-red-400">{{ preview.error }}</p>
-          <p v-else-if="preview" data-preview class="text-xs text-slate-500 dark:text-slate-400">
-            Will create {{ preview.count }} sublocations: {{ preview.first.join(', ') }}{{ preview.more ? ', …' : '' }}
-          </p>
+          <div v-else-if="preview" data-preview class="text-xs text-slate-500 dark:text-slate-400">
+            <p v-if="genStructure === 'flat'">
+              Will create {{ preview.count }} sublocations: {{ preview.first.join(', ') }}{{ preview.more ? ', …' : '' }}
+            </p>
+            <template v-else>
+              <p>Will create {{ preview.count }} sublocations (nested tree):</p>
+              <div v-for="(row, i) in previewTree" :key="i" data-preview-tree-row
+                :style="{ marginLeft: (row.depth * 16) + 'px' }">{{ row.name }}</div>
+              <p v-if="previewHidden > 0" data-preview-more class="text-slate-400 dark:text-slate-500">
+                … and {{ previewHidden }} more
+              </p>
+            </template>
+          </div>
         </div>
 
         <div v-else-if="subMode === 'copy'" data-sub-copy class="mt-2 space-y-1">

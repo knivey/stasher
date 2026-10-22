@@ -100,28 +100,40 @@ export function validateBulkDims(dims: number[]): string | null {
   return null
 }
 
+export interface BulkPreviewRow {
+  name: string
+  /** 0-based indent level for the tree render (flat leaves sit at 0) */
+  depth: number
+}
+
 export interface BulkPreview {
   count: number
   first: string[]
   /** more leaves exist than the (at most five) names shown */
   more: boolean
+  /** EVERY generated node in creation order — the nested tree render */
+  rows: BulkPreviewRow[]
   error: string | null
 }
 
 // Live-preview data: the total child count the backend will create
 // (nested mode includes intermediate levels), the first generated leaf
-// names, and whether any leaves are hidden beyond those five.
+// names, whether any leaves are hidden beyond those five, and the full
+// node list for the indented tree preview.
 export function bulkPreview(
   dims: number[], structure: BulkStructure, naming: BulkNaming, prefix: string,
 ): BulkPreview {
   const error = validateBulkDims(dims)
-  if (error) return { count: 0, first: [], more: false, error }
+  if (error) return { count: 0, first: [], more: false, rows: [], error }
   const nodes = generateBulkLocations(dims, structure, naming, prefix.trim())
   const leaves = nodes.filter(n => n.depth === dims.length)
   return {
     count: nodes.length,
     first: leaves.slice(0, 5).map(n => n.name),
     more: leaves.length > 5,
+    // Flat grids render as one line of sibling leaves; nested trees indent
+    // by dimension level, so shift the node's 1-based depth to 0-based.
+    rows: nodes.map(n => ({ name: n.name, depth: structure === 'flat' ? 0 : n.depth - 1 })),
     error: null,
   }
 }

@@ -149,7 +149,38 @@ describe('LocationsView', () => {
     expect(preview.text()).toContain('A1, A2, A3, A4, A5, …')
   })
 
-  it('nested size-1 dims list every leaf with no misleading ellipsis', async () => {
+  it('nested 2x2 compact preview renders a header plus an indented tree in creation order', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.find('[data-sub-mode]').setValue('generate')
+    await w.find('input[type="radio"][value="nested"]').setValue(true)
+    const dims = w.findAll('[data-dim]')
+    await dims[0].setValue('2')
+    await dims[1].setValue('2')
+    const preview = w.find('[data-preview]')
+    expect(preview.text()).toContain('Will create 6 sublocations (nested tree):')
+    const rows = w.findAll('[data-preview-tree-row]')
+    // parents first, then their children — one 16px indent level per dimension
+    expect(rows.map(r => r.text())).toEqual(['A', 'A1', 'A2', 'B', 'B1', 'B2'])
+    const margins = rows.map(r => (r.element as HTMLElement).style.marginLeft)
+    expect(margins).toEqual(['0px', '16px', '16px', '0px', '16px', '16px'])
+    expect(w.find('[data-preview-more]').exists()).toBe(false)
+  })
+
+  it('nested preview caps the tree at 12 rows with an "and N more" line', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.find('[data-sub-mode]').setValue('generate')
+    await w.find('input[type="radio"][value="nested"]').setValue(true)
+    const dims = w.findAll('[data-dim]')
+    await dims[0].setValue('5')
+    await dims[1].setValue('3') // 5 intermediates + 15 leaves = 20 rows
+    const rows = w.findAll('[data-preview-tree-row]')
+    expect(rows).toHaveLength(12)
+    expect(w.find('[data-preview-more]').text()).toContain('and 8 more')
+  })
+
+  it('nested size-1 dims show the full 12-row tree with no ellipsis', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
     await w.find('[data-sub-mode]').setValue('generate')
@@ -160,10 +191,24 @@ describe('LocationsView', () => {
     await dims[1].setValue('1')
     await dims[2].setValue('1')
     const preview = w.find('[data-preview]')
-    // 12 nodes total (4 per level) but only 4 leaves — none hidden
+    // 12 nodes total (4 per level) — all visible, nothing hidden
     expect(preview.text()).toContain('12 sublocations')
-    expect(preview.text()).toContain('A1a, B1a, C1a, D1a')
+    expect(w.findAll('[data-preview-tree-row]').map(r => r.text())).toEqual([
+      'A', 'A1', 'A1a', 'B', 'B1', 'B1a', 'C', 'C1', 'C1a', 'D', 'D1', 'D1a',
+    ])
+    expect(w.find('[data-preview-more]').exists()).toBe(false)
     expect(preview.text()).not.toContain('…')
+  })
+
+  it('shows a hint line spelling out the flat vs nested semantics', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.find('[data-sub-mode]').setValue('generate')
+    const hint = w.find('[data-structure-hint]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.classes()).toContain('text-xs')
+    expect(hint.text()).toContain('flat: one level of children')
+    expect(hint.text()).toContain('nested: a level per dimension')
   })
 
   it('mode switching shows and hides the right inputs', async () => {
