@@ -75,6 +75,16 @@ check, so:
 - Name collisions with *other users'* tags are invisible (tags are
   per-user) and never block a rename.
 
+## Photos: make-main (2026-10-22)
+
+```
+POST /items/{id}/photos/{photoId}/main — owner only. Renumbers the item's
+photos (sort_order 0..n-1, target first, others keep current (sort_order,
+id) order) in one transaction. Always 204 (already-first is a no-op);
+404 for foreign/absent item or photo. This changes which photo lists
+thumbnail (thumb_key follows (sort_order, id)).
+```
+
 ## Frontend notes
 
 Facts discovered by the frontend round, kept here so they survive:
@@ -114,7 +124,9 @@ Facts discovered by the frontend round, kept here so they survive:
   entries (and their files) on every call. Rows: `{id, name, qty,
   photo_count, thumb_key, trashed_at, purges_at}` — `purges_at` null means
   keep until manually purged (`trash_retention_days` config, default 30;
-  `0` disables auto-purge).
+  `0` disables auto-purge). Trash rows pick the snapshot's derived thumb
+  when present, falling back to the original storage_key for legacy
+  snapshots.
 - `POST /api/v1/trash/{id}/restore` — recreates the item under a NEW id
   (tags, photos/docs rows with the same storage keys, ledger in original
   order, project links and location only if still owned — vanished deps

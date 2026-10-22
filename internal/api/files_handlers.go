@@ -218,6 +218,71 @@ func (s *Server) handleDeletePhoto(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleMakePhotoMain makes the given photo the item's main photo (the one
+// lists thumbnail) by renumbering sort_order 0..n-1 with the target first,
+// in one transaction. Idempotent: already-first is a 204 no-op.
+func (s *Server) handleMakePhotoMain(w http.ResponseWriter, r *http.Request) {
+	u, _ := currentUser(r.Context())
+	item, ok := s.requireOwnedItem(w, r, u)
+	if !ok {
+		return
+	}
+	photoID, err := strconv.ParseInt(chi.URLParam(r, "photoId"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid photo id")
+		return
+	}
+	photos, err := s.q.ListItemPhotos(r.Context(), item.ID) // ordered (sort_order, id)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	idx := -1
+	for i := range photos {
+		if photos[i].ID == photoID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		writeErr(w, http.StatusNotFound, "not_found", "photo not found")
+		return
+	}
+
+	ordered := make([]dbpkg.ItemPhoto, 0, len(photos))
+	ordered = append(ordered, photos[idx])
+	for i := range photos {
+		if i != idx {
+			ordered = append(ordered, photos[i])
+		}
+	}
+
+	tx, err := s.raw.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	defer tx.Rollback()
+	qtx := s.q.WithTx(tx)
+	for i := range ordered {
+		if ordered[i].SortOrder == int64(i) {
+			continue
+		}
+		if err := qtx.UpdateItemPhoto(r.Context(), dbpkg.UpdateItemPhotoParams{
+			Caption: ordered[i].Caption, SortOrder: int64(i),
+			ID: ordered[i].ID, ItemID: item.ID,
+		}); err != nil {
+			s.internalErr(w, err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // sanitizeFilename keeps only the base name and safe characters.
 func sanitizeFilename(name string) string {
 	name = path.Base(strings.ReplaceAll(name, "\\", "/"))

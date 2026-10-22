@@ -382,9 +382,6 @@ func TestDocumentUploadAndDelete(t *testing.T) {
 	}
 }
 
-// TestDocumentActiveContentNotInline covers R15: a shared document that
-// sniffs as text/html must be served as a download, never rendered inline
-// on the app origin (stored-XSS guard).
 // TestBackfillThumbs: photos uploaded before thumb generation existed (row
 // with NULL thumb_key, real file on disk) get a derived thumbnail on the
 // startup backfill; a second run is a no-op.
@@ -540,6 +537,9 @@ func TestBackfillThumbsCanceledContext(t *testing.T) {
 	}
 }
 
+// TestDocumentActiveContentNotInline covers R15: a shared document that
+// sniffs as text/html must be served as a download, never rendered inline
+// on the app origin (stored-XSS guard).
 func TestDocumentActiveContentNotInline(t *testing.T) {
 	_, ts := newTestServer(t, nil)
 	owner := registerUser(t, ts, "xsstest@test.dev", "longpassword1")
@@ -583,5 +583,210 @@ func TestDocumentActiveContentNotInline(t *testing.T) {
 	}
 	if cd := r.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment") {
 		t.Fatalf("content-disposition = %q, want attachment", cd)
+	}
+}
+
+// uploadPhotosWithOrders uploads n photos via the API and PATCHes each to
+// sort_order 0..n-1 in upload order (uploads all land at 0). Returns ids.
+func uploadPhotosWithOrders(t *testing.T, ts *httptest.Server, itemID int64, cookie *http.Cookie, n int) []int64 {
+	t.Helper()
+	var ids []int64
+	for i := 0; i < n; i++ {
+		resp := postFile(t, ts, "/api/v1/items/"+fmtInt64(itemID)+"/photos",
+			"file", "pic.jpg", jpegBytes(t, 600, 400), cookie)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("upload %d = %d", i, resp.StatusCode)
+		}
+		var ph struct {
+			ID int64 `json:"id"`
+		}
+		decodeBody(t, resp, &ph)
+		if r := doJSON(t, ts, "PATCH", "/api/v1/items/"+fmtInt64(itemID)+"/photos/"+fmtInt64(ph.ID),
+			map[string]any{"sort_order": i}, cookie); r.StatusCode != http.StatusOK {
+			t.Fatalf("patch sort %d = %d", i, r.StatusCode)
+		}
+		ids = append(ids, ph.ID)
+	}
+	return ids
+}
+
+// photoSortsByID returns the item's photos as id -> sort_order.
+func photoSortsByID(t *testing.T, s *Server, itemID int64) map[int64]int64 {
+	t.Helper()
+	photos, err := s.Queries().ListItemPhotos(context.Background(), itemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := make(map[int64]int64, len(photos))
+	for _, p := range photos {
+		m[p.ID] = p.SortOrder
+	}
+	return m
+}
+
+func TestMakePhotoMain(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "mainpick@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "pick me"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	ids := uploadPhotosWithOrders(t, ts, created.ID, cookie, 3) // A, B, C => 0, 1, 2
+	aID, bID, cID := ids[0], ids[1], ids[2]
+
+	if r := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(created.ID)+"/photos/"+fmtInt64(cID)+"/main",
+		nil, cookie); r.StatusCode != http.StatusNoContent {
+		t.Fatalf("make main = %d, want 204", r.StatusCode)
+	}
+
+	// the list thumbnail follows the new main photo: C's derived thumb
+	photos, err := s.Queries().ListItemPhotos(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cThumb := ""
+	for _, p := range photos {
+		if p.ID == cID {
+			cThumb = p.ThumbKey.String
+		}
+	}
+	if cThumb == "" {
+		t.Fatal("C has no derived thumb")
+	}
+	list := doJSON(t, ts, "GET", "/api/v1/items", nil, cookie)
+	var items struct {
+		Data []struct {
+			ThumbKey string `json:"thumb_key"`
+		} `json:"data"`
+	}
+	decodeBody(t, list, &items)
+	if len(items.Data) != 1 || items.Data[0].ThumbKey != cThumb {
+		t.Fatalf("list thumb_key = %+v, want C's derived thumb %q", items.Data, cThumb)
+	}
+
+	// detail photos: C, A, B with sort_order 0, 1, 2
+	detail := doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(created.ID), nil, cookie)
+	var det struct {
+		Photos []struct {
+			ID        int64 `json:"id"`
+			SortOrder int64 `json:"sort_order"`
+		} `json:"photos"`
+	}
+	decodeBody(t, detail, &det)
+	wantIDs := []int64{cID, aID, bID}
+	if len(det.Photos) != len(wantIDs) {
+		t.Fatalf("detail photos = %d, want %d", len(det.Photos), len(wantIDs))
+	}
+	for i, p := range det.Photos {
+		if p.ID != wantIDs[i] || p.SortOrder != int64(i) {
+			t.Fatalf("detail photos[%d] = {id %d, sort %d}, want {id %d, sort %d}",
+				i, p.ID, p.SortOrder, wantIDs[i], i)
+		}
+	}
+}
+
+func TestMakePhotoMainNoop(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "mainnoop@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "noop"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	ids := uploadPhotosWithOrders(t, ts, created.ID, cookie, 3) // A, B, C => 0, 1, 2
+
+	if r := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(created.ID)+"/photos/"+fmtInt64(ids[0])+"/main",
+		nil, cookie); r.StatusCode != http.StatusNoContent {
+		t.Fatalf("make main on already-first = %d, want 204", r.StatusCode)
+	}
+
+	// orders unchanged: UpdateItemPhoto never rewrote anything
+	got := photoSortsByID(t, s, created.ID)
+	for i, id := range ids {
+		if got[id] != int64(i) {
+			t.Fatalf("photo %d sort_order = %d, want %d (unchanged)", id, got[id], i)
+		}
+	}
+}
+
+func TestMakePhotoMainForeignPhoto(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "mainforeign@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "foreign"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(created.ID)+"/photos/999999/main",
+		nil, cookie)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("absent photo main = %d, want 404", resp.StatusCode)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeBody(t, resp, &body)
+	if body.Error.Code != "not_found" {
+		t.Fatalf("absent photo code = %q, want not_found", body.Error.Code)
+	}
+
+	// non-numeric photo id -> 400 invalid_id
+	resp = doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(created.ID)+"/photos/abc/main",
+		nil, cookie)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid photo id = %d, want 400", resp.StatusCode)
+	}
+	decodeBody(t, resp, &body)
+	if body.Error.Code != "invalid_id" {
+		t.Fatalf("invalid photo id code = %q, want invalid_id", body.Error.Code)
+	}
+}
+
+// TestMakePhotoMainDeterministicWithDuplicateSorts: three photos all at
+// sort_order 0 (inserted directly) renumber deterministically — the target
+// takes 0, the rest keep their (sort_order, id) order regardless of ties.
+func TestMakePhotoMainDeterministicWithDuplicateSorts(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "maindup@test.dev", "longpassword1")
+	item := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "dups"}, cookie)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, item, &created)
+
+	var ids []int64 // ascending ids: p1 < p2 < p3, all sort_order 0
+	for i := 0; i < 3; i++ {
+		key, _, err := s.Storage().Save(bytes.NewReader(jpegBytes(t, 600, 400)), "jpg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := s.Queries().AddItemPhoto(context.Background(), db.AddItemPhotoParams{
+			ItemID: created.ID, StorageKey: key, ThumbKey: sql.NullString{},
+			Caption: "", SortOrder: 0, CreatedAt: timeNow(t),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, p.ID)
+	}
+
+	// main on the LAST by id: target -> 0; p1, p2 keep (sort, id) order -> 1, 2
+	if r := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(created.ID)+"/photos/"+fmtInt64(ids[2])+"/main",
+		nil, cookie); r.StatusCode != http.StatusNoContent {
+		t.Fatalf("make main = %d, want 204", r.StatusCode)
+	}
+
+	got := photoSortsByID(t, s, created.ID)
+	want := map[int64]int64{ids[2]: 0, ids[0]: 1, ids[1]: 2}
+	for id, sort := range want {
+		if got[id] != sort {
+			t.Fatalf("photo %d sort_order = %d, want %d", id, got[id], sort)
+		}
 	}
 }
