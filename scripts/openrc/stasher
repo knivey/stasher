@@ -6,13 +6,14 @@ description="Stasher home inventory server"
 # Binary, config file, and the user:group the service runs as. The daemon
 # runs with `directory` as its working directory: a relative data_dir in the
 # config (default ./data) resolves against IT — not against the config
-# file's location. Keep directory in sync with the config path, or set an
-# absolute data_dir in stasher.yaml. Make sure the service user can write
-# to the data directory.
+# file's location. Set directory to the directory CONTAINING the binary and
+# config (the binary path minus the last component), or set an absolute
+# data_dir in stasher.yaml. Make sure the service user can write to the
+# data directory.
 command="/home/USERNAME/stasher"
 command_args="-config /home/USERNAME/stasher.yaml"
 command_user="stasher:stasher"
-directory="/home/USERNAME/stasher"
+directory="/home/USERNAME"
 # -------------------------------------------------------------------------
 
 supervisor=supervise-daemon

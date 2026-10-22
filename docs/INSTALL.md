@@ -100,7 +100,8 @@ So the service keeps running after you log out, enable lingering:
 ### OpenRC (Alpine)
 
 Uses `scripts/openrc/stasher`. Edit the clearly-marked `EDIT ME` block at
-the top (binary path, config path, run-as user), then install it:
+the top (binary path, working directory, config path, run-as user), then
+install it:
 
     chmod +x scripts/openrc/stasher
     cp scripts/openrc/stasher /etc/init.d/stasher
@@ -109,10 +110,11 @@ the top (binary path, config path, run-as user), then install it:
 
 The script's `directory=` line is the daemon's working directory: a
 relative `data_dir: "./data"` in `stasher.yaml` resolves against **it**,
-not the config file's location. Keep `directory` in sync with where
-Stasher is deployed, or set an absolute `data_dir` in `stasher.yaml` —
-otherwise the binary would try to create `/data` as the service user and
-fail to start.
+not the config file's location. Set `directory` to the directory
+containing the binary and config (mirroring the systemd unit's
+`WorkingDirectory=%h`; it must not be the binary path itself), or set an
+absolute `data_dir` in `stasher.yaml` — otherwise the binary would try to
+create `/data` as the service user and fail to start.
 
 Logs go to `/var/log/stasher.log` and `/var/log/stasher.err.log` (see the
 script). Status/restart: `rc-service stasher status|restart`.
