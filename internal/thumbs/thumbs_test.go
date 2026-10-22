@@ -76,7 +76,7 @@ func TestGenerateFormatMapping(t *testing.T) {
 			}
 			w, h := decodeDims(t, thumb, ext)
 			if w > 480 || h > 480 {
-				t.Fatalf("thumb %dxh exceeds 480 long side: %dx%d", w, h, w)
+				t.Fatalf("thumb %dx%d exceeds 480 long side: %dx%d", w, h, w, h)
 			}
 		})
 	}
@@ -103,6 +103,40 @@ func TestGenerateEXIFOrientation6(t *testing.T) {
 	}
 	if w, h := decodeDims(t, thumb, ext); w != 2 || h != 4 {
 		t.Fatalf("oriented thumb = %dx%d, want 2x4", w, h)
+	}
+}
+
+// A 2x1 image, red at (0,0) and blue at (1,0), distinguishes transpose
+// (orientation 5) from anti-transpose (orientation 7) by pixel color.
+func TestApplyOrientationTranspose(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 2, 1))
+	red := color.RGBA{R: 255, A: 255}
+	blue := color.RGBA{B: 255, A: 255}
+	src.Set(0, 0, red)
+	src.Set(1, 0, blue)
+
+	// Orientation 5 = transpose: 1 wide x 2 tall, red top, blue bottom.
+	o5 := applyOrientation(src, 5)
+	if b := o5.Bounds(); b.Dx() != 1 || b.Dy() != 2 {
+		t.Fatalf("orientation 5 bounds = %v, want 1x2", b)
+	}
+	assertPixel(t, o5, 0, 0, red)
+	assertPixel(t, o5, 0, 1, blue)
+
+	// Orientation 7 = anti-transpose: 1 wide x 2 tall, blue top, red bottom.
+	o7 := applyOrientation(src, 7)
+	if b := o7.Bounds(); b.Dx() != 1 || b.Dy() != 2 {
+		t.Fatalf("orientation 7 bounds = %v, want 1x2", b)
+	}
+	assertPixel(t, o7, 0, 0, blue)
+	assertPixel(t, o7, 0, 1, red)
+}
+
+func assertPixel(t *testing.T, img image.Image, x, y int, want color.RGBA) {
+	t.Helper()
+	got := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+	if got != want {
+		t.Fatalf("pixel (%d,%d) = %v, want %v", x, y, got, want)
 	}
 }
 
