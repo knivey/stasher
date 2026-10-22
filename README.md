@@ -23,6 +23,9 @@ documented example — copy to `stasher.yaml`, gitignored), env overrides
 `STASHER_*`
 (`LISTEN_ADDR`, `BASE_URL`, `DATA_DIR`, `REGISTRATION`, `LOG_LEVEL`).
 
+Deploying on Alpine, Debian or Arch — full install guide with Caddy TLS and
+systemd/OpenRC service files: [docs/INSTALL.md](docs/INSTALL.md).
+
 The first registered user becomes admin. In `registration: invite` mode the
 first user needs no invite code; afterwards admins create codes in the admin UI.
 

@@ -1,0 +1,18 @@
+[Unit]
+Description=Stasher home inventory server
+After=network.target
+
+[Service]
+# %h expands to the service user's home directory. Override ExecStart (and
+# the -config path) if the binary or config live elsewhere, e.g.
+#   ExecStart=/opt/stasher/stasher -config /etc/stasher/stasher.yaml
+# The data directory (SQLite DB + uploaded files) is resolved relative to
+# data_dir in the config file (default ./data, i.e. relative to
+# WorkingDirectory), or the STASHER_DATA_DIR environment variable.
+ExecStart=%h/stasher -config %h/stasher.yaml
+WorkingDirectory=%h
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
