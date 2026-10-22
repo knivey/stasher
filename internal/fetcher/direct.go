@@ -199,7 +199,11 @@ func suggestFilename(u *url.URL, cd string) string {
 		if i := strings.Index(cd, `filename="`); i >= 0 {
 			rest := cd[i+len(`filename="`):]
 			if j := strings.Index(rest, `"`); j > 0 {
-				return path.Base(rest[:j])
+				// same sanity filter as the URL branch: an empty/path-only
+				// basename is no filename — fall through to the URL
+				if base := path.Base(rest[:j]); base != "" && base != "/" && base != "." {
+					return base
+				}
 			}
 		}
 	}

@@ -201,6 +201,104 @@ func TestDirectFetchSizeCap(t *testing.T) {
 	}
 }
 
+func TestDirectFetchRejectsMixedResolution(t *testing.T) {
+	// Spec §2: a host with ANY non-public address among its A/AAAA answers
+	// is rejected before any dial — even if another answer is public.
+	eng := NewDirectEngine(PublicPolicy())
+	resolveCalls := 0
+	eng.resolve = func(ctx context.Context, host string) ([]net.IP, error) {
+		resolveCalls++
+		return []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("10.0.0.1")}, nil
+	}
+	var dialed []string
+	eng.dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		return nil, fmt.Errorf("blocked by test seam: %s", addr)
+	}
+	if _, err := eng.Fetch(context.Background(), "http://rebind.test/x.pdf"); err == nil {
+		t.Fatal("host with a private address among its answers was accepted")
+	}
+	if resolveCalls != 1 {
+		t.Fatalf("resolver called %d times, want 1", resolveCalls)
+	}
+	if len(dialed) != 0 {
+		t.Errorf("mixed-resolution host was dialed: %v", dialed)
+	}
+}
+
+func TestDirectFetchRedirectDialsFreshPinPerHop(t *testing.T) {
+	// Hop 1 (127.0.0.1) redirects to a DIFFERENT host (public IP literal)
+	// whose server really listens on loopback; the dial must use hop 2's
+	// freshly checked IP — never hop 1's.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("from B"))
+	}))
+	defer srv2.Close()
+	_, port2, err := net.SplitHostPort(srv2.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://93.184.216.34:"+port2+"/x", http.StatusFound)
+	}))
+	defer srv1.Close()
+
+	p := ipSetPolicy{allowed: map[string]bool{"127.0.0.1": true, "93.184.216.34": true}}
+	eng := NewDirectEngine(p)
+	var dialed []string
+	eng.dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		target := addr
+		if host == "93.184.216.34" {
+			// B's server really listens on loopback:port2
+			target = net.JoinHostPort("127.0.0.1", port)
+		}
+		var d net.Dialer
+		return d.DialContext(ctx, network, target)
+	}
+	res, err := eng.Fetch(context.Background(), srv1.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(res.Body) != "from B" {
+		t.Fatalf("body = %q, want hop 2's response", res.Body)
+	}
+	if len(dialed) != 2 {
+		t.Fatalf("dialed %v, want exactly one dial per hop", dialed)
+	}
+	if h, _, err := net.SplitHostPort(dialed[1]); err != nil || h != "93.184.216.34" {
+		t.Errorf("hop 2 dialed %q, want B's IP (stale pin?)", dialed[1])
+	}
+}
+
+func TestDirectFetchCDBasenameFallback(t *testing.T) {
+	// Useless Content-Disposition filenames fall through to the URL basename.
+	cases := []struct{ cd string }{
+		{`attachment; filename=""`},
+		{`attachment; filename="."`},
+	}
+	for _, tc := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/pdf")
+			w.Header().Set("Content-Disposition", tc.cd)
+			w.Write([]byte("%PDF-1.4 fb"))
+		}))
+		res, err := NewDirectEngine(LoopbackPolicy()).Fetch(context.Background(), srv.URL+"/manual.pdf")
+		srv.Close()
+		if err != nil {
+			t.Fatalf("%s: %v", tc.cd, err)
+		}
+		if res.Filename != "manual.pdf" {
+			t.Errorf("%s: filename = %q, want URL basename %q", tc.cd, res.Filename, "manual.pdf")
+		}
+	}
+}
+
 func hostIP(t *testing.T, srv *httptest.Server) string {
 	t.Helper()
 	host, _, err := net.SplitHostPort(srv.URL[len("http://"):])

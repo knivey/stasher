@@ -118,6 +118,17 @@ File references are to the state at commit `60c61fe`.
   preserved); ~~weak count pin in empty-trash test~~ **judged fine 2026-10-22**
   (page-1 leak surfaces in count).
 
+## External content (2026-10-22, task 1 review)
+
+- Per-hop 30s timeout: a 5-hop redirect chain can run ~3 minutes under the
+  direct engine's 30s-per-request client timeout. The job layer (task 2)
+  should impose an overall deadline on fetch jobs rather than relying on the
+  engine's per-request timeout.
+- SSRF policy rejects the spec-exact Global-Constraint list only; still
+  allowed (future hardening candidates): 0.0.0.0/8, 240.0.0.0/4 (reserved +
+  broadcast), and IPv4-compatible IPv6 ::/96. PublicPolicy is hard-coded, so
+  widening it is a one-place change when ruled on.
+
 ## Notes feature review minors (2026-10-22)
 
 - Note body cap counts bytes not runes (consistent with other limits; client
