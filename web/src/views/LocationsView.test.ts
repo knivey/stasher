@@ -234,9 +234,11 @@ describe('LocationsView', () => {
     const spacer = rowOf('Bin').find('[data-expand-spacer]')
     expect(spacer.exists()).toBe(true)
     expect(spacer.attributes('aria-hidden')).toBe('true')
-    // the spacer matches the chevron's 2rem column so names stay depth-aligned
+    // the spacer and the chevron share the same fixed 2rem column so names
+    // stay depth-aligned; the button keeps its ≥32px tap height
     expect(spacer.classes()).toContain('w-8')
-    expect(rowOf('House').find('[data-expand]').classes()).toContain('min-w-8')
+    expect(rowOf('House').find('[data-expand]').classes()).toContain('w-8')
+    expect(rowOf('House').find('[data-expand]').classes()).toContain('min-h-8')
   })
 
   it("flips the chevron's aria-expanded and label with the toggle", async () => {
@@ -285,6 +287,28 @@ describe('LocationsView', () => {
     // House was expanded by the add flow — Shelf is visible, Bin (under
     // still-collapsed Cabinet) stays hidden
     expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet', 'Shelf'])
+  })
+
+  it('adding a child under a deep parent expands the WHOLE ancestor chain so it appears', async () => {
+    const locs = [...LOCATIONS]
+    const calls = mockFetch({
+      locations: locs,
+      onPost: (url, body) => {
+        if (url !== '/api/v1/locations') return
+        const b = JSON.parse(body!) as { name: string; parent_id?: number }
+        locs.push({ id: 4, name: b.name, parent_id: b.parent_id ?? null, notes: '', created_at: '', updated_at: '' } as Location)
+      },
+    })
+    const w = await mountView(calls)
+    // fully collapsed: only House renders, Bin (depth 2) is selectable but hidden
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House'])
+    await w.find('[data-add-name]').setValue('Tray')
+    await w.find('form select[aria-label="Location"]').setValue('3') // Bin, two levels deep
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    // expanding only Bin (the direct parent) would leave it invisible behind
+    // collapsed House and Cabinet — the whole chain must reveal
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet', 'Bin', 'Tray'])
   })
 
   // ---- Sublocations section (bulk generation + layout copy) ----
@@ -586,6 +610,40 @@ describe('LocationsView', () => {
     await w.find('[role="dialog"]').find('[data-dup-confirm]').trigger('click')
     await flushPromises()
     expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet', 'Cabinet copy'])
+  })
+
+  it('duplicate layout under a deep parent expands the WHOLE ancestor chain so the copy appears', async () => {
+    const deep = [
+      { id: 1, name: 'Warehouse', parent_id: null, notes: '', created_at: '', updated_at: '' },
+      { id: 2, name: 'House', parent_id: 1, notes: '', created_at: '', updated_at: '' },
+      { id: 3, name: 'Cabinet', parent_id: 2, notes: '', created_at: '', updated_at: '' },
+      { id: 4, name: 'Bin', parent_id: 3, notes: '', created_at: '', updated_at: '' },
+    ] as Location[]
+    const locs = [...deep]
+    const calls = mockFetch({
+      locations: locs,
+      postBody: { children_created: 1 },
+      onPost: (url, body) => {
+        if (!url.endsWith('/copy-layout')) return
+        const b = JSON.parse(body!) as { name: string; parent_id: number }
+        locs.push({ id: 5, name: b.name, parent_id: b.parent_id || null, notes: '', created_at: '', updated_at: '' } as Location)
+      },
+    })
+    const w = await mountView(calls)
+    await expandAll(w) // reveal Cabinet (its Duplicate… button needs the chain open)
+    await w.findAll('[data-duplicate]')[2].trigger('click') // Cabinet — copy lands under House (depth 1)
+    // collapse EVERY node while the dialog is open (bottom-up, so each
+    // click's hidden chevrons are already cleared): only re-expanding the
+    // full ancestor chain (Warehouse AND House) can make the copy visible
+    for (;;) {
+      const open = w.findAll('[data-expand]').filter(b => b.attributes('aria-expanded') === 'true')
+      if (!open.length) break
+      await open[open.length - 1].trigger('click')
+    }
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['Warehouse'])
+    await w.find('[role="dialog"]').find('[data-dup-confirm]').trigger('click')
+    await flushPromises()
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['Warehouse', 'House', 'Cabinet', 'Cabinet copy'])
   })
 
   it('duplicate layout dialog closes on Escape without posting', async () => {

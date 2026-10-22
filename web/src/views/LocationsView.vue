@@ -28,6 +28,23 @@ function toggleExpand(id: number) {
   else expanded.value.add(id)
 }
 
+// Reveals a location and its WHOLE ancestor chain: every node from `id`
+// up to its root joins `expanded`. Expanding only the direct parent would
+// leave the chain above it collapsed — a row added under a depth ≥ 1
+// parent would stay invisible from the default collapsed state. The seen
+// set guards against a corrupt parent cycle looping forever (same
+// defensive stance as locationTreeRows).
+function expandAncestors(id: number) {
+  const byId = new Map(locations.value.map(l => [l.id, l]))
+  const seen = new Set<number>()
+  let cur: number | undefined = id
+  while (cur !== undefined && !seen.has(cur)) {
+    seen.add(cur)
+    expanded.value.add(cur)
+    cur = byId.get(cur)?.parent_id ?? undefined
+  }
+}
+
 // Which locations have sublocations — drives the per-row "Duplicate
 // layout…" action (copying an empty layout is pointless).
 const childCounts = computed(() => {
@@ -140,8 +157,9 @@ async function addLocation() {
     addError.value = ''
     genPrefix.value = ''
     // Reveal the new location: a non-root addition lands under addParent,
-    // so expand it to make the fresh child visible immediately.
-    if (addParent.value) expanded.value.add(addParent.value)
+    // so expand its whole ancestor chain — from the fully collapsed state,
+    // only the direct parent would leave the chain above it hidden.
+    if (addParent.value) expandAncestors(addParent.value)
     await fetchLocations()
   } catch (e) {
     // 409 location_exists lands here; show the backend message inline too.
@@ -176,8 +194,8 @@ async function duplicateLayout() {
     dupTarget.value = null
     toast(`Created ${name} + ${res.children_created} sublocations`, 'success')
     // The copy lands beside the target, under its parent — expand that
-    // parent so the new subtree is visible.
-    if (target.parent_id !== null) expanded.value.add(target.parent_id)
+    // parent's whole ancestor chain so the new subtree is visible.
+    if (target.parent_id !== null) expandAncestors(target.parent_id)
     await fetchLocations()
   } catch (e) {
     dupError.value = (e as Error).message
@@ -379,13 +397,14 @@ async function deleteLocation() {
         <div v-if="editingId !== r.loc.id" class="flex items-center justify-between gap-2">
           <div class="flex min-w-0 items-center">
             <!-- Chevron toggle on parents (real button, comfortable tap
-                 target); leaf rows keep a same-width spacer so names stay
-                 depth-aligned across levels. -->
+                 target, click stopped so no future row-level handler can
+                 couple to it); leaf rows keep a same-width fixed spacer so
+                 names stay depth-aligned across levels. -->
             <button v-if="(childCounts.get(r.loc.id) ?? 0) > 0" data-expand type="button"
               :aria-expanded="expanded.has(r.loc.id)"
               :aria-label="(expanded.has(r.loc.id) ? 'Collapse ' : 'Expand ') + r.loc.name"
-              class="shrink-0 min-w-8 min-h-8 inline-flex items-center justify-center rounded text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-              @click="toggleExpand(r.loc.id)">{{ expanded.has(r.loc.id) ? '▼' : '▶' }}</button>
+              class="shrink-0 w-8 min-h-8 inline-flex items-center justify-center rounded text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              @click.stop="toggleExpand(r.loc.id)">{{ expanded.has(r.loc.id) ? '▼' : '▶' }}</button>
             <span v-else data-expand-spacer aria-hidden="true" class="shrink-0 inline-block w-8"></span>
             <div class="min-w-0">
               <!-- A real button (keyboard-focusable) styled like a link; it
