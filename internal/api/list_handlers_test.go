@@ -145,6 +145,96 @@ func TestItemListSearchAndFilters(t *testing.T) {
 	}
 }
 
+// Partial-match search (migration 00005: items_fts trigram tokenizer).
+// Trigram matches substrings >= 3 chars, so q=raspb finds "raspberry pi"
+// (docs/api-notes.md "Search"). Under the old unicode61 tokenizer these
+// queries only matched whole whitespace-delimited tokens.
+func TestItemListSearchPartialMatch(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "partial@test.dev", "longpassword1")
+	mk := func(name, desc string) {
+		doJSON(t, ts, "POST", "/api/v1/items", map[string]any{
+			"name": name, "description": desc,
+		}, cookie)
+	}
+	mk("raspberry pi", "model b")
+	mk("cable", "braided USB-C lead")
+
+	// partial word in the name
+	if names, total := listItems(t, ts, cookie, "?q=raspb"); total != 1 || len(names) != 1 || names[0] != "raspberry pi" {
+		t.Fatalf("q=raspb (partial) -> %v (total %d)", names, total)
+	}
+	// partial word in the description
+	if _, total := listItems(t, ts, cookie, "?q=braid"); total != 1 {
+		t.Fatalf("q=braid (description partial) -> %d matches, want 1", total)
+	}
+	// matching stays case-insensitive (trigram folds case by default)
+	if names, _ := listItems(t, ts, cookie, "?q=RASP"); len(names) != 1 || names[0] != "raspberry pi" {
+		t.Fatalf("q=RASP (case-insensitive) -> %v", names)
+	}
+	// no substring match anywhere -> 200 with empty result
+	if _, total := listItems(t, ts, cookie, "?q=abc"); total != 0 {
+		t.Fatalf("q=abc -> %d matches, want 0", total)
+	}
+}
+
+// Short queries cannot form a trigram (3-char minimum). Standalone they
+// match nothing without erroring (driver-verified), but mixed queries
+// silently DROP the short token ("ab raspberry" -> behaves as "raspberry"),
+// so ftsHasShortToken short-circuits to a uniform empty result instead.
+// Pin: any query containing a <3-char term -> 200 + empty data, never 500.
+func TestItemListSearchShortQuery(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "shortq@test.dev", "longpassword1")
+	doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "raspberry pi"}, cookie)
+
+	for _, q := range []string{"ab", "PI", "a", "ab raspberry"} {
+		names, total := listItems(t, ts, cookie, "?q="+url.QueryEscape(q))
+		if total != 0 || len(names) != 0 {
+			t.Fatalf("q=%q -> %v (total %d), want 200 + empty (no >=3-char trigram)", q, names, total)
+		}
+	}
+}
+
+// Same trigram semantics on the shared browse path (separate sqlc query, same index).
+func TestSharedListSearchPartialMatch(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	alice := registerUser(t, ts, "shared-q-a@test.dev", "longpassword1")
+	bob := registerUser(t, ts, "shared-q-b@test.dev", "longpassword1")
+
+	doJSON(t, ts, "POST", "/api/v1/items",
+		map[string]any{"name": "public widget", "visibility": "shared"}, alice)
+	doJSON(t, ts, "POST", "/api/v1/items",
+		map[string]any{"name": "secret jig", "visibility": "private"}, alice)
+
+	if _, total := listItems2(t, ts, bob, "/api/v1/shared?q=widg"); total != 1 {
+		t.Fatalf("shared q=widg (partial) -> %d matches, want 1", total)
+	}
+	if _, total := listItems2(t, ts, bob, "/api/v1/shared?q=abc"); total != 0 {
+		t.Fatalf("shared q=abc -> %d matches, want 0", total)
+	}
+}
+
+// listItems2 is listItems for an arbitrary path (shared list has its own route).
+func listItems2(t *testing.T, ts *httptest.Server, cookie *http.Cookie, path string) (names []string, total int64) {
+	t.Helper()
+	resp := doJSON(t, ts, "GET", path, nil, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s = %d", path, resp.StatusCode)
+	}
+	var body struct {
+		Data []struct {
+			Name string `json:"name"`
+		} `json:"data"`
+		Total int64 `json:"total"`
+	}
+	decodeBody(t, resp, &body)
+	for _, d := range body.Data {
+		names = append(names, d.Name)
+	}
+	return names, body.Total
+}
+
 func TestItemListPaginationClamps(t *testing.T) {
 	_, ts := newTestServer(t, nil)
 	cookie := registerUser(t, ts, "page@test.dev", "longpassword1")

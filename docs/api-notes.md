@@ -39,6 +39,20 @@ Note the asymmetry: for an item's location you clear with `0`, not `null`.
   don't rely on a secondary ordering.
 - `GET /shared` has no `sort` param; it is always `updated_at DESC`.
 
+## Search (`q` on `GET /items` and `GET /shared`)
+
+- Since 2026-10-22 the search index uses SQLite FTS5's **trigram
+  tokenizer**: `q` terms are **substring matches** inside item names and
+  descriptions — `q=raspb` finds "raspberry pi". Matching is
+  case-insensitive (`q=RASP` works too). Multiple terms are AND-ed.
+- **A term must be at least 3 characters to match anything.** Shorter
+  terms cannot form a trigram: a query containing one returns an **empty
+  result** (200, `data: []`) — never an error, and the short term is not
+  silently ignored (`q=pi 5` matches nothing, it is not `q=5`).
+- FTS5 special characters in `q` (`"`, `AND`, `*`, parentheses, …) are
+  still safe: each term is quoted before it reaches MATCH, so they match
+  nothing rather than erroring or injecting operators.
+
 ## Pagination shape + clamps
 
 - `page` is 1-based (default 1, values < 1 or non-numeric → 1).

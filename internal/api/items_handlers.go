@@ -509,6 +509,12 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 	// phrases ("" would make items_fts MATCH '' an fts5 syntax error -> 500)
 	if raw := q.Get("q"); raw != "" {
 		if fq := ftsQuery(raw); fq != "" {
+			if ftsHasShortToken(raw) {
+				// trigram tokens need >= 3 chars; a shorter term can never
+				// match, so the documented result is an empty list
+				writeEmptyList(w)
+				return
+			}
 			f.q = &fq
 		}
 	}

@@ -32,8 +32,9 @@ File references are to the state at commit `60c61fe`.
   404. Documented in `docs/api-notes.md`; acceptable.
 - **`GET /items` empty page reports `total: 0`** — `count(*) OVER()` needs a
   row; page-1 reads are unaffected. Documented in api-notes; trash view clamps.
-- **FTS whole-token semantics** — `q=rasp` doesn't match "raspberry" without
-  `*`; consider prefix queries or frontend-side `*` appending.
+- ~~**FTS whole-token semantics** — `q=rasp` doesn't match "raspberry" without
+  `*`~~ — **done 2026-10-22** (trigram tokenizer, migration 00005: substring
+  matching for terms ≥ 3 chars; shorter terms return empty — see api-notes).
 - ~~qty_used unbounded~~ — **done 2026-10-22** (0..1e12 on add + patch,
   matching items.qty).
 

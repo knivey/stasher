@@ -22,6 +22,11 @@ func (s *Server) handleListShared(w http.ResponseWriter, r *http.Request) {
 	// phrases ("" would make items_fts MATCH '' an fts5 syntax error -> 500)
 	if raw := r.URL.Query().Get("q"); raw != "" {
 		if fq := ftsQuery(raw); fq != "" {
+			if ftsHasShortToken(raw) {
+				// trigram tokens need >= 3 chars; see handleListItems
+				writeEmptyList(w)
+				return
+			}
 			params.Q = sqlNullString(fq)
 		}
 	}
