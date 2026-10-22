@@ -57,11 +57,20 @@ onMounted(() => {
     .then(r => { tags.value = r.data }).catch(e => toast(e.message, 'error'))
 })
 
-// Desktop thumb hover preview: one fixed popup keyed off the hovered/focused
-// thumb, anchored top-right of the viewport. pointer-events-none so the
+// Desktop thumb hover preview: one fixed popup anchored to the hovered/focused
+// thumb itself — right of the thumb, flipping to its left when it would
+// overflow the viewport, top clamped onscreen. pointer-events-none so the
 // popup can never steal the hover that keeps it alive; focus/blur mirror
-// mouseenter/mouseleave for keyboard users.
-const hoverThumb = ref<{ key: string; name: string } | null>(null)
+// mouseenter/mouseleave for keyboard users (one showPopup code path for both).
+const hoverThumb = ref<{ key: string; name: string; left: number; top: number } | null>(null)
+
+function showPopup(key: string, name: string, el: EventTarget | null) {
+  const r = (el as HTMLElement | null)?.getBoundingClientRect()
+  if (!r) return
+  const rightOfThumb = r.left + r.width + 12
+  const left = rightOfThumb + 320 > window.innerWidth ? r.left - 332 : rightOfThumb
+  hoverThumb.value = { key, name, left, top: Math.max(r.top - 8, 8) }
+}
 </script>
 <template>
   <div class="space-y-4">
@@ -118,8 +127,8 @@ const hoverThumb = ref<{ key: string; name: string } | null>(null)
             <td class="px-3 py-2">
               <img v-if="i.thumb_key" :src="`/files/${i.thumb_key}`" loading="lazy" :alt="i.name" tabindex="0"
                 class="w-10 h-10 object-cover rounded-lg"
-                @mouseenter="hoverThumb = { key: i.thumb_key, name: i.name }" @mouseleave="hoverThumb = null"
-                @focus="hoverThumb = { key: i.thumb_key, name: i.name }" @blur="hoverThumb = null" />
+                @mouseenter="showPopup(i.thumb_key, i.name, $event.target)" @mouseleave="hoverThumb = null"
+                @focus="showPopup(i.thumb_key, i.name, $event.target)" @blur="hoverThumb = null" />
               <span v-else class="text-slate-400 dark:text-slate-500">—</span>
             </td>
             <td class="px-3 py-2"><router-link :to="`/items/${i.id}`" class="hover:underline">{{ i.name }}</router-link><span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 dark:bg-slate-700 text-gray-500 dark:text-slate-300 px-1.5 py-0.5 text-xs align-middle">disposed</span></td>
@@ -133,10 +142,12 @@ const hoverThumb = ref<{ key: string; name: string } | null>(null)
       </table>
 
       <!-- Hover preview of the desktop table thumb: fixed so it can't be
-           clipped by the table, desktop-only (the trigger is the md table). -->
+           clipped by the table, positioned next to the thumb (see showPopup),
+           desktop-only (the trigger is the md table). -->
       <div v-if="hoverThumb" data-thumb-popup
-        class="pointer-events-none fixed top-16 right-4 z-50 hidden md:block rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-1.5">
-        <img :src="`/files/${hoverThumb.key}`" :alt="hoverThumb.name" class="w-80 max-w-[80vw] rounded-lg" />
+        class="pointer-events-none fixed z-50 hidden md:block w-80 max-w-[80vw] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-1.5"
+        :style="{ left: `${hoverThumb.left}px`, top: `${hoverThumb.top}px` }">
+        <img :src="`/files/${hoverThumb.key}`" :alt="hoverThumb.name" class="w-full rounded-lg" />
       </div>
 
       <!-- mobile cards (<md) -->

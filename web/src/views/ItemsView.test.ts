@@ -82,7 +82,7 @@ describe('ItemsView', () => {
     expect(w.find('[data-thumb-popup]').exists()).toBe(false)
   })
 
-  it('keyboard focus on a desktop thumb shows the same popup; blur removes it', async () => {
+  it('keyboard focus on a desktop thumb shows the same popup (anchored + clamped); blur removes it', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
       if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
@@ -93,9 +93,43 @@ describe('ItemsView', () => {
     await flushPromises()
     const thumb = w.find('table img')
     await thumb.trigger('focus')
-    expect(w.find('[data-thumb-popup]').exists()).toBe(true)
+    const popup = w.find('[data-thumb-popup]')
+    expect(popup.exists()).toBe(true)
+    // same rect logic as hover; happy-dom default rect (0,0,0,0) → top clamps to 8
+    expect(popup.attributes('style')).toContain('left: 12px')
+    expect(popup.attributes('style')).toContain('top: 8px')
     await thumb.trigger('blur')
     expect(w.find('[data-thumb-popup]').exists()).toBe(false)
+  })
+
+  it('anchors the hover popup next to the hovered thumb, flipping left near the right edge', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [{ id: 5, name: 'M3 screws', qty: 250, photo_count: 2, thumb_key: '2026/10/abc.jpg' }], total: 1 }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    const w = mount(ItemsView)
+    await flushPromises()
+    const thumb = w.find('table img')
+
+    // normal case: popup sits to the right of the thumb (left + width + 12)
+    thumb.element.getBoundingClientRect = () => ({ left: 100, top: 50, width: 40, height: 40 } as DOMRect)
+    await thumb.trigger('mouseenter')
+    let popup = w.find('[data-thumb-popup]')
+    expect(popup.exists()).toBe(true)
+    expect(popup.attributes('style')).toContain('left: 152px') // 100 + 40 + 12
+    expect(popup.attributes('style')).toContain('top: 42px') // 50 - 8
+    await thumb.trigger('mouseleave')
+    expect(w.find('[data-thumb-popup]').exists()).toBe(false)
+
+    // near-right-edge: 900 + 40 + 12 + 320 > 1024 → flips to the left of the thumb
+    thumb.element.getBoundingClientRect = () => ({ left: 900, top: 50, width: 40, height: 40 } as DOMRect)
+    await thumb.trigger('mouseenter')
+    popup = w.find('[data-thumb-popup]')
+    expect(popup.exists()).toBe(true)
+    expect(popup.attributes('style')).toContain('left: 568px') // 900 - 332
+    await thumb.trigger('mouseleave')
   })
 
   it('shows an em-dash placeholder in the desktop table thumb cell when there is no thumb_key', async () => {

@@ -486,7 +486,7 @@ describe('ItemFormView widgets', () => {
         : new Response(JSON.stringify(item), { status: 200 })))
     const w = mount(ItemFormView, { props: { id: '9' } })
     await flushPromises()
-    const input = w.find('input[placeholder="Add tag…"]')
+    const input = w.find('input[aria-label="Add tag"]') // stable across placeholder copy changes
     const add = async (v: string) => { await input.setValue(v); await input.trigger('keydown', { key: 'Enter' }) }
     await add('  alpha ')
     await add('beta')

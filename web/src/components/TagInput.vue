@@ -1,12 +1,17 @@
 <template>
-  <div class="border dark:border-slate-700 rounded-lg px-2 py-1.5 flex flex-wrap gap-1 items-center bg-white dark:bg-slate-800 min-h-9">
-    <span v-for="t in tags" :key="t" class="bg-slate-100 dark:bg-slate-700 dark:text-slate-100 rounded-full px-2 py-0.5 text-sm flex items-center gap-1">
-      {{ t }}
-      <button type="button" class="text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400" :aria-label="`Remove tag ${t}`" @click="remove(t)">✕</button>
-    </span>
-    <input v-model="input" placeholder="Add tag…" aria-label="Add tag"
-      class="flex-1 min-w-24 outline-none text-sm dark:text-slate-100"
-      @keydown="onKeydown" @blur="add" />
+  <div>
+    <div class="border dark:border-slate-700 rounded-lg px-2 py-1.5 flex flex-wrap gap-1 items-center bg-white dark:bg-slate-800 min-h-9">
+      <span v-for="t in tags" :key="t" class="bg-slate-100 dark:bg-slate-700 dark:text-slate-100 rounded-full px-2 py-0.5 text-sm flex items-center gap-1">
+        {{ t }}
+        <button type="button" class="text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400" :aria-label="`Remove tag ${t}`" @click="remove(t)">✕</button>
+      </span>
+      <input v-model="input" placeholder="Add tag… (Enter)" aria-label="Add tag"
+        class="flex-1 min-w-24 outline-none text-sm dark:text-slate-100"
+        @keydown="onKeydown" @blur="add" />
+    </div>
+    <!-- Discoverability: only while something is typed; outside the bordered
+         box so the input's height doesn't change when it appears. -->
+    <p v-if="input.trim()" class="mt-1 text-xs text-slate-500 dark:text-slate-400">Press Enter (or comma) to add “{{ input.trim() }}”</p>
   </div>
 </template>
 <script setup lang="ts">
