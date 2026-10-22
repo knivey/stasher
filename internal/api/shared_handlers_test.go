@@ -312,3 +312,33 @@ func TestCopyNotesNotCopied(t *testing.T) {
 		t.Fatalf("source notes = %+v, want the original note intact", src.Notes)
 	}
 }
+
+// TestCopyCarriesProductURL: unlike location (user-scoped, never copied),
+// the copy carries the source's product_url onto the new item.
+func TestCopyCarriesProductURL(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "copy-purl@test.dev", "longpassword1")
+
+	created := doJSON(t, ts, "POST", "/api/v1/items",
+		map[string]any{"name": "copy me", "product_url": "https://example.com/part"}, cookie)
+	var srcItem struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, created, &srcItem)
+
+	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(srcItem.ID)+"/copy", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("copy = %d", resp.StatusCode)
+	}
+	var copied struct {
+		ID         int64   `json:"id"`
+		ProductURL *string `json:"product_url"`
+	}
+	decodeBody(t, resp, &copied)
+	if copied.ID == srcItem.ID {
+		t.Fatal("copy returned the source id")
+	}
+	if copied.ProductURL == nil || *copied.ProductURL != "https://example.com/part" {
+		t.Fatalf("copied product_url = %v, want https://example.com/part", copied.ProductURL)
+	}
+}

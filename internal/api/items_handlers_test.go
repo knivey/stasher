@@ -302,3 +302,116 @@ func TestItemNotesIsolation(t *testing.T) {
 		t.Fatalf("notes after failed attempts = %+v, want empty", detail.Notes)
 	}
 }
+
+// TestItemProductURL: product_url is a detail-only item field. Create and
+// PATCH validate it as an http(s) URL of at most 2000 chars (400
+// validation_error otherwise); PATCH follows the house nullable rules
+// (absent keeps, "" clears to an explicit JSON null); the LIST envelope
+// never carries it.
+func TestItemProductURL(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "purl@test.dev", "longpassword1")
+
+	// create echoes the product_url back on the detail JSON
+	resp := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{
+		"name": "Raspberry Pi 5", "product_url": "https://example.com/pi5",
+	}, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create item = %d", resp.StatusCode)
+	}
+	var created struct {
+		ID         int64   `json:"id"`
+		ProductURL *string `json:"product_url"`
+	}
+	decodeBody(t, resp, &created)
+	if created.ProductURL == nil || *created.ProductURL != "https://example.com/pi5" {
+		t.Fatalf("created product_url = %v, want https://example.com/pi5", created.ProductURL)
+	}
+	id := fmtInt64(created.ID)
+
+	// invalid values are all rejected 400 validation_error before any write
+	for _, bad := range []string{
+		"ftp://example.com/part", // wrong scheme
+		"not a url",              // no scheme at all
+		"https://example.com/" + strings.Repeat("a", 1981), // 2001 chars
+	} {
+		if r := doJSON(t, ts, "POST", "/api/v1/items",
+			map[string]any{"name": "bad url", "product_url": bad}, cookie); r.StatusCode != http.StatusBadRequest {
+			t.Fatalf("create product_url %.30q... = %d, want 400", bad, r.StatusCode)
+		}
+	}
+	var errBody struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	decodeBody(t, doJSON(t, ts, "POST", "/api/v1/items",
+		map[string]any{"name": "bad url", "product_url": "ftp://example.com/part"}, cookie), &errBody)
+	if errBody.Error.Code != "validation_error" ||
+		errBody.Error.Message != "product_url must be an http(s) URL of at most 2000 chars" {
+		t.Fatalf("error = %+v, want validation_error / product_url message", errBody.Error)
+	}
+
+	// GET detail carries the field
+	var got struct {
+		ProductURL *string `json:"product_url"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+id, nil, cookie), &got)
+	if got.ProductURL == nil || *got.ProductURL != "https://example.com/pi5" {
+		t.Fatalf("detail product_url = %v, want https://example.com/pi5", got.ProductURL)
+	}
+
+	// PATCH absent keeps (only qty changes here)
+	if resp := doJSON(t, ts, "PATCH", "/api/v1/items/"+id, map[string]any{"qty": 3}, cookie); resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch qty = %d", resp.StatusCode)
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+id, nil, cookie), &got)
+	if got.ProductURL == nil || *got.ProductURL != "https://example.com/pi5" {
+		t.Fatalf("product_url after absent PATCH = %v, want kept", got.ProductURL)
+	}
+
+	// PATCH a valid value updates
+	resp = doJSON(t, ts, "PATCH", "/api/v1/items/"+id, map[string]any{
+		"product_url": "https://example.com/pi5-kit",
+	}, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch product_url = %d", resp.StatusCode)
+	}
+	decodeBody(t, resp, &got)
+	if got.ProductURL == nil || *got.ProductURL != "https://example.com/pi5-kit" {
+		t.Fatalf("patched product_url = %v, want https://example.com/pi5-kit", got.ProductURL)
+	}
+
+	// a usage (ledger) rewrite of the item row must preserve the field
+	if resp := doJSON(t, ts, "POST", "/api/v1/items/"+id+"/usage",
+		map[string]any{"kind": "used", "delta": -1}, cookie); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("usage = %d", resp.StatusCode)
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+id, nil, cookie), &got)
+	if got.ProductURL == nil || *got.ProductURL != "https://example.com/pi5-kit" {
+		t.Fatalf("product_url after usage = %v, want preserved", got.ProductURL)
+	}
+
+	// PATCH "" clears to an explicit JSON null
+	resp = doJSON(t, ts, "PATCH", "/api/v1/items/"+id, map[string]any{"product_url": ""}, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clear product_url = %d", resp.StatusCode)
+	}
+	decodeBody(t, resp, &got)
+	if got.ProductURL != nil {
+		t.Fatalf("cleared product_url = %v, want null", *got.ProductURL)
+	}
+
+	// LIST rows never carry the detail-only field
+	var list struct {
+		Data []map[string]any `json:"data"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items", nil, cookie), &list)
+	if len(list.Data) == 0 {
+		t.Fatal("no list rows to inspect")
+	}
+	if _, has := list.Data[0]["product_url"]; has {
+		t.Fatal("list row carries product_url; the field is detail-only")
+	}
+}

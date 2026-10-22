@@ -150,14 +150,14 @@ UPDATE tags SET name = ? WHERE id = ? AND user_id = ?;
 DELETE FROM tags WHERE id = ? AND user_id = ?;
 
 -- name: CreateItem :one
-INSERT INTO items (user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *;
+INSERT INTO items (user_id, name, description, qty, unit, location_id, visibility, product_url, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *;
 
 -- name: CreateItemWithID :one
 -- restore path: an explicit id guarantees the restored item never reuses
 -- the trashed item's id (SQLite recycles the max rowid after a delete)
-INSERT INTO items (id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *;
+INSERT INTO items (id, user_id, name, description, qty, unit, location_id, visibility, product_url, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *;
 
 -- name: MaxItemID :one
 SELECT CAST(COALESCE(MAX(id), 0) AS INTEGER) FROM items;
@@ -169,7 +169,7 @@ SELECT * FROM items WHERE id = ? AND user_id = ?;
 SELECT * FROM items WHERE id = ?;
 
 -- name: UpdateItem :exec
-UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, disposed = ?, updated_at = ?
+UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, product_url = ?, disposed = ?, updated_at = ?
 WHERE id = ? AND user_id = ?;
 
 -- name: BulkMoveItems :execrows

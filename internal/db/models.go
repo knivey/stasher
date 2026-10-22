@@ -18,17 +18,18 @@ type Invite struct {
 }
 
 type Item struct {
-	ID          int64         `json:"id"`
-	UserID      int64         `json:"user_id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Qty         float64       `json:"qty"`
-	Unit        string        `json:"unit"`
-	LocationID  sql.NullInt64 `json:"location_id"`
-	Visibility  string        `json:"visibility"`
-	CreatedAt   string        `json:"created_at"`
-	UpdatedAt   string        `json:"updated_at"`
-	Disposed    int64         `json:"disposed"`
+	ID          int64          `json:"id"`
+	UserID      int64          `json:"user_id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Qty         float64        `json:"qty"`
+	Unit        string         `json:"unit"`
+	LocationID  sql.NullInt64  `json:"location_id"`
+	Visibility  string         `json:"visibility"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
+	Disposed    int64          `json:"disposed"`
+	ProductUrl  sql.NullString `json:"product_url"`
 }
 
 type ItemDocument struct {

@@ -77,10 +77,11 @@ func (s *Server) handleCopyItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	// location is NOT copied: locations are user-scoped
+	// location is NOT copied: locations are user-scoped. product_url IS
+	// copied: it is item data, not user-scoped.
 	newItem, err := s.q.CreateItem(r.Context(), dbpkg.CreateItemParams{
 		UserID: u.ID, Name: src.Name, Description: src.Description,
-		Qty: src.Qty, Unit: src.Unit,
+		Qty: src.Qty, Unit: src.Unit, ProductUrl: src.ProductUrl,
 		LocationID: sql.NullInt64{}, Visibility: u.DefaultItemVisibility,
 		CreatedAt: now, UpdatedAt: now,
 	})

@@ -142,7 +142,7 @@ func (s *Server) handleAddItemUsage(w http.ResponseWriter, r *http.Request) {
 	if err := qtx.UpdateItem(r.Context(), dbpkg.UpdateItemParams{
 		Name: item.Name, Description: item.Description, Qty: resulting,
 		Unit: item.Unit, LocationID: item.LocationID, Visibility: item.Visibility,
-		Disposed: disposed, UpdatedAt: now, ID: item.ID, UserID: u.ID,
+		ProductUrl: item.ProductUrl, Disposed: disposed, UpdatedAt: now, ID: item.ID, UserID: u.ID,
 	}); err != nil {
 		s.internalErr(w, err)
 		return

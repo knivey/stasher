@@ -26,6 +26,8 @@ type trashSnapshot struct {
 	Visibility  string  `json:"visibility"`
 	Disposed    bool    `json:"disposed"`
 	LocationID  *int64  `json:"location_id"` // nil = no location
+	// "" in legacy snapshots = no product_url (restores to NULL)
+	ProductUrl string `json:"product_url,omitempty"`
 
 	Tags         []string                  `json:"tags"`
 	Photos       []trashSnapshotPhoto      `json:"photos"`
@@ -80,6 +82,8 @@ func buildTrashSnapshot(ctx context.Context, q *dbpkg.Queries, item dbpkg.Item) 
 		Name:   item.Name, Description: item.Description, Qty: item.Qty,
 		Unit: item.Unit, Visibility: item.Visibility,
 		Disposed: item.Disposed != 0,
+		// "" when unset (same convention as the photos' thumb_key)
+		ProductUrl: item.ProductUrl.String,
 	}
 	if item.LocationID.Valid {
 		loc := item.LocationID.Int64
@@ -312,7 +316,9 @@ func (s *Server) handleRestoreTrashEntry(w http.ResponseWriter, r *http.Request)
 		ID:     newID,
 		UserID: u.ID, Name: snap.Name, Description: snap.Description,
 		Qty: snap.Qty, Unit: snap.Unit, LocationID: loc,
-		Visibility: snap.Visibility, CreatedAt: now, UpdatedAt: now,
+		Visibility: snap.Visibility,
+		ProductUrl: sql.NullString{String: snap.ProductUrl, Valid: snap.ProductUrl != ""},
+		CreatedAt:  now, UpdatedAt: now,
 	})
 	if err != nil {
 		s.internalErr(w, err)
@@ -322,7 +328,7 @@ func (s *Server) handleRestoreTrashEntry(w http.ResponseWriter, r *http.Request)
 		if err := qtx.UpdateItem(r.Context(), dbpkg.UpdateItemParams{
 			Name: item.Name, Description: item.Description, Qty: item.Qty,
 			Unit: item.Unit, LocationID: item.LocationID, Visibility: item.Visibility,
-			Disposed: 1, UpdatedAt: now, ID: item.ID, UserID: u.ID,
+			ProductUrl: item.ProductUrl, Disposed: 1, UpdatedAt: now, ID: item.ID, UserID: u.ID,
 		}); err != nil {
 			s.internalErr(w, err)
 			return

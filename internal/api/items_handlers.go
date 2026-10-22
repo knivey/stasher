@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -21,7 +22,22 @@ type itemReq struct {
 	Unit        *string  `json:"unit"`
 	LocationID  *int64   `json:"location_id"`
 	Visibility  *string  `json:"visibility"`
+	ProductURL  *string  `json:"product_url"`
 	Tags        []string `json:"tags"`
+}
+
+// validProductURL enforces the product_url contract: an http(s) URL of at
+// most 2000 bytes. An unparseable URL or any other scheme is rejected; the
+// scheme check is also what catches schemeless garbage ("not a url").
+func validProductURL(s string) bool {
+	if len(s) > 2000 {
+		return false
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "http" || u.Scheme == "https"
 }
 
 func itemJSON(i dbpkg.Item) map[string]any {
@@ -33,7 +49,8 @@ func itemJSON(i dbpkg.Item) map[string]any {
 		"id": i.ID, "name": i.Name, "description": i.Description,
 		"qty": i.Qty, "unit": i.Unit, "location_id": loc,
 		"visibility": i.Visibility, "disposed": i.Disposed != 0,
-		"created_at": i.CreatedAt, "updated_at": i.UpdatedAt,
+		"product_url": nullString(i.ProductUrl),
+		"created_at":  i.CreatedAt, "updated_at": i.UpdatedAt,
 	}
 }
 
@@ -180,6 +197,16 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, r *http.Request) {
 		}
 		visibility = *req.Visibility
 	}
+	// product_url: absent or "" stores NULL; anything else is validated
+	// before any write
+	var productURL sql.NullString
+	if req.ProductURL != nil && *req.ProductURL != "" {
+		if !validProductURL(*req.ProductURL) {
+			writeErr(w, http.StatusBadRequest, "validation_error", "product_url must be an http(s) URL of at most 2000 chars")
+			return
+		}
+		productURL = sqlNullString(*req.ProductURL)
+	}
 	// validate tags before ANY write (final-review Finding 2): otherwise a
 	// bad list 400s only after the item row exists -> ghost item
 	if req.Tags != nil {
@@ -207,7 +234,8 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	item, err := s.q.CreateItem(r.Context(), dbpkg.CreateItemParams{
 		UserID: u.ID, Name: req.Name, Description: desc, Qty: qty, Unit: unit,
-		LocationID: loc, Visibility: visibility, CreatedAt: now, UpdatedAt: now,
+		LocationID: loc, Visibility: visibility, ProductUrl: productURL,
+		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		s.internalErr(w, err)
@@ -293,6 +321,12 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.ProductURL != nil && *req.ProductURL != "" { // "" clears, so only non-empty values need validating
+		if !validProductURL(*req.ProductURL) {
+			writeErr(w, http.StatusBadRequest, "validation_error", "product_url must be an http(s) URL of at most 2000 chars")
+			return
+		}
+	}
 	if req.Tags != nil {
 		if err := validateTagNames(req.Tags); err != nil {
 			s.tagErr(w, err)
@@ -345,6 +379,13 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 			item.LocationID = sqlNullInt64(*req.LocationID)
 		}
 	}
+	if req.ProductURL != nil { // absent keeps; "" clears to NULL
+		if *req.ProductURL == "" {
+			item.ProductUrl = sql.NullString{}
+		} else {
+			item.ProductUrl = sqlNullString(*req.ProductURL)
+		}
+	}
 	// a qty change is logged to the ledger in the same transaction as the
 	// update; other-field PATCHes write no entry. Any change resulting in
 	// qty > 0 clears the disposed flag (same rule as the usage path); a
@@ -358,7 +399,7 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 	if err := qtx.UpdateItem(r.Context(), dbpkg.UpdateItemParams{
 		Name: item.Name, Description: item.Description, Qty: item.Qty, Unit: item.Unit,
 		LocationID: item.LocationID, Visibility: item.Visibility,
-		Disposed: disposed, UpdatedAt: now,
+		ProductUrl: item.ProductUrl, Disposed: disposed, UpdatedAt: now,
 		ID: id, UserID: u.ID,
 	}); err != nil {
 		s.internalErr(w, err)

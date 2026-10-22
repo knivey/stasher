@@ -704,3 +704,58 @@ func TestTrashRestorePreservesNotes(t *testing.T) {
 		t.Fatalf("restored notes = %+v, want bodies + original created_at", restored.Notes)
 	}
 }
+
+// TestTrashRestoreCarriesProductURL: product_url rides the trash snapshot
+// like tags/photos/notes and comes back intact on restore (under the new
+// item id). Legacy snapshots predating the field restore to a null
+// product_url (absent JSON key unmarshals to "" -> NULL).
+func TestTrashRestoreCarriesProductURL(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "trash-purl@test.dev", "longpassword1")
+
+	resp := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{
+		"name": "DS18B20 sensor", "product_url": "https://example.com/ds18b20",
+	}, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create item = %d", resp.StatusCode)
+	}
+	var item struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &item)
+
+	// dispose it first so the restore ALSO exercises the disposed-flag
+	// rewrite of the item row (that path must preserve product_url too)
+	if resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(item.ID)+"/usage",
+		map[string]any{"kind": "disposed"}, cookie); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("dispose = %d", resp.StatusCode)
+	}
+
+	if resp := doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(item.ID), nil, cookie); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete = %d", resp.StatusCode)
+	}
+	entries, _ := listTrash(t, ts, cookie)
+	if len(entries) != 1 {
+		t.Fatalf("trash entries = %d, want 1", len(entries))
+	}
+
+	resp = doJSON(t, ts, "POST", "/api/v1/trash/"+fmtInt64(entries[0].ID)+"/restore", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("restore = %d", resp.StatusCode)
+	}
+	var restored struct {
+		ID         int64   `json:"id"`
+		Disposed   bool    `json:"disposed"`
+		ProductURL *string `json:"product_url"`
+	}
+	decodeBody(t, resp, &restored)
+	if restored.ID == item.ID {
+		t.Fatal("restore reused the old item id")
+	}
+	if !restored.Disposed {
+		t.Fatal("restored item lost the disposed flag")
+	}
+	if restored.ProductURL == nil || *restored.ProductURL != "https://example.com/ds18b20" {
+		t.Fatalf("restored product_url = %v, want https://example.com/ds18b20", restored.ProductURL)
+	}
+}

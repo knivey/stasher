@@ -223,20 +223,21 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Inv
 }
 
 const createItem = `-- name: CreateItem :one
-INSERT INTO items (user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed
+INSERT INTO items (user_id, name, description, qty, unit, location_id, visibility, product_url, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed, product_url
 `
 
 type CreateItemParams struct {
-	UserID      int64         `json:"user_id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Qty         float64       `json:"qty"`
-	Unit        string        `json:"unit"`
-	LocationID  sql.NullInt64 `json:"location_id"`
-	Visibility  string        `json:"visibility"`
-	CreatedAt   string        `json:"created_at"`
-	UpdatedAt   string        `json:"updated_at"`
+	UserID      int64          `json:"user_id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Qty         float64        `json:"qty"`
+	Unit        string         `json:"unit"`
+	LocationID  sql.NullInt64  `json:"location_id"`
+	Visibility  string         `json:"visibility"`
+	ProductUrl  sql.NullString `json:"product_url"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
 }
 
 func (q *Queries) CreateItem(ctx context.Context, arg CreateItemParams) (Item, error) {
@@ -248,6 +249,7 @@ func (q *Queries) CreateItem(ctx context.Context, arg CreateItemParams) (Item, e
 		arg.Unit,
 		arg.LocationID,
 		arg.Visibility,
+		arg.ProductUrl,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -264,6 +266,7 @@ func (q *Queries) CreateItem(ctx context.Context, arg CreateItemParams) (Item, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Disposed,
+		&i.ProductUrl,
 	)
 	return i, err
 }
@@ -312,21 +315,22 @@ func (q *Queries) CreateItemLedger(ctx context.Context, arg CreateItemLedgerPara
 }
 
 const createItemWithID = `-- name: CreateItemWithID :one
-INSERT INTO items (id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed
+INSERT INTO items (id, user_id, name, description, qty, unit, location_id, visibility, product_url, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed, product_url
 `
 
 type CreateItemWithIDParams struct {
-	ID          int64         `json:"id"`
-	UserID      int64         `json:"user_id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Qty         float64       `json:"qty"`
-	Unit        string        `json:"unit"`
-	LocationID  sql.NullInt64 `json:"location_id"`
-	Visibility  string        `json:"visibility"`
-	CreatedAt   string        `json:"created_at"`
-	UpdatedAt   string        `json:"updated_at"`
+	ID          int64          `json:"id"`
+	UserID      int64          `json:"user_id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Qty         float64        `json:"qty"`
+	Unit        string         `json:"unit"`
+	LocationID  sql.NullInt64  `json:"location_id"`
+	Visibility  string         `json:"visibility"`
+	ProductUrl  sql.NullString `json:"product_url"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
 }
 
 // restore path: an explicit id guarantees the restored item never reuses
@@ -341,6 +345,7 @@ func (q *Queries) CreateItemWithID(ctx context.Context, arg CreateItemWithIDPara
 		arg.Unit,
 		arg.LocationID,
 		arg.Visibility,
+		arg.ProductUrl,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -357,6 +362,7 @@ func (q *Queries) CreateItemWithID(ctx context.Context, arg CreateItemWithIDPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Disposed,
+		&i.ProductUrl,
 	)
 	return i, err
 }
@@ -847,7 +853,7 @@ func (q *Queries) GetInvite(ctx context.Context, code string) (Invite, error) {
 }
 
 const getItem = `-- name: GetItem :one
-SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed FROM items WHERE id = ? AND user_id = ?
+SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed, product_url FROM items WHERE id = ? AND user_id = ?
 `
 
 type GetItemParams struct {
@@ -870,12 +876,13 @@ func (q *Queries) GetItem(ctx context.Context, arg GetItemParams) (Item, error) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Disposed,
+		&i.ProductUrl,
 	)
 	return i, err
 }
 
 const getItemAnyOwner = `-- name: GetItemAnyOwner :one
-SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed FROM items WHERE id = ?
+SELECT id, user_id, name, description, qty, unit, location_id, visibility, created_at, updated_at, disposed, product_url FROM items WHERE id = ?
 `
 
 func (q *Queries) GetItemAnyOwner(ctx context.Context, id int64) (Item, error) {
@@ -893,6 +900,7 @@ func (q *Queries) GetItemAnyOwner(ctx context.Context, id int64) (Item, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Disposed,
+		&i.ProductUrl,
 	)
 	return i, err
 }
@@ -2144,21 +2152,22 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 }
 
 const updateItem = `-- name: UpdateItem :exec
-UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, disposed = ?, updated_at = ?
+UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, product_url = ?, disposed = ?, updated_at = ?
 WHERE id = ? AND user_id = ?
 `
 
 type UpdateItemParams struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Qty         float64       `json:"qty"`
-	Unit        string        `json:"unit"`
-	LocationID  sql.NullInt64 `json:"location_id"`
-	Visibility  string        `json:"visibility"`
-	Disposed    int64         `json:"disposed"`
-	UpdatedAt   string        `json:"updated_at"`
-	ID          int64         `json:"id"`
-	UserID      int64         `json:"user_id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Qty         float64        `json:"qty"`
+	Unit        string         `json:"unit"`
+	LocationID  sql.NullInt64  `json:"location_id"`
+	Visibility  string         `json:"visibility"`
+	ProductUrl  sql.NullString `json:"product_url"`
+	Disposed    int64          `json:"disposed"`
+	UpdatedAt   string         `json:"updated_at"`
+	ID          int64          `json:"id"`
+	UserID      int64          `json:"user_id"`
 }
 
 func (q *Queries) UpdateItem(ctx context.Context, arg UpdateItemParams) error {
@@ -2169,6 +2178,7 @@ func (q *Queries) UpdateItem(ctx context.Context, arg UpdateItemParams) error {
 		arg.Unit,
 		arg.LocationID,
 		arg.Visibility,
+		arg.ProductUrl,
 		arg.Disposed,
 		arg.UpdatedAt,
 		arg.ID,
