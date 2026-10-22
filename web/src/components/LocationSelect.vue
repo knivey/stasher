@@ -1,6 +1,6 @@
 <template>
   <select :value="modelValue" aria-label="Location"
-    class="w-full border rounded-lg px-2 py-1.5 text-sm bg-white"
+    class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm bg-white"
     @change="emit('update:modelValue', Number(($event.target as HTMLSelectElement).value))">
     <option v-if="allowNone !== false" :value="0">{{ noneLabel ?? 'No location' }}</option>
     <option v-for="o in options" :key="o.id" :value="o.id">{{ '— '.repeat(o.depth) }}{{ o.name }}</option>

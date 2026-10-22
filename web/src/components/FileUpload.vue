@@ -49,7 +49,7 @@ async function onChange(e: Event) {
       :capture="kind === 'photo' ? 'environment' : undefined"
       @change="onChange" />
     <button type="button" :disabled="busy" @click="pick"
-      class="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50">
+      class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm disabled:opacity-50">
       {{ kind === 'photo' ? 'Add photo 📷' : 'Add document' }}{{ busy ? '…' : '' }}
     </button>
   </span>

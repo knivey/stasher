@@ -128,60 +128,60 @@ function fmtTime(iso: string) {
 </script>
 <template>
   <div class="max-w-3xl space-y-6">
-    <h1 class="text-2xl font-bold">Settings</h1>
+    <h1 class="text-2xl font-bold dark:text-slate-100">Settings</h1>
 
     <!-- Profile -->
-    <form data-profile-form class="bg-white rounded-xl shadow p-4 space-y-3" @submit.prevent="saveProfile">
-      <h2 class="text-sm font-semibold text-slate-700">Profile</h2>
-      <label class="block text-sm font-medium">Display name
+    <form data-profile-form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3" @submit.prevent="saveProfile">
+      <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Profile</h2>
+      <label class="block text-sm font-medium dark:text-slate-100">Display name
         <input v-model="displayName" data-profile-name required maxlength="100"
-          class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal" />
+          class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
       </label>
-      <label class="block text-sm font-medium">Default item visibility
-        <select v-model="visibility" data-profile-visibility class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal">
+      <label class="block text-sm font-medium dark:text-slate-100">Default item visibility
+        <select v-model="visibility" data-profile-visibility class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal">
           <option value="private">Private</option>
           <option value="shared">Shared</option>
         </select>
       </label>
       <button type="submit" :disabled="savingProfile"
-        class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save profile</button>
+        class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50">Save profile</button>
     </form>
 
     <!-- Password -->
-    <form data-pw-form class="bg-white rounded-xl shadow p-4 space-y-3" @submit.prevent="changePassword">
-      <h2 class="text-sm font-semibold text-slate-700">Change password</h2>
-      <label class="block text-sm font-medium">Current password
+    <form data-pw-form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3" @submit.prevent="changePassword">
+      <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Change password</h2>
+      <label class="block text-sm font-medium dark:text-slate-100">Current password
         <input v-model="pwCurrent" data-pw-current type="password" required autocomplete="current-password"
-          class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal" @input="pwError = ''" />
-        <p v-if="pwError" data-pw-error class="mt-1 text-xs text-red-600">{{ pwError }}</p>
+          class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" @input="pwError = ''" />
+        <p v-if="pwError" data-pw-error class="mt-1 text-xs text-red-600 dark:text-red-400">{{ pwError }}</p>
       </label>
-      <label class="block text-sm font-medium">New password
+      <label class="block text-sm font-medium dark:text-slate-100">New password
         <!-- minlength is the ≥10 client check (browser blocks the submit);
              the backend enforces it again with 400 validation_error. -->
         <input v-model="pwNew" data-pw-new type="password" required minlength="10" autocomplete="new-password"
-          class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal" />
+          class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
       </label>
-      <label class="flex items-center gap-2 text-sm">
+      <label class="flex items-center gap-2 text-sm dark:text-slate-100">
         <input v-model="pwRevokeOthers" data-pw-revoke-others type="checkbox" class="rounded" />
         Revoke other sessions (sign out everywhere else)
       </label>
       <button type="submit" :disabled="changingPw"
-        class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-50">Change password</button>
+        class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50">Change password</button>
     </form>
 
     <!-- Devices -->
-    <section class="bg-white rounded-xl shadow p-4 space-y-3">
+    <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3">
       <div class="flex items-center justify-between gap-2">
-        <h2 class="text-sm font-semibold text-slate-700">Devices</h2>
+        <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Devices</h2>
         <button v-if="hasOthers" data-revoke-all type="button" :disabled="revokingAll"
-          class="rounded-lg border border-red-300 text-red-700 px-3 py-1.5 text-sm hover:bg-red-50 disabled:opacity-50"
+          class="rounded-lg border border-red-300 text-red-700 dark:text-red-400 dark:hover:bg-red-400/10 px-3 py-1.5 text-sm hover:bg-red-50 disabled:opacity-50"
           @click="revokeAllOthers">Revoke all other devices</button>
       </div>
-      <p v-if="!sessions.length" class="text-slate-400 text-sm">No devices found.</p>
+      <p v-if="!sessions.length" class="text-slate-400 dark:text-slate-500 text-sm">No devices found.</p>
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="text-left text-xs text-slate-500 border-b">
+            <tr class="text-left text-xs text-slate-500 dark:text-slate-400 border-b dark:border-slate-700">
               <th class="py-1.5 pr-2">Device</th>
               <th class="py-1.5 pr-2">IP</th>
               <th class="py-1.5 pr-2">Last seen</th>
@@ -189,18 +189,18 @@ function fmtTime(iso: string) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="s in sessions" :key="s.id" data-session-row class="border-b last:border-0 align-top">
+            <tr v-for="s in sessions" :key="s.id" data-session-row class="border-b dark:border-slate-700 last:border-0 align-top">
               <td class="py-2 pr-2 max-w-48">
-                <span class="break-words">{{ s.user_agent || 'Unknown device' }}</span>
+                <span class="break-words dark:text-slate-100">{{ s.user_agent || 'Unknown device' }}</span>
                 <span v-if="s.current" data-current-badge
                   class="ml-2 whitespace-nowrap rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-xs font-medium">This device</span>
               </td>
-              <td class="py-2 pr-2 text-slate-500">{{ s.last_ip }}</td>
-              <td class="py-2 pr-2 text-slate-500">{{ fmtTime(s.last_seen_at) }}</td>
+              <td class="py-2 pr-2 text-slate-500 dark:text-slate-400">{{ s.last_ip }}</td>
+              <td class="py-2 pr-2 text-slate-500 dark:text-slate-400">{{ fmtTime(s.last_seen_at) }}</td>
               <td class="py-2 text-right">
                 <button v-if="!s.current" data-revoke-session type="button"
                   :disabled="revokingId !== null"
-                  class="text-red-600 hover:underline disabled:opacity-50" @click="revokeSession(s)">Revoke</button>
+                  class="text-red-600 dark:text-red-400 hover:underline disabled:opacity-50" @click="revokeSession(s)">Revoke</button>
               </td>
             </tr>
           </tbody>

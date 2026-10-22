@@ -133,16 +133,16 @@ onMounted(async () => {
 </script>
 <template>
   <div class="max-w-5xl space-y-6">
-    <h1 class="text-2xl font-bold">Admin</h1>
+    <h1 class="text-2xl font-bold dark:text-slate-100">Admin</h1>
 
     <!-- Users -->
-    <section class="bg-white rounded-xl shadow p-4 space-y-3">
-      <h2 class="text-sm font-semibold text-slate-700">Users</h2>
-      <p v-if="!users.length" class="text-slate-400 text-sm">No users found.</p>
+    <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3">
+      <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Users</h2>
+      <p v-if="!users.length" class="text-slate-400 dark:text-slate-500 text-sm">No users found.</p>
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="text-left text-xs text-slate-500 border-b">
+            <tr class="text-left text-xs text-slate-500 dark:text-slate-400 border-b dark:border-slate-700">
               <th class="py-1.5 pr-2">Email</th>
               <th class="py-1.5 pr-2">Name</th>
               <th class="py-1.5 pr-2">Admin</th>
@@ -151,15 +151,15 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="u in users" :key="u.id" data-user-row class="border-b last:border-0 align-top"
+            <tr v-for="u in users" :key="u.id" data-user-row class="border-b dark:border-slate-700 last:border-0 align-top"
               :data-disabled="u.disabled ? 'true' : undefined"
-              :class="{ 'line-through text-slate-400': u.disabled }">
+              :class="{ 'line-through text-slate-400 dark:text-slate-500': u.disabled }">
               <td class="py-2 pr-2">
-                <span class="break-words">{{ u.email }}</span>
+                <span class="break-words dark:text-slate-100">{{ u.email }}</span>
                 <span v-if="u.id === auth.user?.id" data-you-badge
                   class="ml-2 whitespace-nowrap rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-xs font-medium">you</span>
               </td>
-              <td class="py-2 pr-2">{{ u.display_name }}</td>
+              <td class="py-2 pr-2 dark:text-slate-100">{{ u.display_name }}</td>
               <td class="py-2 pr-2">
                 <input v-model="u.is_admin" data-admin-toggle type="checkbox" class="rounded"
                   :disabled="busyUserId !== null" @change="onAdminToggle(u)" />
@@ -169,9 +169,9 @@ onMounted(async () => {
                      backend would reject it with cannot_disable_self. -->
                 <input v-if="u.id !== auth.user?.id" v-model="u.disabled" data-disable-toggle type="checkbox"
                   class="rounded" :disabled="busyUserId !== null" @change="onDisabledToggle(u)" />
-                <span v-else class="text-slate-300" title="You cannot disable your own account">—</span>
+                <span v-else class="text-slate-300 dark:text-slate-600" title="You cannot disable your own account">—</span>
               </td>
-              <td class="py-2 text-slate-500">{{ fmtTime(u.created_at) }}</td>
+              <td class="py-2 text-slate-500 dark:text-slate-400">{{ fmtTime(u.created_at) }}</td>
             </tr>
           </tbody>
         </table>
@@ -179,11 +179,11 @@ onMounted(async () => {
     </section>
 
     <!-- Invites -->
-    <section class="bg-white rounded-xl shadow p-4 space-y-3">
+    <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3">
       <div class="flex items-center justify-between gap-2">
-        <h2 class="text-sm font-semibold text-slate-700">Invites</h2>
+        <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Invites</h2>
         <button data-create-invite type="button" :disabled="creatingInvite"
-          class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm hover:bg-slate-700 disabled:opacity-50"
+          class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm hover:bg-slate-700 dark:hover:bg-slate-300 disabled:opacity-50"
           @click="createInvite">New invite</button>
       </div>
 
@@ -194,11 +194,11 @@ onMounted(async () => {
           @click="copyCode(newInvite.code)">Copy</button>
       </div>
 
-      <p v-if="!invites.length" class="text-slate-400 text-sm">No invites yet.</p>
+      <p v-if="!invites.length" class="text-slate-400 dark:text-slate-500 text-sm">No invites yet.</p>
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="text-left text-xs text-slate-500 border-b">
+            <tr class="text-left text-xs text-slate-500 dark:text-slate-400 border-b dark:border-slate-700">
               <th class="py-1.5 pr-2">Code</th>
               <th class="py-1.5 pr-2">Created</th>
               <th class="py-1.5 pr-2">Used by</th>
@@ -207,15 +207,15 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="i in invites" :key="i.id" data-invite-row class="border-b last:border-0 align-top">
-              <td class="py-2 pr-2 font-mono">{{ i.code }}</td>
-              <td class="py-2 pr-2 text-slate-500">{{ fmtTime(i.created_at) }}</td>
-              <td class="py-2 pr-2">{{ i.used_at ? i.used_by_email : '—' }}</td>
-              <td class="py-2 pr-2 text-slate-500">{{ fmtTime(i.used_at) }}</td>
+            <tr v-for="i in invites" :key="i.id" data-invite-row class="border-b dark:border-slate-700 last:border-0 align-top">
+              <td class="py-2 pr-2 font-mono dark:text-slate-100">{{ i.code }}</td>
+              <td class="py-2 pr-2 text-slate-500 dark:text-slate-400">{{ fmtTime(i.created_at) }}</td>
+              <td class="py-2 pr-2 dark:text-slate-100">{{ i.used_at ? i.used_by_email : '—' }}</td>
+              <td class="py-2 pr-2 text-slate-500 dark:text-slate-400">{{ fmtTime(i.used_at) }}</td>
               <td class="py-2 text-right">
                 <!-- only unused invites can be deleted -->
                 <button v-if="!i.used_at" data-delete-invite type="button" :disabled="deletingInviteId !== null"
-                  class="text-red-600 hover:underline disabled:opacity-50" @click="deleteInvite(i)">Delete</button>
+                  class="text-red-600 dark:text-red-400 hover:underline disabled:opacity-50" @click="deleteInvite(i)">Delete</button>
               </td>
             </tr>
           </tbody>

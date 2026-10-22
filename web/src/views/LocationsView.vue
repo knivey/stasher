@@ -141,51 +141,51 @@ async function deleteLocation() {
 </script>
 <template>
   <div class="max-w-3xl space-y-6">
-    <h1 class="text-2xl font-bold">Locations</h1>
+    <h1 class="text-2xl font-bold dark:text-slate-100">Locations</h1>
 
-    <form class="bg-white rounded-xl shadow p-4 flex flex-wrap items-end gap-3" @submit.prevent="addLocation">
-      <label class="flex-1 min-w-48 block text-sm font-medium">Add location
+    <form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 flex flex-wrap items-end gap-3" @submit.prevent="addLocation">
+      <label class="flex-1 min-w-48 block text-sm font-medium dark:text-slate-100">Add location
         <input v-model="addName" data-add-name required maxlength="200" placeholder="Name"
-          class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal" @input="addError = ''" />
-        <p v-if="addError" class="mt-1 text-xs text-red-600">{{ addError }}</p>
+          class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" @input="addError = ''" />
+        <p v-if="addError" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ addError }}</p>
       </label>
-      <div class="w-56 text-sm font-medium">Parent
+      <div class="w-56 text-sm font-medium dark:text-slate-100">Parent
         <LocationSelect v-model="addParent" :locations="locations" class="mt-1" />
       </div>
       <button type="submit" :disabled="adding"
-        class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm font-normal disabled:opacity-50">Add</button>
+        class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm font-normal disabled:opacity-50">Add</button>
     </form>
 
-    <p v-if="!rows.length" class="text-slate-400 text-sm">No locations yet.</p>
-    <ul v-else class="bg-white rounded-xl shadow divide-y text-sm">
+    <p v-if="!rows.length" class="text-slate-400 dark:text-slate-500 text-sm">No locations yet.</p>
+    <ul v-else class="bg-white dark:bg-slate-800 rounded-xl shadow divide-y dark:divide-slate-700 text-sm">
       <li v-for="r in rows" :key="r.loc.id" class="px-4 py-2">
         <div v-if="editingId !== r.loc.id" class="flex items-center justify-between gap-2">
           <div class="min-w-0">
-            <span data-loc-name class="font-medium" :style="{ paddingLeft: r.depth * 1.5 + 'rem' }">{{ r.loc.name }}</span>
-            <p v-if="r.loc.notes" class="text-slate-500 whitespace-pre-wrap" :style="{ paddingLeft: r.depth * 1.5 + 'rem' }">{{ r.loc.notes }}</p>
+            <span data-loc-name class="font-medium dark:text-slate-100" :style="{ paddingLeft: r.depth * 1.5 + 'rem' }">{{ r.loc.name }}</span>
+            <p v-if="r.loc.notes" class="text-slate-500 dark:text-slate-400 whitespace-pre-wrap" :style="{ paddingLeft: r.depth * 1.5 + 'rem' }">{{ r.loc.notes }}</p>
           </div>
           <span class="flex gap-2 shrink-0">
-            <button data-edit class="text-slate-600 hover:underline" @click="startEdit(r)">Edit</button>
-            <button data-delete class="text-red-600 hover:underline" @click="deleteTarget = r.loc">Delete</button>
+            <button data-edit class="text-slate-600 dark:text-slate-300 hover:underline" @click="startEdit(r)">Edit</button>
+            <button data-delete class="text-red-600 dark:text-red-400 hover:underline" @click="deleteTarget = r.loc">Delete</button>
           </span>
         </div>
         <div v-else class="space-y-2 py-1">
           <input v-model="editName" data-edit-name maxlength="200" aria-label="Name"
-            class="w-full border rounded-lg px-2 py-1.5 text-sm font-medium" />
+            class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-medium" />
           <div class="max-w-xs">
-            <span class="block text-xs text-slate-500 mb-1">Parent (cannot be cleared)</span>
+            <span class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Parent (cannot be cleared)</span>
             <!-- Roots may stay root (value 0 = keep); children must keep or
                  change parent — the API has no "move to root". -->
             <LocationSelect v-model="editParent" :locations="locations" :exclude="excludedParentIds(r.loc)"
               :allow-none="r.loc.parent_id === null" none-label="— root (no parent) —" />
           </div>
           <textarea v-model="editNotes" data-edit-notes rows="2" maxlength="10000" placeholder="Notes"
-            class="w-full border rounded-lg px-2 py-1.5 text-sm"></textarea>
-          <p v-if="editError" class="text-xs text-red-600">{{ editError }}</p>
+            class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm"></textarea>
+          <p v-if="editError" class="text-xs text-red-600 dark:text-red-400">{{ editError }}</p>
           <div class="flex gap-2">
             <button data-save :disabled="saving"
-              class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-50" @click="saveEdit(r.loc)">Save</button>
-            <button class="rounded-lg border px-3 py-1.5 text-sm" @click="cancelEdit">Cancel</button>
+              class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50" @click="saveEdit(r.loc)">Save</button>
+            <button class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm" @click="cancelEdit">Cancel</button>
           </div>
         </div>
       </li>

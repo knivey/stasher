@@ -196,58 +196,58 @@ defineExpose({ form, save, tagsEqual })
 </script>
 <template>
   <div class="max-w-xl space-y-4">
-    <h1 class="text-2xl font-bold">{{ editing ? 'Edit item' : 'New item' }}</h1>
-    <form class="bg-white rounded-xl shadow p-4 space-y-4" @submit.prevent="save">
-      <label class="block text-sm font-medium">Name
-        <input v-model="form.name" required class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal" />
+    <h1 class="text-2xl font-bold dark:text-slate-100">{{ editing ? 'Edit item' : 'New item' }}</h1>
+    <form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-4" @submit.prevent="save">
+      <label class="block text-sm font-medium dark:text-slate-100">Name
+        <input v-model="form.name" required class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
       </label>
-      <label class="block text-sm font-medium">Description
-        <textarea v-model="form.description" rows="3" class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal"></textarea>
+      <label class="block text-sm font-medium dark:text-slate-100">Description
+        <textarea v-model="form.description" rows="3" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal"></textarea>
       </label>
       <div class="flex gap-4">
-        <label class="flex-1 block text-sm font-medium">Qty
-          <input v-model.number="form.qty" type="number" min="0" step="any" class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal" />
+        <label class="flex-1 block text-sm font-medium dark:text-slate-100">Qty
+          <input v-model.number="form.qty" type="number" min="0" step="any" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
         </label>
-        <label class="flex-1 block text-sm font-medium">Unit
-          <input v-model="form.unit" placeholder="pcs, kg…" class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal" />
+        <label class="flex-1 block text-sm font-medium dark:text-slate-100">Unit
+          <input v-model="form.unit" placeholder="pcs, kg…" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
         </label>
       </div>
-      <label class="block text-sm font-medium">Visibility
-        <select v-model="form.visibility" class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal bg-white">
+      <label class="block text-sm font-medium dark:text-slate-100">Visibility
+        <select v-model="form.visibility" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal bg-white">
           <option value="private">Private</option>
           <option value="shared">Shared</option>
         </select>
       </label>
-      <div class="block text-sm font-medium">Location
+      <div class="block text-sm font-medium dark:text-slate-100">Location
         <LocationSelect v-model="form.location_id" class="mt-1" />
       </div>
-      <div class="block text-sm font-medium">Tags
+      <div class="block text-sm font-medium dark:text-slate-100">Tags
         <TagInput v-model:tags="form.tags" class="mt-1" />
       </div>
-      <div v-if="!editing" class="block text-sm font-medium">Photos & documents
+      <div v-if="!editing" class="block text-sm font-medium dark:text-slate-100">Photos & documents
         <div class="mt-1 flex gap-2">
           <!-- :disabled blocks label-click activation too; the labels dim and
                go inert so a pick can't START mid-save and miss the encode
                drain (backlog: residual upload race). -->
-          <label class="rounded-lg border px-3 py-1.5 text-sm font-normal cursor-pointer"
+          <label class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm font-normal cursor-pointer"
             :class="saving && 'opacity-50 pointer-events-none'">Add photo 📷
             <input type="file" accept="image/*" capture="environment" multiple class="hidden"
               :disabled="saving" @change="onPickPhotos" />
           </label>
-          <label class="rounded-lg border px-3 py-1.5 text-sm font-normal cursor-pointer"
+          <label class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm font-normal cursor-pointer"
             :class="saving && 'opacity-50 pointer-events-none'">Add document
             <input type="file" multiple class="hidden" :disabled="saving" @change="onPickDocs" />
           </label>
         </div>
-        <p v-if="queuedPhotos.length || queuedDocs.length" class="mt-1 text-xs text-slate-500 font-normal">
+        <p v-if="queuedPhotos.length || queuedDocs.length" class="mt-1 text-xs text-slate-500 dark:text-slate-400 font-normal">
           {{ queuedPhotos.length }} photo{{ queuedPhotos.length === 1 ? '' : 's' }},
           {{ queuedDocs.length }} document{{ queuedDocs.length === 1 ? '' : 's' }} will be added after saving
         </p>
       </div>
       <div class="flex justify-end gap-2">
-        <button type="button" class="rounded-lg border px-3 py-1.5 text-sm" @click="cancel">Cancel</button>
+        <button type="button" class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm" @click="cancel">Cancel</button>
         <button type="submit" :disabled="saving"
-          class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+          class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50">
           {{ saving ? 'Saving…' : 'Save' }}</button>
       </div>
     </form>

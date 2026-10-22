@@ -93,20 +93,20 @@ async function emptyTrash() {
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between gap-2">
-      <h1 class="text-2xl font-bold">Trash</h1>
+      <h1 class="text-2xl font-bold dark:text-slate-100">Trash</h1>
       <button v-if="entries.length" @click="confirmEmpty = true"
         class="rounded-lg bg-red-600 text-white px-3 py-1.5 text-sm">Empty trash</button>
     </div>
 
-    <p v-if="loading" class="text-slate-400 text-sm">Loading…</p>
+    <p v-if="loading" class="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>
 
     <div v-else-if="entries.length" data-cards class="space-y-2">
       <div v-for="e in entries" :key="e.id"
-        class="bg-white rounded-xl shadow px-4 py-3 flex items-center justify-between gap-2">
+        class="bg-white dark:bg-slate-800 rounded-xl shadow px-4 py-3 flex items-center justify-between gap-2">
         <div>
-          <div class="font-medium">{{ e.name }}</div>
+          <div class="font-medium dark:text-slate-100">{{ e.name }}</div>
           <!-- No <img> here on purpose: thumb_key 404s while trashed. -->
-          <div class="text-xs text-slate-500">
+          <div class="text-xs text-slate-500 dark:text-slate-400">
             qty {{ e.qty }}<span v-if="e.photo_count"> · 📷 {{ e.photo_count }}</span>
             · trashed {{ e.trashed_at.slice(0, 10) }}
             · <span v-if="e.purges_at">purges {{ e.purges_at.slice(0, 10) }}</span><span v-else>kept until purged</span>
@@ -114,17 +114,17 @@ async function emptyTrash() {
         </div>
         <div class="flex gap-2 shrink-0">
           <button @click="restore(e)" :disabled="restoring.has(e.id)"
-            class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-40">
+            class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-40">
             {{ restoring.has(e.id) ? 'Restoring…' : 'Restore' }}
           </button>
-          <button @click="purgeTarget = e" class="rounded-lg border border-red-300 text-red-600 px-3 py-1.5 text-sm">
+          <button @click="purgeTarget = e" class="rounded-lg border border-red-300 text-red-600 dark:text-red-400 px-3 py-1.5 text-sm">
             Purge
           </button>
         </div>
       </div>
     </div>
 
-    <p v-else class="bg-white rounded-xl shadow p-6 text-center text-slate-400 text-sm">Trash is empty.</p>
+    <p v-else class="bg-white dark:bg-slate-800 rounded-xl shadow p-6 text-center text-slate-400 dark:text-slate-500 text-sm">Trash is empty.</p>
 
     <Pagination v-if="entries.length" v-model:page="page" :total="total" :page-size="pageSize" />
 

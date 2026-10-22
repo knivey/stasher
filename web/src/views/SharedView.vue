@@ -83,32 +83,32 @@ async function copy(item: SharedItem) {
 </script>
 <template>
   <div class="space-y-4">
-    <h1 class="text-2xl font-bold">Shared with you</h1>
+    <h1 class="text-2xl font-bold dark:text-slate-100">Shared with you</h1>
 
-    <div class="bg-white rounded-xl shadow p-3 flex gap-2 items-center">
-      <input v-model="search" placeholder="Search shared items…" class="border rounded-lg px-2 py-1.5 text-sm flex-1 min-w-40" />
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow p-3 flex gap-2 items-center">
+      <input v-model="search" placeholder="Search shared items…" class="border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm flex-1 min-w-40" />
     </div>
 
-    <p v-if="loading" class="text-slate-400 text-sm">Loading…</p>
+    <p v-if="loading" class="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>
 
     <div v-else-if="items.length" data-cards class="space-y-2">
       <div v-for="i in items" :key="i.id"
-        class="bg-white rounded-xl shadow px-4 py-3 flex items-center justify-between">
+        class="bg-white dark:bg-slate-800 rounded-xl shadow px-4 py-3 flex items-center justify-between">
         <div>
-          <div class="font-medium">{{ i.name }}<span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 text-gray-500 px-1.5 py-0.5 text-xs font-normal align-middle">disposed</span></div>
-          <div class="text-xs text-slate-500">from {{ i.owner_name }} · {{ i.qty }}{{ i.unit ? ` ${i.unit}` : '' }}</div>
+          <div class="font-medium dark:text-slate-100">{{ i.name }}<span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 dark:bg-slate-700 text-gray-500 dark:text-slate-300 px-1.5 py-0.5 text-xs font-normal align-middle">disposed</span></div>
+          <div class="text-xs text-slate-500 dark:text-slate-400">from {{ i.owner_name }} · {{ i.qty }}{{ i.unit ? ` ${i.unit}` : '' }}</div>
           <img v-if="i.thumb_key" :src="`/files/${i.thumb_key}`" loading="lazy" alt=""
             class="h-24 w-full object-cover rounded-lg" />
-          <div v-else-if="i.photo_count" class="text-xs text-slate-400">📷 {{ i.photo_count }}</div>
+          <div v-else-if="i.photo_count" class="text-xs text-slate-400 dark:text-slate-500">📷 {{ i.photo_count }}</div>
         </div>
         <button @click="copy(i)" :disabled="copying.has(i.id)"
-          class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-40">
+          class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-40">
           {{ copying.has(i.id) ? 'Copying…' : 'Copy' }}
         </button>
       </div>
     </div>
 
-    <p v-else class="bg-white rounded-xl shadow p-6 text-center text-slate-400 text-sm">No shared items found.</p>
+    <p v-else class="bg-white dark:bg-slate-800 rounded-xl shadow p-6 text-center text-slate-400 dark:text-slate-500 text-sm">No shared items found.</p>
 
     <Pagination v-model:page="page" :total="total" :page-size="pageSize" />
   </div>

@@ -130,13 +130,13 @@ watch(usagePage, () => { fetchUsage() })
 // found vs restock: both are "gains" — emerald vs teal keeps them distinct
 // (backlog: they previously shared a color).
 const kindBadgeClass: Record<UsageKind, string> = {
-  used: 'bg-slate-200 text-slate-700',
+  used: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
   sold: 'bg-blue-100 text-blue-700',
   lost: 'bg-red-100 text-red-700',
   found: 'bg-emerald-100 text-emerald-700',
   restock: 'bg-teal-100 text-teal-700',
-  disposed: 'bg-gray-200 text-gray-600',
-  adjustment: 'bg-slate-100 text-slate-500',
+  disposed: 'bg-gray-200 text-gray-600 dark:bg-slate-700 dark:text-slate-300',
+  adjustment: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300',
 }
 
 function fmtDelta(d: number): string {
@@ -203,16 +203,16 @@ onMounted(async () => {
 <template>
   <div v-if="item" class="space-y-6">
     <div class="flex items-center justify-between gap-2">
-      <h1 class="text-2xl font-bold">{{ item.name }}</h1>
+      <h1 class="text-2xl font-bold dark:text-slate-100">{{ item.name }}</h1>
       <div class="flex gap-2">
-        <router-link :to="`/items/${item.id}/edit`" class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm">Edit</router-link>
-        <button @click="openLogForm" class="rounded-lg border px-3 py-1.5 text-sm">Log usage</button>
+        <router-link :to="`/items/${item.id}/edit`" class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm">Edit</router-link>
+        <button @click="openLogForm" class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm">Log usage</button>
         <button @click="confirmDelete = true" class="rounded-lg bg-red-600 text-white px-3 py-1.5 text-sm">Delete</button>
       </div>
     </div>
 
     <img v-if="mainPhoto" :src="`/files/${mainPhoto.storage_key}`" :alt="item.name" data-hero
-      class="w-full max-h-80 object-contain rounded-xl bg-slate-100 cursor-zoom-in"
+      class="w-full max-h-80 object-contain rounded-xl bg-slate-100 dark:bg-slate-700 cursor-zoom-in"
       @click="heroZoom = true" />
     <div v-if="heroZoom" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" @click="heroZoom = false">
       <img v-if="mainPhoto" :src="`/files/${mainPhoto.storage_key}`" class="max-h-full max-w-full object-contain" @click.stop />
@@ -220,59 +220,59 @@ onMounted(async () => {
     </div>
 
     <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-      <span class="font-medium">{{ item.qty }}{{ item.unit ? ` ${item.unit}` : '' }}</span>
-      <span v-if="breadcrumbs.length" class="text-slate-500">{{ breadcrumbs.map(b => b.name).join(' › ') }}</span>
-      <span :class="item.visibility === 'shared' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'"
+      <span class="font-medium dark:text-slate-100">{{ item.qty }}{{ item.unit ? ` ${item.unit}` : '' }}</span>
+      <span v-if="breadcrumbs.length" class="text-slate-500 dark:text-slate-400">{{ breadcrumbs.map(b => b.name).join(' › ') }}</span>
+      <span :class="item.visibility === 'shared' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'"
         class="rounded-full px-2 py-0.5 text-xs font-medium">{{ item.visibility === 'shared' ? 'Shared' : 'Private' }}</span>
-      <span v-if="item.disposed" data-disposed class="rounded-full bg-gray-200 text-gray-500 px-2 py-0.5 text-xs font-medium">disposed</span>
+      <span v-if="item.disposed" data-disposed class="rounded-full bg-gray-200 dark:bg-slate-700 text-gray-500 dark:text-slate-300 px-2 py-0.5 text-xs font-medium">disposed</span>
     </div>
 
     <!-- Inline usage log form (not a route) -->
-    <form v-if="showLogForm" data-log-form class="bg-white rounded-xl shadow p-4 space-y-3" @submit.prevent="submitUsage">
-      <h2 class="text-sm font-semibold">Log usage</h2>
+    <form v-if="showLogForm" data-log-form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3" @submit.prevent="submitUsage">
+      <h2 class="text-sm font-semibold dark:text-slate-100">Log usage</h2>
       <div class="flex gap-4">
-        <label class="flex-1 block text-sm font-medium">Kind
-          <select v-model="logForm.kind" data-log-kind class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal bg-white">
+        <label class="flex-1 block text-sm font-medium dark:text-slate-100">Kind
+          <select v-model="logForm.kind" data-log-kind class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal bg-white">
             <option v-for="k in usageKinds" :key="k" :value="k">{{ k }}</option>
           </select>
         </label>
-        <label v-if="logForm.kind !== 'disposed'" class="flex-1 block text-sm font-medium">Delta
+        <label v-if="logForm.kind !== 'disposed'" class="flex-1 block text-sm font-medium dark:text-slate-100">Delta
           <input v-model.number="logForm.delta" data-log-delta type="number" step="any" required
-            class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal" />
+            class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
         </label>
       </div>
-      <p v-if="logForm.kind === 'disposed'" class="text-xs text-slate-500">Sets quantity to 0 and marks the item disposed.</p>
-      <label class="block text-sm font-medium">Project <span class="font-normal text-slate-400">(optional)</span>
-        <select v-model="logForm.project_id" data-log-project class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal bg-white">
+      <p v-if="logForm.kind === 'disposed'" class="text-xs text-slate-500 dark:text-slate-400">Sets quantity to 0 and marks the item disposed.</p>
+      <label class="block text-sm font-medium dark:text-slate-100">Project <span class="font-normal text-slate-400 dark:text-slate-500">(optional)</span>
+        <select v-model="logForm.project_id" data-log-project class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal bg-white">
           <option :value="0">None</option>
           <option v-for="p in logProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
         </select>
       </label>
-      <label class="block text-sm font-medium">Note <span class="font-normal text-slate-400">(optional)</span>
+      <label class="block text-sm font-medium dark:text-slate-100">Note <span class="font-normal text-slate-400 dark:text-slate-500">(optional)</span>
         <input v-model="logForm.note" data-log-note maxlength="10000" placeholder="What happened…"
-          class="mt-1 w-full border rounded-lg px-2 py-1.5 text-sm font-normal" />
+          class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
       </label>
       <div class="flex justify-end gap-2">
-        <button type="button" @click="showLogForm = false" class="rounded-lg border px-3 py-1.5 text-sm">Cancel</button>
+        <button type="button" @click="showLogForm = false" class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm">Cancel</button>
         <button type="submit" :disabled="logSaving"
-          class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+          class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50">
           {{ logSaving ? 'Logging…' : 'Log' }}</button>
       </div>
     </form>
 
-    <p v-if="item.description" class="bg-white rounded-xl shadow p-4 text-sm whitespace-pre-wrap">{{ item.description }}</p>
+    <p v-if="item.description" class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 text-sm dark:text-slate-100 whitespace-pre-wrap">{{ item.description }}</p>
 
     <section v-if="item.tags?.length">
-      <h2 class="font-semibold mb-2">Tags</h2>
+      <h2 class="font-semibold mb-2 dark:text-slate-100">Tags</h2>
       <div class="flex flex-wrap gap-2">
         <button v-for="t in item.tags" :key="t.id" @click="filterByTag(t.name)"
-          class="bg-slate-100 rounded-full px-3 py-1 text-sm hover:bg-slate-200">#{{ t.name }}</button>
+          class="bg-slate-100 dark:bg-slate-700 dark:text-slate-100 rounded-full px-3 py-1 text-sm hover:bg-slate-200 dark:hover:bg-slate-600">#{{ t.name }}</button>
       </div>
     </section>
 
     <section>
       <div class="flex items-center justify-between mb-2">
-        <h2 class="font-semibold">Photos</h2>
+        <h2 class="font-semibold dark:text-slate-100">Photos</h2>
         <FileUpload kind="photo" :item-id="item.id" @uploaded="fetchItem" />
       </div>
       <PhotoGallery v-if="item.photos?.length" :photos="item.photos" :can-edit="true" @delete="deletePhoto" @main="makeMain" />
@@ -280,13 +280,13 @@ onMounted(async () => {
 
     <section>
       <div class="flex items-center justify-between mb-2">
-        <h2 class="font-semibold">Documents</h2>
+        <h2 class="font-semibold dark:text-slate-100">Documents</h2>
         <FileUpload kind="doc" :item-id="item.id" @uploaded="fetchItem" />
       </div>
-      <ul v-if="item.documents?.length" class="bg-white rounded-xl shadow divide-y text-sm">
+      <ul v-if="item.documents?.length" class="bg-white dark:bg-slate-800 rounded-xl shadow divide-y dark:divide-slate-700 text-sm">
         <li v-for="d in item.documents" :key="d.id" class="flex items-center justify-between gap-2 px-4 py-2">
-          <a :href="`/files/${d.storage_key}`" target="_blank" rel="noopener" class="hover:underline">📄 {{ d.filename }} ({{ Math.ceil(d.size_bytes / 1024) }} KB)</a>
-          <button @click="deleteDoc(d)" class="text-red-600">Delete</button>
+          <a :href="`/files/${d.storage_key}`" target="_blank" rel="noopener" class="hover:underline dark:text-slate-100">📄 {{ d.filename }} ({{ Math.ceil(d.size_bytes / 1024) }} KB)</a>
+          <button @click="deleteDoc(d)" class="text-red-600 dark:text-red-400">Delete</button>
         </li>
       </ul>
     </section>
@@ -294,31 +294,31 @@ onMounted(async () => {
     <!-- Usage history (newest first; the ledger is written by usage posts and
          qty-changing PATCHes alike — see api-notes "Usage ledger") -->
     <section data-usage>
-      <h2 class="font-semibold mb-2">History</h2>
-      <p v-if="usageLoading" class="text-slate-400 text-sm">Loading…</p>
+      <h2 class="font-semibold mb-2 dark:text-slate-100">History</h2>
+      <p v-if="usageLoading" class="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>
       <template v-else>
-        <ul v-if="usage.length" class="bg-white rounded-xl shadow divide-y text-sm">
+        <ul v-if="usage.length" class="bg-white dark:bg-slate-800 rounded-xl shadow divide-y dark:divide-slate-700 text-sm">
           <li v-for="e in usage" :key="e.id" class="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
-            <span class="font-medium tabular-nums">{{ fmtDelta(e.delta) }}</span>
+            <span class="font-medium tabular-nums dark:text-slate-100">{{ fmtDelta(e.delta) }}</span>
             <span data-kind-badge class="rounded-full px-2 py-0.5 text-xs font-medium" :class="kindBadgeClass[e.kind]">{{ e.kind }}</span>
             <router-link v-if="e.project_id" :to="`/projects/${e.project_id}`"
-              class="bg-slate-100 rounded-full px-2 py-0.5 text-xs hover:bg-slate-200">🧵 {{ projectName(e.project_id) }}</router-link>
-            <span v-if="e.note" class="text-slate-500">“{{ e.note }}”</span>
-            <span class="text-slate-500">→ {{ e.resulting_qty }} left</span>
-            <span class="ml-auto text-xs text-slate-400">{{ e.created_at.slice(0, 10) }}</span>
+              class="bg-slate-100 dark:bg-slate-700 dark:text-slate-100 rounded-full px-2 py-0.5 text-xs hover:bg-slate-200 dark:hover:bg-slate-600">🧵 {{ projectName(e.project_id) }}</router-link>
+            <span v-if="e.note" class="text-slate-500 dark:text-slate-400">“{{ e.note }}”</span>
+            <span class="text-slate-500 dark:text-slate-400">→ {{ e.resulting_qty }} left</span>
+            <span class="ml-auto text-xs text-slate-400 dark:text-slate-500">{{ e.created_at.slice(0, 10) }}</span>
           </li>
         </ul>
-        <p v-else class="text-slate-400 text-sm">No usage recorded.</p>
+        <p v-else class="text-slate-400 dark:text-slate-500 text-sm">No usage recorded.</p>
         <Pagination v-if="usage.length" v-model:page="usagePage" :total="usageTotal" :page-size="usagePageSize" class="mt-2" />
       </template>
     </section>
 
     <section v-if="item.projects?.length">
-      <h2 class="font-semibold mb-2">Used in projects</h2>
-      <ul class="bg-white rounded-xl shadow divide-y text-sm">
+      <h2 class="font-semibold mb-2 dark:text-slate-100">Used in projects</h2>
+      <ul class="bg-white dark:bg-slate-800 rounded-xl shadow divide-y dark:divide-slate-700 text-sm">
         <li v-for="p in item.projects" :key="p.id" class="flex items-center justify-between px-4 py-2">
-          <router-link :to="`/projects/${p.id}`" class="hover:underline">{{ p.name }}</router-link>
-          <span v-if="p.qty_used !== null" class="text-slate-500">{{ p.qty_used }} used</span>
+          <router-link :to="`/projects/${p.id}`" class="hover:underline dark:text-slate-100">{{ p.name }}</router-link>
+          <span v-if="p.qty_used !== null" class="text-slate-500 dark:text-slate-400">{{ p.qty_used }} used</span>
         </li>
       </ul>
     </section>
@@ -327,5 +327,5 @@ onMounted(async () => {
       message="The item will be moved to trash. You can restore it from Trash before it is permanently purged."
       confirm-label="Delete" @confirm="deleteItem" @cancel="confirmDelete = false" />
   </div>
-  <p v-else class="text-slate-400 text-sm">Loading…</p>
+  <p v-else class="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>
 </template>

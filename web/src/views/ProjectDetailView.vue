@@ -223,93 +223,93 @@ async function addProjectItem() {
 </script>
 <template>
   <div v-if="project" class="max-w-4xl space-y-6">
-    <router-link to="/projects" class="text-sm text-slate-500 hover:underline">← Projects</router-link>
+    <router-link to="/projects" class="text-sm text-slate-500 dark:text-slate-400 hover:underline">← Projects</router-link>
 
-    <div class="bg-white rounded-xl shadow p-4">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow p-4">
       <div v-if="!editing" class="flex flex-wrap items-center justify-between gap-3">
         <div class="min-w-0">
-          <h1 class="text-2xl font-bold flex items-center gap-3 flex-wrap">
+          <h1 class="text-2xl font-bold dark:text-slate-100 flex items-center gap-3 flex-wrap">
             <span>{{ project.name }}</span>
             <span data-status-badge class="rounded-full px-2 py-0.5 text-xs font-medium"
               :class="statusBadgeClass(project.status)">{{ project.status }}</span>
           </h1>
-          <p v-if="project.notes" class="mt-1 text-sm text-slate-500 whitespace-pre-wrap">{{ project.notes }}</p>
+          <p v-if="project.notes" class="mt-1 text-sm text-slate-500 dark:text-slate-400 whitespace-pre-wrap">{{ project.notes }}</p>
         </div>
         <div class="flex items-center gap-3 shrink-0">
-          <label class="text-sm text-slate-600">Status
+          <label class="text-sm text-slate-600 dark:text-slate-300">Status
             <select v-model="project.status" data-status :disabled="statusSaving"
-              class="mt-1 ml-1 border rounded-lg px-2 py-1 text-sm" @change="onStatusChange">
+              class="mt-1 ml-1 border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1 text-sm" @change="onStatusChange">
               <option v-for="s in PROJECT_STATUSES" :key="s" :value="s">{{ s }}</option>
             </select>
           </label>
-          <button data-edit class="text-slate-600 hover:underline" @click="startEdit">Edit</button>
-          <button data-delete class="text-red-600 hover:underline" @click="confirmDelete = true">Delete</button>
+          <button data-edit class="text-slate-600 dark:text-slate-300 hover:underline" @click="startEdit">Edit</button>
+          <button data-delete class="text-red-600 dark:text-red-400 hover:underline" @click="confirmDelete = true">Delete</button>
         </div>
       </div>
       <div v-else class="space-y-2">
         <input v-model="editName" data-edit-name maxlength="200" aria-label="Name"
-          class="w-full border rounded-lg px-2 py-1.5 text-lg font-bold" />
+          class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-lg font-bold" />
         <textarea v-model="editNotes" data-edit-notes rows="2" maxlength="10000" placeholder="Notes"
-          class="w-full border rounded-lg px-2 py-1.5 text-sm"></textarea>
-        <p v-if="editError" class="text-xs text-red-600">{{ editError }}</p>
+          class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm"></textarea>
+        <p v-if="editError" class="text-xs text-red-600 dark:text-red-400">{{ editError }}</p>
         <div class="flex gap-2">
           <button data-save :disabled="saving"
-            class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-50" @click="saveEdit">Save</button>
-          <button class="rounded-lg border px-3 py-1.5 text-sm" @click="cancelEdit">Cancel</button>
+            class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50" @click="saveEdit">Save</button>
+          <button class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm" @click="cancelEdit">Cancel</button>
         </div>
       </div>
     </div>
 
-    <div class="bg-white rounded-xl shadow p-4 space-y-3">
-      <h2 class="text-sm font-semibold text-slate-700">Items</h2>
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3">
+      <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Items</h2>
 
-      <p v-if="!items.length" class="text-slate-400 text-sm">No items linked yet.</p>
+      <p v-if="!items.length" class="text-slate-400 dark:text-slate-500 text-sm">No items linked yet.</p>
       <table v-else class="w-full text-sm">
         <thead>
-          <tr class="text-left text-xs text-slate-500 border-b">
+          <tr class="text-left text-xs text-slate-500 dark:text-slate-400 border-b dark:border-slate-700">
             <th class="py-2 pr-2 font-medium">Item</th>
             <th class="py-2 pr-2 font-medium">In stock</th>
             <th class="py-2 pr-2 font-medium">Qty used</th>
             <th class="py-2 font-medium"></th>
           </tr>
         </thead>
-        <tbody class="divide-y">
+        <tbody class="divide-y dark:divide-slate-700">
           <tr v-for="pi in items" :key="pi.item_id">
             <td class="py-2 pr-2">
-              <router-link :to="`/items/${pi.item_id}`" data-item-name class="hover:underline">{{ pi.item_name }}</router-link>
+              <router-link :to="`/items/${pi.item_id}`" data-item-name class="hover:underline dark:text-slate-100">{{ pi.item_name }}</router-link>
             </td>
-            <td class="py-2 pr-2 text-slate-500">{{ pi.item_qty }}{{ pi.item_unit ? ' ' + pi.item_unit : '' }}</td>
+            <td class="py-2 pr-2 text-slate-500 dark:text-slate-400">{{ pi.item_qty }}{{ pi.item_unit ? ' ' + pi.item_unit : '' }}</td>
             <td class="py-2 pr-2">
               <span class="flex items-center gap-1">
                 <input v-model="qtyEdits[pi.item_id]" data-qty-used type="number" step="any" min="0"
-                  class="w-20 border rounded-lg px-2 py-1" :aria-label="`Qty used for ${pi.item_name}`" />
+                  class="w-20 border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1" :aria-label="`Qty used for ${pi.item_name}`" />
                 <button data-qty-save :disabled="qtySaving > 0"
-                  class="text-slate-600 hover:underline disabled:opacity-50" @click="saveQty(pi)">Save</button>
+                  class="text-slate-600 dark:text-slate-300 hover:underline disabled:opacity-50" @click="saveQty(pi)">Save</button>
               </span>
             </td>
             <td class="py-2 text-right">
               <button data-remove :disabled="removing > 0"
-                class="text-red-600 hover:underline disabled:opacity-50" @click="removeItem(pi)">Remove</button>
+                class="text-red-600 dark:text-red-400 hover:underline disabled:opacity-50" @click="removeItem(pi)">Remove</button>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <form class="flex flex-wrap items-end gap-2 border-t pt-3" @submit.prevent="addProjectItem">
-        <label class="text-sm font-medium">Add item
+      <form class="flex flex-wrap items-end gap-2 border-t dark:border-slate-700 pt-3" @submit.prevent="addProjectItem">
+        <label class="text-sm font-medium dark:text-slate-100">Add item
           <select v-model="addItem" data-add-item :disabled="adding"
-            class="mt-1 block border rounded-lg px-2 py-1.5 text-sm font-normal">
+            class="mt-1 block border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal">
             <option value="" disabled>Choose an item…</option>
             <option v-for="i in pickerOptions" :key="i.id" :value="String(i.id)">{{ i.name }}</option>
           </select>
         </label>
-        <label class="text-sm font-medium">Qty used
+        <label class="text-sm font-medium dark:text-slate-100">Qty used
           <input v-model="addQty" data-add-qty type="number" step="any" min="0"
-            class="mt-1 w-24 border rounded-lg px-2 py-1.5 text-sm font-normal" />
+            class="mt-1 w-24 border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
         </label>
         <button type="submit" data-add :disabled="adding || !addItem"
-          class="rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm disabled:opacity-50">Add</button>
-        <p v-if="allItems.length && !pickerOptions.length" class="w-full text-xs text-slate-400">
+          class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50">Add</button>
+        <p v-if="allItems.length && !pickerOptions.length" class="w-full text-xs text-slate-400 dark:text-slate-500">
           All your items are already linked.
         </p>
       </form>

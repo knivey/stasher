@@ -1,6 +1,16 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      (function () {
+        try {
+          var m = localStorage.getItem('stasher-theme')
+          var dark = m ? m === 'dark'
+            : window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) { /* private mode: default light */ }
+      })()
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest">
@@ -9,9 +19,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0f172a">
     <title>stasher</title>
-    <script type="module" crossorigin src="/assets/index-D2wcTajo.js"></script>
+    <script type="module" crossorigin src="/assets/index-DkjPPSRT.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/client-ZheBNp85.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-DOFVOjgA.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-C-z1ntEs.css">
   </head>
   <body>
     <div id="app"></div>

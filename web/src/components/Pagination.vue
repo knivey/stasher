@@ -1,10 +1,10 @@
 <template>
-  <div class="flex items-center gap-2 text-sm">
+  <div class="flex items-center gap-2 text-sm dark:text-slate-100">
     <button :disabled="page <= 1" @click="$emit('update:page', page - 1)"
-      class="rounded border px-2 py-1 disabled:opacity-40">Prev</button>
+      class="rounded border dark:border-slate-700 dark:text-slate-100 px-2 py-1 disabled:opacity-40">Prev</button>
     <span>Page {{ page }} of {{ pages }} · {{ total }} items</span>
     <button :disabled="page >= pages" @click="$emit('update:page', page + 1)"
-      class="rounded border px-2 py-1 disabled:opacity-40">Next</button>
+      class="rounded border dark:border-slate-700 dark:text-slate-100 px-2 py-1 disabled:opacity-40">Next</button>
   </div>
 </template>
 <script setup lang="ts">

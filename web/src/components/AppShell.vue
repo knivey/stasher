@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-slate-100">
+  <div class="min-h-screen bg-slate-100 dark:bg-slate-900">
     <!-- desktop sidebar -->
     <aside class="hidden md:flex fixed inset-y-0 left-0 w-56 flex-col bg-slate-900 text-slate-100 p-4 gap-1">
       <h1 class="text-lg font-bold px-2 py-3">Stasher</h1>
