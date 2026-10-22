@@ -170,4 +170,30 @@ describe('ProjectDetailView', () => {
     expect(router.currentRoute.value.path).toBe('/projects')
     expect(toasts.some(t => t.message === 'project not found' && t.type === 'error')).toBe(true)
   })
+
+  it('delete via ConfirmDialog: DELETEs /projects/1, toasts, navigates to /projects', async () => {
+    const calls = mockFetch()
+    const { w, router } = await mountView()
+    await w.find('[data-delete]').trigger('click')
+    // nothing deleted yet — the dialog is open with the linked-items warning
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false)
+    const overlay = w.find('.fixed.inset-0')
+    expect(overlay.text())
+      .toContain('Permanently delete this project? Linked items are NOT deleted — only their links to this project are removed.')
+    await overlay.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
+    await flushPromises()
+    expect(calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/projects/1')).toBe(true)
+    expect(toasts.some(t => t.message === 'Project deleted' && t.type === 'success')).toBe(true)
+    expect(router.currentRoute.value.path).toBe('/projects')
+  })
+
+  it('canceling the delete dialog sends no DELETE', async () => {
+    const calls = mockFetch()
+    const { w } = await mountView()
+    await w.find('[data-delete]').trigger('click')
+    await w.find('.fixed.inset-0').findAll('button').find(b => b.text() === 'Cancel')!.trigger('click')
+    await flushPromises()
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false)
+    expect(w.find('.fixed.inset-0').exists()).toBe(false)
+  })
 })

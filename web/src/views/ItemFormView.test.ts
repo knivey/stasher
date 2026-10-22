@@ -184,6 +184,36 @@ describe('ItemFormView create', () => {
     expect(router.currentRoute.value.path).toBe('/items/42')
   })
 
+  it('disables the photo and document pick inputs while a save is in flight', async () => {
+    // Residual race (backlog): a pick STARTED during an in-flight save
+    // misses the post-POST encode drain. Blocking the pickers closes it.
+    let releasePost!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST')
+        return new Promise<Response>(res => { releasePost = res })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    await router.push('/items/new')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    const vm = w.vm as any
+    vm.form.name = 'Picker locked'
+    const photoInput = w.find('input[accept="image/*"]')
+    const docInput = w.findAll('input[type="file"]').find(i => !i.attributes('accept'))!
+    expect(photoInput.attributes('disabled')).toBeUndefined()
+    expect(docInput.attributes('disabled')).toBeUndefined()
+
+    const saving = vm.save()
+    await flushPromises()
+    expect(photoInput.attributes('disabled')).toBeDefined()
+    expect(docInput.attributes('disabled')).toBeDefined()
+
+    releasePost(new Response(JSON.stringify({ id: 42 }), { status: 200 }))
+    await saving
+    await flushPromises()
+  })
+
   it('toasts but still navigates when a queued upload fails after create', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
       if (url.endsWith('/api/v1/items') && init?.method === 'POST')

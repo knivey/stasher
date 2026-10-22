@@ -226,11 +226,17 @@ defineExpose({ form, save, tagsEqual })
       </div>
       <div v-if="!editing" class="block text-sm font-medium">Photos & documents
         <div class="mt-1 flex gap-2">
-          <label class="rounded-lg border px-3 py-1.5 text-sm font-normal cursor-pointer">Add photo 📷
-            <input type="file" accept="image/*" capture="environment" multiple class="hidden" @change="onPickPhotos" />
+          <!-- :disabled blocks label-click activation too; the labels dim and
+               go inert so a pick can't START mid-save and miss the encode
+               drain (backlog: residual upload race). -->
+          <label class="rounded-lg border px-3 py-1.5 text-sm font-normal cursor-pointer"
+            :class="saving && 'opacity-50 pointer-events-none'">Add photo 📷
+            <input type="file" accept="image/*" capture="environment" multiple class="hidden"
+              :disabled="saving" @change="onPickPhotos" />
           </label>
-          <label class="rounded-lg border px-3 py-1.5 text-sm font-normal cursor-pointer">Add document
-            <input type="file" multiple class="hidden" @change="onPickDocs" />
+          <label class="rounded-lg border px-3 py-1.5 text-sm font-normal cursor-pointer"
+            :class="saving && 'opacity-50 pointer-events-none'">Add document
+            <input type="file" multiple class="hidden" :disabled="saving" @change="onPickDocs" />
           </label>
         </div>
         <p v-if="queuedPhotos.length || queuedDocs.length" class="mt-1 text-xs text-slate-500 font-normal">

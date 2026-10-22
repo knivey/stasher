@@ -5,6 +5,7 @@ import { api, ApiError } from '../api/client'
 import type { Item, ListResponse, Project, ProjectItem } from '../api/types'
 import { toast } from '../utils/toast'
 import { PROJECT_STATUSES, statusBadgeClass } from '../utils/projects'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -175,6 +176,23 @@ async function removeItem(pi: ProjectItem) {
   }
 }
 
+// ---- Delete project ----
+// Deleting removes the project and its item links only — the items
+// themselves survive. The ConfirmDialog spells that out before the DELETE.
+const confirmDelete = ref(false)
+
+async function deleteProject() {
+  if (!project.value) return
+  confirmDelete.value = false
+  try {
+    await api.del(`/api/v1/projects/${project.value.id}`)
+    toast('Project deleted', 'success')
+    router.push('/projects')
+  } catch (e) {
+    toast((e as Error).message, 'error')
+  }
+}
+
 // ---- Add item picker ----
 // Already-linked items are hidden; qty_used is optional on add (empty omits it,
 // leaving the backend's NULL until the user edits the row).
@@ -225,6 +243,7 @@ async function addProjectItem() {
             </select>
           </label>
           <button data-edit class="text-slate-600 hover:underline" @click="startEdit">Edit</button>
+          <button data-delete class="text-red-600 hover:underline" @click="confirmDelete = true">Delete</button>
         </div>
       </div>
       <div v-else class="space-y-2">
@@ -295,5 +314,9 @@ async function addProjectItem() {
         </p>
       </form>
     </div>
+
+    <ConfirmDialog :open="confirmDelete" :title="`Delete '${project.name}'`"
+      message="Permanently delete this project? Linked items are NOT deleted — only their links to this project are removed."
+      confirm-label="Delete" @confirm="deleteProject" @cancel="confirmDelete = false" />
   </div>
 </template>

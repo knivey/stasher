@@ -109,12 +109,14 @@ async function fetchUsage() {
 watch(usagePage, () => { fetchUsage() })
 
 // Badge colors per kind (see api-notes: kinds are a fixed whitelist).
+// found vs restock: both are "gains" — emerald vs teal keeps them distinct
+// (backlog: they previously shared a color).
 const kindBadgeClass: Record<UsageKind, string> = {
   used: 'bg-slate-200 text-slate-700',
   sold: 'bg-blue-100 text-blue-700',
   lost: 'bg-red-100 text-red-700',
   found: 'bg-emerald-100 text-emerald-700',
-  restock: 'bg-emerald-100 text-emerald-700',
+  restock: 'bg-teal-100 text-teal-700',
   disposed: 'bg-gray-200 text-gray-600',
   adjustment: 'bg-slate-100 text-slate-500',
 }

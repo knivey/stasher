@@ -104,6 +104,22 @@ describe('TrashView', () => {
     expect(calls.filter(c => c === LIST_URL)).toHaveLength(2)
   })
 
+  it('toasts and refetches when the entry vanished before purge (purge 404)', async () => {
+    // Mirror of the restore-404 branch: the row is stale (expired and swept
+    // by another request), so the list must refetch after the toast.
+    const { stub, calls } = trashFetch((url, init) => {
+      if (url.includes('/trash/7') && init?.method === 'DELETE')
+        return new Response(JSON.stringify({ error: { code: 'not_found', message: 'trash entry not found' } }), { status: 404 })
+    })
+    vi.stubGlobal('fetch', stub)
+    const w = await mountView()
+    await w.findAll('[data-cards] > div')[0].findAll('button').find(b => b.text() === 'Purge')!.trigger('click')
+    await w.find('.fixed.inset-0').findAll('button').find(b => b.text() === 'Purge')!.trigger('click')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'trash entry not found' && t.type === 'error')).toBe(true)
+    expect(calls.filter(c => c === LIST_URL)).toHaveLength(2)
+  })
+
   it('purges via ConfirmDialog: DELETE /trash/{id}, toasts, refetches', async () => {
     const { stub, calls } = trashFetch((_url, init) => {
       if (init?.method === 'DELETE') return new Response(null, { status: 204 })

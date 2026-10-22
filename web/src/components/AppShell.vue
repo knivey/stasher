@@ -20,10 +20,17 @@
     <header class="md:hidden sticky top-0 z-10 bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
       <span class="font-bold">Stasher</span>
       <nav class="flex items-center gap-3 text-sm" aria-label="Secondary">
-        <router-link to="/shared" aria-label="Shared" title="Shared">👥</router-link>
-        <router-link to="/trash" aria-label="Trash" title="Trash">🗑️</router-link>
-        <router-link to="/settings" aria-label="Settings" title="Settings">⚙️</router-link>
-        <router-link v-if="auth.user?.is_admin" to="/admin" aria-label="Admin" title="Admin">🛡️</router-link>
+        <!-- 44px tap targets (WCAG/mobile comfort): the emoji glyphs are
+             tiny, so pad the links out to finger size without changing
+             the desktop sidebar above. -->
+        <router-link to="/shared" aria-label="Shared" title="Shared"
+          class="inline-flex min-w-11 min-h-11 items-center justify-center">👥</router-link>
+        <router-link to="/trash" aria-label="Trash" title="Trash"
+          class="inline-flex min-w-11 min-h-11 items-center justify-center">🗑️</router-link>
+        <router-link to="/settings" aria-label="Settings" title="Settings"
+          class="inline-flex min-w-11 min-h-11 items-center justify-center">⚙️</router-link>
+        <router-link v-if="auth.user?.is_admin" to="/admin" aria-label="Admin" title="Admin"
+          class="inline-flex min-w-11 min-h-11 items-center justify-center">🛡️</router-link>
         <button @click="logout">Sign out</button>
       </nav>
     </header>

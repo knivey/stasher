@@ -71,6 +71,9 @@ async function purge() {
     await fetch()
   } catch (err) {
     toast((err as Error).message, 'error')
+    // 404 = already gone (expired entry swept server-side) — the row is
+    // stale, refetch like the restore-404 branch.
+    if (err instanceof ApiError && err.status === 404) fetch()
   }
 }
 
