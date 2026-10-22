@@ -46,6 +46,30 @@ func (q *Queries) AddItemDocument(ctx context.Context, arg AddItemDocumentParams
 	return i, err
 }
 
+const addItemNote = `-- name: AddItemNote :one
+INSERT INTO item_notes (item_id, body, created_at)
+VALUES (?, ?, ?)
+RETURNING id, item_id, body, created_at
+`
+
+type AddItemNoteParams struct {
+	ItemID    int64  `json:"item_id"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (q *Queries) AddItemNote(ctx context.Context, arg AddItemNoteParams) (ItemNote, error) {
+	row := q.db.QueryRowContext(ctx, addItemNote, arg.ItemID, arg.Body, arg.CreatedAt)
+	var i ItemNote
+	err := row.Scan(
+		&i.ID,
+		&i.ItemID,
+		&i.Body,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const addItemPhoto = `-- name: AddItemPhoto :one
 INSERT INTO item_photos (item_id, storage_key, thumb_key, caption, sort_order, created_at)
 VALUES (?, ?, ?, ?, ?, ?) RETURNING id, item_id, storage_key, caption, sort_order, created_at, thumb_key
@@ -605,6 +629,24 @@ type DeleteItemDocumentParams struct {
 func (q *Queries) DeleteItemDocument(ctx context.Context, arg DeleteItemDocumentParams) error {
 	_, err := q.db.ExecContext(ctx, deleteItemDocument, arg.ID, arg.ItemID)
 	return err
+}
+
+const deleteItemNote = `-- name: DeleteItemNote :execrows
+DELETE FROM item_notes WHERE id = ? AND item_id = ?
+`
+
+type DeleteItemNoteParams struct {
+	ID     int64 `json:"id"`
+	ItemID int64 `json:"item_id"`
+}
+
+// execrows so the handler can 404 an absent note (photos/docs semantics)
+func (q *Queries) DeleteItemNote(ctx context.Context, arg DeleteItemNoteParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteItemNote, arg.ID, arg.ItemID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteItemPhoto = `-- name: DeleteItemPhoto :exec
@@ -1323,6 +1365,38 @@ func (q *Queries) ListItemLedgerAll(ctx context.Context, arg ListItemLedgerAllPa
 			&i.Kind,
 			&i.ProjectID,
 			&i.Note,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listItemNotes = `-- name: ListItemNotes :many
+SELECT id, item_id, body, created_at FROM item_notes WHERE item_id = ? ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListItemNotes(ctx context.Context, itemID int64) ([]ItemNote, error) {
+	rows, err := q.db.QueryContext(ctx, listItemNotes, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ItemNote
+	for rows.Next() {
+		var i ItemNote
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.Body,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

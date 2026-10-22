@@ -252,6 +252,18 @@ SELECT d.id AS document_id, d.storage_key, d.filename, d.mime_type,
 FROM item_documents d JOIN items i ON i.id = d.item_id
 WHERE d.storage_key = ?;
 
+-- name: AddItemNote :one
+INSERT INTO item_notes (item_id, body, created_at)
+VALUES (?, ?, ?)
+RETURNING *;
+
+-- name: ListItemNotes :many
+SELECT * FROM item_notes WHERE item_id = ? ORDER BY created_at DESC, id DESC;
+
+-- name: DeleteItemNote :execrows
+-- execrows so the handler can 404 an absent note (photos/docs semantics)
+DELETE FROM item_notes WHERE id = ? AND item_id = ?;
+
 -- name: CreateProject :one
 INSERT INTO projects (user_id, name, status, notes, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?) RETURNING *;

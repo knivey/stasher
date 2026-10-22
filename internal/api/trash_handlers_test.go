@@ -559,3 +559,56 @@ func TestTrashIsolation(t *testing.T) {
 		t.Fatalf("alice trash total after bob empty = %d, want 1", total)
 	}
 }
+
+// TestTrashRestorePreservesNotes: notes ride the trash snapshot and come
+// back on restore with their ORIGINAL created_at (ledger precedent); the
+// trash LISTING stays note-free (no notes payload in the row envelope).
+func TestTrashRestorePreservesNotes(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "trash-notes@test.dev", "longpassword1")
+
+	id := createQtyItem(t, ts, cookie, "annotated widget", 1)
+	addItemNote(t, ts, cookie, id, "first note")
+	addItemNote(t, ts, cookie, id, "second note")
+	// pin both created_at values in the past so restore cannot fake
+	// preservation with a same-second now
+	mustExec(t, s, "UPDATE item_notes SET created_at = ? WHERE item_id = ? AND body = ?",
+		"2026-01-15T10:00:00Z", id, "first note")
+	mustExec(t, s, "UPDATE item_notes SET created_at = ? WHERE item_id = ? AND body = ?",
+		"2026-01-16T10:00:00Z", id, "second note")
+
+	doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(id), nil, cookie)
+	entries, _ := listTrash(t, ts, cookie)
+	if len(entries) != 1 {
+		t.Fatalf("trash entries = %d, want 1", len(entries))
+	}
+	// the listing envelope carries no notes payload
+	var listBody struct {
+		Data []map[string]any `json:"data"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/trash", nil, cookie), &listBody)
+	if _, has := listBody.Data[0]["notes"]; has {
+		t.Fatal("trash listing carries a notes payload; listing stays note-free by design")
+	}
+
+	resp := doJSON(t, ts, "POST", "/api/v1/trash/"+fmtInt64(entries[0].ID)+"/restore", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("restore = %d", resp.StatusCode)
+	}
+	var restored struct {
+		ID    int64      `json:"id"`
+		Notes []noteJSON `json:"notes"`
+	}
+	decodeBody(t, resp, &restored)
+	if restored.ID == id {
+		t.Fatal("restore reused the old item id")
+	}
+	if len(restored.Notes) != 2 {
+		t.Fatalf("restored notes = %+v, want 2", restored.Notes)
+	}
+	// newest first, ORIGINAL timestamps preserved
+	if restored.Notes[0].Body != "second note" || restored.Notes[0].CreatedAt != "2026-01-16T10:00:00Z" ||
+		restored.Notes[1].Body != "first note" || restored.Notes[1].CreatedAt != "2026-01-15T10:00:00Z" {
+		t.Fatalf("restored notes = %+v, want bodies + original created_at", restored.Notes)
+	}
+}

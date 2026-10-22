@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -69,9 +70,20 @@ func (s *Server) itemDetailJSON(r *http.Request, i dbpkg.Item) (map[string]any, 
 			"mime_type": d.MimeType, "size_bytes": d.SizeBytes, "created_at": d.CreatedAt,
 		})
 	}
+	notes, err := s.q.ListItemNotes(r.Context(), i.ID)
+	if err != nil {
+		return nil, err
+	}
+	noteList := make([]map[string]any, 0, len(notes))
+	for _, n := range notes {
+		noteList = append(noteList, map[string]any{
+			"id": n.ID, "body": n.Body, "created_at": n.CreatedAt,
+		})
+	}
 	out["tags"] = tagList
 	out["photos"] = photoList
 	out["documents"] = docList
+	out["notes"] = noteList
 	projects, err := s.q.GetItemProjects(r.Context(), i.ID)
 	if err != nil {
 		return nil, err
@@ -651,6 +663,68 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := tx.Commit(); err != nil {
 		s.internalErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- Item notes ----
+
+type noteReq struct {
+	Body string `json:"body"`
+}
+
+// handleAddItemNote creates a timestamped note on an owned item. The body
+// is trimmed and must be 1-2000 chars AFTER the trim (a whitespace-only
+// body is empty).
+func (s *Server) handleAddItemNote(w http.ResponseWriter, r *http.Request) {
+	u, _ := currentUser(r.Context())
+	item, ok := s.requireOwnedItem(w, r, u)
+	if !ok {
+		return
+	}
+	var req noteReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	body := strings.TrimSpace(req.Body)
+	if body == "" || len(body) > 2000 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "note must be 1-2000 characters")
+		return
+	}
+	note, err := s.q.AddItemNote(r.Context(), dbpkg.AddItemNoteParams{
+		ItemID: item.ID, Body: body,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id": note.ID, "body": note.Body, "created_at": note.CreatedAt,
+	})
+}
+
+// handleDeleteItemNote removes one of the item's notes (204). An absent or
+// already-deleted note is 404 via execrows.
+func (s *Server) handleDeleteItemNote(w http.ResponseWriter, r *http.Request) {
+	u, _ := currentUser(r.Context())
+	item, ok := s.requireOwnedItem(w, r, u)
+	if !ok {
+		return
+	}
+	noteID, err := strconv.ParseInt(chi.URLParam(r, "noteId"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid note id")
+		return
+	}
+	rows, err := s.q.DeleteItemNote(r.Context(), dbpkg.DeleteItemNoteParams{ID: noteID, ItemID: item.ID})
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	if rows == 0 {
+		writeErr(w, http.StatusNotFound, "not_found", "note not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

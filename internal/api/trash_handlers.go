@@ -29,6 +29,7 @@ type trashSnapshot struct {
 	Tags         []string                  `json:"tags"`
 	Photos       []trashSnapshotPhoto      `json:"photos"`
 	Documents    []trashSnapshotDocument   `json:"documents"`
+	Notes        []trashSnapshotNote       `json:"notes"`
 	ProjectItems []trashSnapshotProjectRef `json:"project_items"`
 	Ledger       []trashSnapshotLedger     `json:"ledger"`
 }
@@ -45,6 +46,13 @@ type trashSnapshotDocument struct {
 	Filename   string `json:"filename"`
 	MimeType   string `json:"mime_type"`
 	SizeBytes  int64  `json:"size_bytes"`
+}
+
+// trashSnapshotNote keeps only body + created_at (the note's whole state;
+// ids are re-assigned on restore, timestamps are preserved - ledger-style).
+type trashSnapshotNote struct {
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
 }
 
 type trashSnapshotProjectRef struct {
@@ -105,6 +113,14 @@ func buildTrashSnapshot(ctx context.Context, q *dbpkg.Queries, item dbpkg.Item) 
 			StorageKey: d.StorageKey, Filename: d.Filename,
 			MimeType: d.MimeType, SizeBytes: d.SizeBytes,
 		})
+	}
+	notes, err := q.ListItemNotes(ctx, item.ID)
+	if err != nil {
+		return snap, err
+	}
+	snap.Notes = make([]trashSnapshotNote, 0, len(notes))
+	for _, n := range notes {
+		snap.Notes = append(snap.Notes, trashSnapshotNote{Body: n.Body, CreatedAt: n.CreatedAt})
 	}
 	links, err := q.ListItemProjectLinks(ctx, item.ID)
 	if err != nil {
@@ -331,6 +347,14 @@ func (s *Server) handleRestoreTrashEntry(w http.ResponseWriter, r *http.Request)
 		if _, err := qtx.AddItemDocument(r.Context(), dbpkg.AddItemDocumentParams{
 			ItemID: item.ID, StorageKey: d.StorageKey, Filename: d.Filename,
 			MimeType: d.MimeType, SizeBytes: d.SizeBytes, CreatedAt: now,
+		}); err != nil {
+			s.internalErr(w, err)
+			return
+		}
+	}
+	for _, n := range snap.Notes { // original created_at (ledger precedent)
+		if _, err := qtx.AddItemNote(r.Context(), dbpkg.AddItemNoteParams{
+			ItemID: item.ID, Body: n.Body, CreatedAt: n.CreatedAt,
 		}); err != nil {
 			s.internalErr(w, err)
 			return

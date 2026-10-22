@@ -279,3 +279,36 @@ func TestCopyDuplicatesThumb(t *testing.T) {
 		f.Close()
 	}
 }
+
+// TestCopyNotesNotCopied: notes are personal to the source item and are NOT
+// copied — the copy starts with an empty notes list (same ruling as the
+// usage ledger's fresh baseline). The source keeps its notes.
+func TestCopyNotesNotCopied(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "copy-notes@test.dev", "longpassword1")
+	id := createQtyItem(t, ts, cookie, "source with notes", 2)
+	addItemNote(t, ts, cookie, id, "personal note")
+
+	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/copy", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("copy = %d", resp.StatusCode)
+	}
+	var copied struct {
+		ID    int64      `json:"id"`
+		Notes []noteJSON `json:"notes"`
+	}
+	decodeBody(t, resp, &copied)
+	if copied.ID == id {
+		t.Fatal("copy returned the source id")
+	}
+	if len(copied.Notes) != 0 {
+		t.Fatalf("copied notes = %+v, want none", copied.Notes)
+	}
+	var src struct {
+		Notes []noteJSON `json:"notes"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id), nil, cookie), &src)
+	if len(src.Notes) != 1 || src.Notes[0].Body != "personal note" {
+		t.Fatalf("source notes = %+v, want the original note intact", src.Notes)
+	}
+}

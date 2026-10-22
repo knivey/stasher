@@ -53,6 +53,13 @@ type ItemLedger struct {
 	CreatedAt    string        `json:"created_at"`
 }
 
+type ItemNote struct {
+	ID        int64  `json:"id"`
+	ItemID    int64  `json:"item_id"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+}
+
 type ItemPhoto struct {
 	ID         int64          `json:"id"`
 	ItemID     int64          `json:"item_id"`

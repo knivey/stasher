@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -173,5 +175,130 @@ func TestItemPatchInvalidTagsDoesNotPartiallyApply(t *testing.T) {
 	}
 	if len(got.Tags) != 0 {
 		t.Fatalf("patch partially applied tags: %+v", got.Tags)
+	}
+}
+
+// noteJSON mirrors one item_notes row as returned by the notes endpoints
+// and the item detail's notes array.
+type noteJSON struct {
+	ID        int64  `json:"id"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+}
+
+func addItemNote(t *testing.T, ts *httptest.Server, cookie *http.Cookie, itemID int64, body string) noteJSON {
+	t.Helper()
+	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(itemID)+"/notes",
+		map[string]any{"body": body}, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("add note %q = %d, want 201", body, resp.StatusCode)
+	}
+	var n noteJSON
+	decodeBody(t, resp, &n)
+	return n
+}
+
+// TestItemNotesLifecycle: POST creates a trimmed note (201, created_at set),
+// the detail JSON lists notes newest-first, invalid bodies 400 with the
+// documented error shape, and DELETE removes a note (204; repeat 404).
+func TestItemNotesLifecycle(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "notes-life@test.dev", "longpassword1")
+	id := createQtyItem(t, ts, cookie, "bench psu", 1)
+
+	// two adds in quick succession share an RFC3339 second, so the id DESC
+	// tiebreaker decides which one is "newest"
+	n1 := addItemNote(t, ts, cookie, id, "  first note  ")
+	if n1.Body != "first note" {
+		t.Fatalf("note body = %q, want trimmed %q", n1.Body, "first note")
+	}
+	if n1.CreatedAt == "" {
+		t.Fatal("note created_at empty")
+	}
+	n2 := addItemNote(t, ts, cookie, id, "second")
+	if n2.ID == n1.ID {
+		t.Fatal("both notes share one id")
+	}
+
+	// detail JSON carries the notes array newest-first
+	var detail struct {
+		Notes []noteJSON `json:"notes"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id), nil, cookie), &detail)
+	if len(detail.Notes) != 2 || detail.Notes[0].ID != n2.ID || detail.Notes[1].ID != n1.ID {
+		t.Fatalf("detail notes = %+v, want newest-first [%d %d]", detail.Notes, n2.ID, n1.ID)
+	}
+	if detail.Notes[1].CreatedAt != n1.CreatedAt {
+		t.Fatalf("note[1] created_at = %q, want %q", detail.Notes[1].CreatedAt, n1.CreatedAt)
+	}
+
+	// validation: empty, whitespace-only, and 2001-char bodies all 400
+	for name, body := range map[string]string{
+		"empty":      "",
+		"whitespace": "   \n\t ",
+		"2001chars":  strings.Repeat("x", 2001),
+	} {
+		resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/notes",
+			map[string]any{"body": body}, cookie)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s body = %d, want 400", name, resp.StatusCode)
+		}
+		var errBody struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		decodeBody(t, resp, &errBody)
+		if errBody.Error.Code != "validation_error" || errBody.Error.Message != "note must be 1-2000 characters" {
+			t.Fatalf("%s body error = %+v", name, errBody.Error)
+		}
+	}
+	// the failed attempts wrote nothing
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id), nil, cookie), &detail)
+	if len(detail.Notes) != 2 {
+		t.Fatalf("notes after rejected posts = %d, want 2", len(detail.Notes))
+	}
+
+	// delete: 204, then 404 on repeat
+	if resp := doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(id)+"/notes/"+fmtInt64(n1.ID), nil, cookie); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete note = %d, want 204", resp.StatusCode)
+	}
+	if resp := doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(id)+"/notes/"+fmtInt64(n1.ID), nil, cookie); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("re-delete note = %d, want 404", resp.StatusCode)
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id), nil, cookie), &detail)
+	if len(detail.Notes) != 1 || detail.Notes[0].ID != n2.ID {
+		t.Fatalf("notes after delete = %+v, want only %d", detail.Notes, n2.ID)
+	}
+}
+
+// TestItemNotesIsolation: notes endpoints are owner-only — a foreign item
+// is 404 (never 403), and a non-numeric note id is 400 invalid_id.
+func TestItemNotesIsolation(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	alice := registerUser(t, ts, "notes-iso-a@test.dev", "longpassword1")
+	bob := registerUser(t, ts, "notes-iso-b@test.dev", "longpassword1")
+	id := createQtyItem(t, ts, alice, "alice multimeter", 1)
+
+	// bob cannot read or write alice's notes
+	if resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/notes",
+		map[string]any{"body": "bob was here"}, bob); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("foreign POST note = %d, want 404", resp.StatusCode)
+	}
+	if resp := doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(id)+"/notes/1", nil, bob); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("foreign DELETE note = %d, want 404", resp.StatusCode)
+	}
+	// non-numeric note id -> 400 invalid_id (after the ownership gate)
+	if resp := doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(id)+"/notes/nope", nil, alice); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad note id = %d, want 400", resp.StatusCode)
+	}
+	// none of the failed attempts wrote anything
+	var detail struct {
+		Notes []any `json:"notes"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(id), nil, alice), &detail)
+	if len(detail.Notes) != 0 {
+		t.Fatalf("notes after failed attempts = %+v, want empty", detail.Notes)
 	}
 }
