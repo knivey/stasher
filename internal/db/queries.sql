@@ -12,6 +12,11 @@ SELECT * FROM users WHERE id = ?;
 -- name: CountUsers :one
 SELECT COUNT(*) FROM users;
 
+-- name: CountAdmins :one
+-- enabled admins only: a disabled admin cannot manage the instance, so
+-- they must not count towards the last-admin guard
+SELECT COUNT(*) FROM users WHERE is_admin = 1 AND disabled = 0;
+
 -- name: UpdateUserProfile :exec
 UPDATE users SET display_name = ?, default_item_visibility = ?, updated_at = ? WHERE id = ?;
 

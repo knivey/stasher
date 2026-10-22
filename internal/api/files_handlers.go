@@ -304,6 +304,9 @@ func isSafeInline(ct string) bool {
 // handleFileGet serves /files/{key} to the owner, or to any user if the
 // owning item is shared.
 func (s *Server) handleFileGet(w http.ResponseWriter, r *http.Request) {
+	// Set on every /files/* response (hits and misses): never let the
+	// browser sniff a content type on this origin.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	u, _ := currentUser(r.Context())
 	key := chi.URLParam(r, "*")
 	if !files.ValidKey(key) {

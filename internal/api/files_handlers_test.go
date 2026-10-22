@@ -88,6 +88,10 @@ func TestPhotoUploadAndServe(t *testing.T) {
 		if !bytes.Equal(b, png1x1) {
 			t.Fatal("file content mismatch")
 		}
+		// defense in depth: never let the browser sniff a content type
+		if opt := r.Header.Get("X-Content-Type-Options"); opt != "nosniff" {
+			t.Fatalf("x-content-type-options = %q, want nosniff", opt)
+		}
 		// safe image types keep inline serving (R15)
 		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "image/png") {
 			t.Fatalf("photo content-type = %q, want image/png", ct)
@@ -117,6 +121,8 @@ func TestPhotoUploadAndServe(t *testing.T) {
 	req.AddCookie(owner)
 	if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode != 404 {
 		t.Fatalf("traversal = %v %d, want 404", err, r.StatusCode)
+	} else if opt := r.Header.Get("X-Content-Type-Options"); opt != "nosniff" {
+		t.Fatalf("traversal 404 x-content-type-options = %q, want nosniff", opt)
 	}
 
 	// caption/sort patch

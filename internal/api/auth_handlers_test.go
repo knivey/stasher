@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"stasher/internal/auth"
 	"stasher/internal/config"
 	"stasher/internal/db"
 )
@@ -146,6 +148,50 @@ func TestLoginRateLimited(t *testing.T) {
 		map[string]any{"email": "rl@test.dev", "password": "wrongpassword"}, nil)
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("6th attempt = %d, want 429", resp.StatusCode)
+	}
+}
+
+func TestRegisterRateLimited(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	// per-IP limiter is 10/min burst 10: ten registrations succeed, the
+	// eleventh from the same client is 429 before any DB work. XFF pins the
+	// client IP: the test client's RemoteAddr port differs per connection
+	// (unclosed bodies defeat keep-alive), which would key a fresh bucket
+	// per request.
+	register := func(i int) *http.Response {
+		req, err := http.NewRequest("POST", ts.URL+"/api/v1/auth/register", strings.NewReader(
+			`{"email":"rl`+fmtInt64(int64(i))+`@test.dev","password":"longpassword1","display_name":"RL"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", "9.9.9.9")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	for i := 0; i < 10; i++ {
+		if resp := register(i); resp.StatusCode != http.StatusCreated {
+			t.Fatalf("register %d = %d, want 201", i, resp.StatusCode)
+		}
+	}
+	resp := register(10)
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("11th register = %d, want 429", resp.StatusCode)
+	}
+}
+
+// TestDummyPasswordHashWellFormed pins the login timing-equalization dummy:
+// unknown-email attempts verify against it, so it must be a real argon2id
+// hash (a malformed one would short-circuit and re-open the timing gap).
+func TestDummyPasswordHashWellFormed(t *testing.T) {
+	if !strings.HasPrefix(dummyPasswordHash, "$argon2id$") {
+		t.Fatalf("dummy hash = %q, want an argon2id encoded hash", dummyPasswordHash)
+	}
+	if auth.VerifyPassword(dummyPasswordHash, "definitely-not-the-password") {
+		t.Fatal("dummy hash verified a wrong password")
 	}
 }
 

@@ -20,16 +20,18 @@ type Server struct {
 	raw         *sql.DB // for transactions and test queries; same pool as q
 	spaFallback http.HandlerFunc
 
-	loginIP   *auth.Limiter // 10 attempts/min per IP
-	loginAcct *auth.Limiter // 5 attempts/min per account
+	loginIP    *auth.Limiter // 10 attempts/min per IP
+	loginAcct  *auth.Limiter // 5 attempts/min per account
+	registerIP *auth.Limiter // 10 registrations/min per IP
 }
 
 // New wires the server. This signature is final for the whole plan.
 func New(cfg *config.Config, raw *sql.DB, st *files.Storage) *Server {
 	return &Server{
 		cfg: cfg, q: dbpkg.New(raw), st: st, raw: raw,
-		loginIP:   auth.NewLimiter(10, 10),
-		loginAcct: auth.NewLimiter(5, 5),
+		loginIP:    auth.NewLimiter(10, 10),
+		loginAcct:  auth.NewLimiter(5, 5),
+		registerIP: auth.NewLimiter(10, 10),
 	}
 }
 

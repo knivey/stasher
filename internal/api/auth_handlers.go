@@ -21,6 +21,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	// Rate-limit before any DB work or argon2 hashing: open registration is
+	// unauthenticated, so this is the only guard against grinding and spam.
+	if !s.registerIP.Allow("ip:" + clientIP(r)) {
+		writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many attempts; try again later")
+		return
+	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
 	if !strings.Contains(req.Email, "@") || len(req.Email) > 254 ||
@@ -88,6 +94,18 @@ type loginReq struct {
 	Password string `json:"password"`
 }
 
+// dummyPasswordHash is verified when the email lookup fails so that
+// unknown-email and wrong-password attempts burn the same argon2 cost —
+// response timing must not reveal whether an account exists. Computed once
+// at package init; the password it encodes is never used anywhere.
+var dummyPasswordHash = func() string {
+	h, err := auth.HashPassword("stasher-timing-equalization-dummy")
+	if err != nil {
+		panic(err) // argon2 with fixed in-house params cannot fail
+	}
+	return h
+}()
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
 	if !decodeJSON(w, r, &req) {
@@ -103,7 +121,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := s.q.GetUserByEmail(r.Context(), req.Email)
-	if err != nil || !auth.VerifyPassword(u.PasswordHash, req.Password) {
+	if err != nil {
+		// Unknown email: still run a full argon2 verify against the dummy
+		// hash to equalize timing with the wrong-password path below.
+		auth.VerifyPassword(dummyPasswordHash, req.Password)
+		writeErr(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
+		return
+	}
+	if !auth.VerifyPassword(u.PasswordHash, req.Password) {
 		// Same error for unknown email and bad password (no account probing).
 		writeErr(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 		return

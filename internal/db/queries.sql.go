@@ -117,6 +117,19 @@ func (q *Queries) ClearItemsLocation(ctx context.Context, arg ClearItemsLocation
 	return err
 }
 
+const countAdmins = `-- name: CountAdmins :one
+SELECT COUNT(*) FROM users WHERE is_admin = 1 AND disabled = 0
+`
+
+// enabled admins only: a disabled admin cannot manage the instance, so
+// they must not count towards the last-admin guard
+func (q *Queries) CountAdmins(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAdmins)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT COUNT(*) FROM users
 `

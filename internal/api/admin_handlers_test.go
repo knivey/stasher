@@ -107,6 +107,67 @@ func TestAdminCannotDisableSelf(t *testing.T) {
 	}
 }
 
+func TestAdminCannotDemoteSelf(t *testing.T) {
+	admin, _, ts, _ := adminSetup(t)
+	resp := doJSON(t, ts, "PATCH", "/api/v1/admin/users/1", map[string]any{"is_admin": false}, admin)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("self-demote = %d, want 400", resp.StatusCode)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeBody(t, resp, &body)
+	if body.Error.Code != "cannot_demote_self" {
+		t.Fatalf("self-demote code = %q, want cannot_demote_self", body.Error.Code)
+	}
+	// even with a second admin available, self-demotion stays rejected
+	// (second admin is created below via promote -> covered in guards test)
+}
+
+func TestAdminDemoteGuards(t *testing.T) {
+	admin, pleb, ts, s := adminSetup(t)
+	plebID := s.lastUserID(t)
+
+	// promote pleb: two admins now
+	if r := doJSON(t, ts, "PATCH", "/api/v1/admin/users/"+fmtInt64(plebID),
+		map[string]any{"is_admin": true}, admin); r.StatusCode != http.StatusOK {
+		t.Fatalf("promote = %d", r.StatusCode)
+	}
+	// demoting the OTHER admin is fine with two active admins
+	if r := doJSON(t, ts, "PATCH", "/api/v1/admin/users/"+fmtInt64(plebID),
+		map[string]any{"is_admin": false}, admin); r.StatusCode != http.StatusOK {
+		t.Fatalf("demote with two admins = %d, want 200", r.StatusCode)
+	}
+
+	// re-promote pleb, then disable them: a disabled admin doesn't count,
+	// so demoting them would leave zero usable admins -> 400
+	if r := doJSON(t, ts, "PATCH", "/api/v1/admin/users/"+fmtInt64(plebID),
+		map[string]any{"is_admin": true}, admin); r.StatusCode != http.StatusOK {
+		t.Fatalf("re-promote = %d", r.StatusCode)
+	}
+	if r := doJSON(t, ts, "PATCH", "/api/v1/admin/users/"+fmtInt64(plebID),
+		map[string]any{"disabled": true}, admin); r.StatusCode != http.StatusOK {
+		t.Fatalf("disable pleb = %d", r.StatusCode)
+	}
+	resp := doJSON(t, ts, "PATCH", "/api/v1/admin/users/"+fmtInt64(plebID),
+		map[string]any{"is_admin": false}, admin)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("demote with only disabled second admin = %d, want 400", resp.StatusCode)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeBody(t, resp, &body)
+	if body.Error.Code != "cannot_demote_last_admin" {
+		t.Fatalf("last-admin code = %q, want cannot_demote_last_admin", body.Error.Code)
+	}
+	_ = pleb
+}
+
 func TestInviteLifecycle(t *testing.T) {
 	admin, _, ts, _ := adminSetup(t)
 	inv := doJSON(t, ts, "POST", "/api/v1/admin/invites", map[string]any{}, admin)

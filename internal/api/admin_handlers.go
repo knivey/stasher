@@ -54,6 +54,24 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "user not found")
 		return
 	}
+	// Demotion guards: an admin may never drop their own admin role, and the
+	// instance must always retain at least one enabled admin (otherwise an
+	// invite-mode instance becomes unmanageable without raw SQLite surgery).
+	if req.IsAdmin != nil && !*req.IsAdmin && target.IsAdmin != 0 {
+		if id == me.ID {
+			writeErr(w, http.StatusBadRequest, "cannot_demote_self", "you cannot demote your own admin role")
+			return
+		}
+		n, err := s.q.CountAdmins(r.Context())
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		if n <= 1 {
+			writeErr(w, http.StatusBadRequest, "cannot_demote_last_admin", "instance must retain at least one admin")
+			return
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if req.Disabled != nil {
 		if err := s.q.SetUserDisabled(r.Context(), dbpkg.SetUserDisabledParams{
