@@ -117,7 +117,8 @@ The existing photo PATCH (caption/sort_order) is unchanged.
 - **ItemDetailView hero**: the main photo rendered large (full-size
   `/files/{storage_key}`, **not** the thumb), `object-contain`, capped
   height, click → existing lightbox. Shown above the fields, mobile and
-  desktop. Shared/public viewers see the hero too (read-only).
+  desktop. (Owner-only view — shared browsing has no item-detail route;
+  §8 keeps the shared-view hero out of scope.)
 
 ## 4. Desktop table thumbnails
 
