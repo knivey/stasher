@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import type { ListResponse, Location, Tag } from '../api/types'
@@ -21,6 +21,13 @@ watch(search, v => {
   timer = setTimeout(() => { filters.q = v }, 300)
 })
 onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
+
+// Leaving the page clears every filter (and pagination) so a return visit
+// starts clean. This MUST stay an unmount hook, not a mount-time reset:
+// the tag-chip flow (ItemDetailView.filterByTag) and project "view items"
+// links set store filters from another view BEFORE navigating here — a
+// mount-time reset would wipe them before the first fetch.
+onUnmounted(() => store.resetFilters())
 
 // Locations & tags feed the filter selects. NOTE: these two endpoints
 // ignore pagination entirely — the page_size param is accepted but unused

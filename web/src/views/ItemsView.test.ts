@@ -200,6 +200,57 @@ describe('ItemsView', () => {
     expect(urls.some(u => u.includes('location_id=7'))).toBe(true)
   })
 
+  it('resets the filters back to their defaults when leaving the page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
+    setActivePinia(createPinia())
+    const store = useItemsStore()
+    store.filters.tag = 'hardware'
+    store.filters.visibility = 'shared'
+    store.filters.q = 'screw'
+    store.filters.page = 3
+    const w = mount(ItemsView)
+    await flushPromises()
+    w.unmount()
+    expect(store.filters).toEqual({
+      q: '', location_id: 0, tag: '', project_id: 0,
+      visibility: '', sort: 'updated_at', order: 'desc', page: 1, page_size: 50,
+    })
+  })
+
+  it('still applies a filter set from another view before mount (tag-chip flow survives)', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url)
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    // ItemDetailView.filterByTag sets the store THEN pushes /items
+    useItemsStore().filters.tag = 'x'
+    const w = mount(ItemsView)
+    await flushPromises()
+    expect(urls.some(u => u.includes('/items?') && u.includes('tag=x'))).toBe(true)
+    w.unmount()
+  })
+
+  it('mounts with an empty search box after the previous visit reset the filters', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url)
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    useItemsStore().filters.q = 'stale'
+    let w = mount(ItemsView)
+    await flushPromises()
+    expect((w.find('input').element as HTMLInputElement).value).toBe('stale')
+    w.unmount()
+    urls.length = 0
+    w = mount(ItemsView)
+    await flushPromises()
+    expect((w.find('input').element as HTMLInputElement).value).toBe('')
+    expect(urls.some(u => u.includes('q='))).toBe(false) // the stale q never reaches the API
+  })
+
   it('shows a muted disposed badge on disposed items in both the table and the mobile cards', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
