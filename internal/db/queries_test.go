@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -52,44 +53,50 @@ func TestLocationCTEBoundedUnderParentCycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runBounded := func(name string, fn func()) {
+	// Each query runs in a watchdog-wrapped goroutine that reports its
+	// result over a buffered channel — the goroutine NEVER calls t.Error
+	// itself, so a completion that lands after the timeout fired (leaked
+	// pre-guard query finishing late) cannot log into a finished test and
+	// panic it. (A leaked query still holds its test's single DB conn; the
+	// next test gets a fresh DB, so nothing else is poisoned.)
+	runBounded := func(name string, fn func() error) {
 		t.Helper()
-		done := make(chan int, 1)
-		go func() {
-			fn()
-			done <- 0
-		}()
+		errc := make(chan error, 1)
+		go func() { errc <- fn() }()
 		select {
-		case <-done:
+		case err := <-errc:
+			if err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
 		case <-time.After(5 * time.Second):
 			t.Fatalf("%s did not terminate under a parent cycle (depth guard missing)", name)
 		}
 	}
 
-	runBounded("LocationDescendants", func() {
+	runBounded("LocationDescendants", func() error {
 		rows, err := q.LocationDescendants(ctx, LocationDescendantsParams{
 			ID: a.ID, UserID: u.ID, UserID_2: u.ID,
 		})
 		if err != nil {
-			t.Error(err)
-			return
+			return err
 		}
 		// cycle A<->B: anchor + 50 capped steps = 51 rows max
 		if len(rows) > 51 {
-			t.Errorf("LocationDescendants returned %d rows, want <= 51", len(rows))
+			return fmt.Errorf("returned %d rows, want <= 51", len(rows))
 		}
+		return nil
 	})
-	runBounded("LocationBreadcrumbs", func() {
+	runBounded("LocationBreadcrumbs", func() error {
 		rows, err := q.LocationBreadcrumbs(ctx, LocationBreadcrumbsParams{
 			ID: a.ID, UserID: u.ID, UserID_2: u.ID,
 		})
 		if err != nil {
-			t.Error(err)
-			return
+			return err
 		}
 		if len(rows) > 51 {
-			t.Errorf("LocationBreadcrumbs returned %d rows, want <= 51", len(rows))
+			return fmt.Errorf("returned %d rows, want <= 51", len(rows))
 		}
+		return nil
 	})
 }
 

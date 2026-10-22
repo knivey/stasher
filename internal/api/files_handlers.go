@@ -80,7 +80,7 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	// truncated sniff buffer
 	n, err := io.ReadFull(f, head)
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-		writeErr(w, http.StatusBadRequest, "invalid_upload", "bad multipart body or file too large")
+		writeErr(w, http.StatusBadRequest, "invalid_upload", "bad upload body")
 		return
 	}
 	head = head[:n]
@@ -124,8 +124,15 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		s.st.Delete(key)
-		s.st.Delete(thumbKey.String)
+		// row insert failed: roll back the files we already saved
+		if derr := s.st.Delete(key); derr != nil {
+			slog.Warn("file delete failed", "key", key, "err", derr)
+		}
+		if thumbKey.Valid {
+			if derr := s.st.Delete(thumbKey.String); derr != nil {
+				slog.Warn("file delete failed", "key", thumbKey.String, "err", derr)
+			}
+		}
 		s.internalErr(w, err)
 		return
 	}
@@ -333,7 +340,7 @@ func (s *Server) handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	// fine, real read errors 400 instead of sniffing a truncated buffer
 	n, err := io.ReadFull(f, head)
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-		writeErr(w, http.StatusBadRequest, "invalid_upload", "bad multipart body or file too large")
+		writeErr(w, http.StatusBadRequest, "invalid_upload", "bad upload body")
 		return
 	}
 	if n == 0 {
@@ -449,13 +456,17 @@ func (s *Server) BackfillThumbs(ctx context.Context) {
 			ThumbKey: sql.NullString{String: tkey, Valid: true}, ID: p.ID,
 		}); err != nil {
 			slog.Warn("thumb backfill: update failed", "photo", p.ID, "err", err)
-			s.st.Delete(tkey)
+			if derr := s.st.Delete(tkey); derr != nil {
+				slog.Warn("file delete failed", "key", tkey, "err", derr)
+			}
 			continue
 		} else if n == 0 {
 			// the photo row was cascade-deleted between the list and the
 			// update — don't orphan the just-saved thumb file
 			slog.Warn("thumb backfill: photo row vanished, discarding thumb", "photo", p.ID)
-			s.st.Delete(tkey)
+			if derr := s.st.Delete(tkey); derr != nil {
+				slog.Warn("file delete failed", "key", tkey, "err", derr)
+			}
 			continue
 		}
 		done++

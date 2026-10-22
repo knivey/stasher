@@ -21,12 +21,13 @@ const (
 // Bounds on parameters accepted from a STORED hash string (KiB / rounds /
 // threads). A tampered or corrupted hash must be rejected before
 // argon2.IDKey runs — the KDF allocates m KiB, so an unbounded m is a
-// memory-DoS (a hash claiming m=1<<27 would allocate ~256 GiB). The
-// envelope brackets every hash this package generates (m=64MiB, t=3, p=4)
-// with generous headroom for future tunings.
+// memory-DoS (a crafted hash claiming m=1<<21 would allocate 2 GiB per
+// verification attempt). The ceiling of 1<<20 KiB = 1 GiB is 16× what
+// HashPassword emits (m=64 MiB) — ample headroom for future tunings at
+// 1 GiB worst-case per call.
 const (
 	argonMinMemoryKiB = 8 * 1024
-	argonMaxMemoryKiB = 1 << 26
+	argonMaxMemoryKiB = 1 << 20
 	argonMaxTime      = 64
 	argonMaxThreads   = 16
 )

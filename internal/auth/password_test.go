@@ -40,6 +40,9 @@ func TestVerifyPasswordParamBounds(t *testing.T) {
 	if VerifyPassword(craftHash(t, argonMemory, 1, 17), "x") { // p above 16
 		t.Error("p=17 verified; bounds check missing")
 	}
+	if VerifyPassword(craftHash(t, (1<<20)+1024, 1, 1), "x") { // just above the 1 GiB m ceiling
+		t.Error("m=1<<20+1024 (above cap) verified; bounds check missing")
+	}
 	// genuine hash with the cheapest in-bounds params: must verify
 	if h := craftHash(t, 8*1024, 1, 1); !VerifyPassword(h, "x") {
 		t.Error("in-bounds m=8192,t=1,p=1 failed to verify")
@@ -56,7 +59,7 @@ func TestVerifyPasswordHugeMRejectedWithoutKDF(t *testing.T) {
 	for _, h := range []string{
 		// m overflows uint32 outright (rejected at parse even pre-guard)
 		"$argon2id$v=19$m=4294967296,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-		// m fits uint32 but exceeds the 1<<26 KiB cap (~256 GiB claim)
+		// m fits uint32 but exceeds the 1<<20 KiB (1 GiB) cap (~256 GiB claim)
 		"$argon2id$v=19$m=268435456,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 	} {
 		if VerifyPassword(h, "x") {
