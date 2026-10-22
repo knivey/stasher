@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
-import type { Item } from '../api/types'
+import type { Item, ListResponse, Location } from '../api/types'
 import { useAuthStore } from '../stores/auth'
 import { toast } from '../utils/toast'
 import { downscaleImage } from '../utils/image'
@@ -70,7 +70,29 @@ function buildPatch(): Record<string, unknown> {
   return out
 }
 
+// Locations feed the select AND the ?location= prefill guard below — fetched
+// here once and passed down (this replaces LocationSelect's internal fetch).
+const locations = ref<Location[]>([])
+
+// /items/new?location=N (LocationsView "Add item" links): prefill the select
+// with N when N is one of the loaded locations. Invalid or unknown ids are
+// ignored silently — no toast storm for a stale link.
+function applyLocationPrefill() {
+  if (editing.value) return // edit mode: the item's own location wins
+  const raw = route?.query?.location
+  const v = typeof raw === 'string' ? raw : Array.isArray(raw) ? String(raw[0]) : ''
+  if (!/^\d+$/.test(v)) return
+  const id = Number(v)
+  if (locations.value.some(l => l.id === id)) form.location_id = id
+}
+
 onMounted(async () => {
+  api.get<ListResponse<Location>>('/api/v1/locations?page_size=200')
+    .then(r => {
+      locations.value = r.data
+      applyLocationPrefill()
+    })
+    .catch(e => toast(e.message, 'error'))
   if (!editing.value) return
   try {
     const it = await api.get<Item>(`/api/v1/items/${itemId.value}`)
@@ -219,7 +241,7 @@ defineExpose({ form, save, tagsEqual })
         </select>
       </label>
       <div class="block text-sm font-medium dark:text-slate-100">Location
-        <LocationSelect v-model="form.location_id" class="mt-1" />
+        <LocationSelect v-model="form.location_id" :locations="locations" class="mt-1" />
       </div>
       <div class="block text-sm font-medium dark:text-slate-100">Tags
         <TagInput v-model:tags="form.tags" class="mt-1" />

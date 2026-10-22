@@ -165,6 +165,8 @@ async function deleteLocation() {
             <p v-if="r.loc.notes" class="text-slate-500 dark:text-slate-400 whitespace-pre-wrap" :style="{ paddingLeft: r.depth * 1.5 + 'rem' }">{{ r.loc.notes }}</p>
           </div>
           <span class="flex gap-2 shrink-0">
+            <router-link :to="`/items/new?location=${r.loc.id}`" data-add-item
+              class="text-slate-600 dark:text-slate-300 hover:underline">Add item</router-link>
             <button data-edit class="text-slate-600 dark:text-slate-300 hover:underline" @click="startEdit(r)">Edit</button>
             <button data-delete class="text-red-600 dark:text-red-400 hover:underline" @click="deleteTarget = r.loc">Delete</button>
           </span>

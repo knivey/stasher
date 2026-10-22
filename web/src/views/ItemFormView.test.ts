@@ -88,6 +88,34 @@ describe('ItemFormView create', () => {
     expect(bodies.at(-1)).toEqual({ name: 'Binned', description: '', qty: 1, unit: '', visibility: 'private', location_id: 7 })
   })
 
+  it('prefills the location select from ?location=<id> (LocationsView "Add item")', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url.includes('/locations')
+        ? new Response(JSON.stringify({ data: [{ id: 3, name: 'Bin', parent_id: null }], total: 1 }), { status: 200 })
+        : new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
+    const router = newRouter()
+    await router.push('/items/new?location=3')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    expect((w.vm as any).form.location_id).toBe(3)
+    const select = w.find('select[aria-label="Location"]')
+    expect((select.element as HTMLSelectElement).value).toBe('3')
+  })
+
+  it('silently ignores ?location=<id> that is not among the loaded locations', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url.includes('/locations')
+        ? new Response(JSON.stringify({ data: [{ id: 3, name: 'Bin', parent_id: null }], total: 1 }), { status: 200 })
+        : new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
+    const router = newRouter()
+    await router.push('/items/new?location=999')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    expect((w.vm as any).form.location_id).toBe(0)
+    expect((w.find('select[aria-label="Location"]').element as HTMLSelectElement).value).toBe('0')
+    expect(toasts.some(t => t.type === 'error')).toBe(false) // no toast storm
+  })
+
   it('uploads queued photos (downscaled at pick time) and docs after create, then navigates', async () => {
     const calls: string[] = []
     let uploadedBlob: Blob | undefined

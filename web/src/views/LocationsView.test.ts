@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import LocationsView from './LocationsView.vue'
 import type { Location } from '../api/types'
 import { toasts } from '../utils/toast'
@@ -31,7 +32,12 @@ function mockFetch(opts: { postStatus?: number; postBody?: unknown; patchStatus?
 }
 
 async function mountView(calls: Call[]) {
-  const w = mount(LocationsView)
+  // router so per-row router-links resolve to real anchors
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/:pathMatch(.*)*', component: { template: '<div />' } }],
+  })
+  const w = mount(LocationsView, { global: { plugins: [router] } })
   await flushPromises()
   expect(calls.length).toBeGreaterThan(0) // initial list fetch happened
   return w
@@ -52,6 +58,16 @@ describe('LocationsView', () => {
     expect(pad(0)).toBe(0)
     expect(pad(1)).toBeGreaterThan(pad(0))
     expect(pad(2)).toBeGreaterThan(pad(1))
+  })
+
+  it('offers one "Add item" link per row pointing at /items/new?location=<id>', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    const links = w.findAll('[data-add-item]')
+    expect(links).toHaveLength(3) // one per location row
+    expect(links.map(l => l.attributes('href'))).toEqual([
+      '/items/new?location=1', '/items/new?location=2', '/items/new?location=3',
+    ])
   })
 
   it('Add posts {name} without parent_id for a root location', async () => {
