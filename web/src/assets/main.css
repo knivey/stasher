@@ -4,3 +4,10 @@
 
 :root { color-scheme: light; }
 .dark { color-scheme: dark; }
+
+/* Linux Firefox defers to the GTK theme for native select popups, ignoring
+   color-scheme — style the options so dark mode gets a dark popup there too. */
+.dark select option {
+  background-color: #1e293b; /* slate-800 */
+  color: #f1f5f9;            /* slate-100 */
+}
