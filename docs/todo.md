@@ -13,7 +13,7 @@ the headless chrome can be used for the datasheet fetcher as well if we need to 
 ~~* item delete should explain that "Log usage" is probably what they want instead~~ done 2026-10-22
 * should Log usage be named something else?
 ~~* adding new items, maybe this can be streamlined for the location, like maybe add item from the locations page fills that in~~ done 2026-10-22 ("Add item" per location row prefills the form; "save and add another" variant not done)
-* moving items: from the items list we should be able to select multiple items to be able to change the location on
+~~* moving items: from the items list we should be able to select multiple items to be able to change the location on~~ done 2026-10-22: checkbox selection + select-all-on-page + bulk-move endpoint (200/call, 0 clears)
 ~~* search should do partial matches maybe use that trigraph thing idr what its called~~ done 2026-10-22 (FTS5 trigram tokenizer; needs ≥3 chars)
 ~~* location adding should have be more streamlined for adding a location with its sublocations like a parts organizer with many compartments, this should include like add sublocations X,Y,Z (each dimension optional) just for helping name the added sublocations they might want to do a x,y like A1 B3 or like row 1 col 2 or this could be getting too complicated for the naming part.. also in this same vien of parts organizers we should be able to copy/reference the layout of one location to add another.~~ done 2026-10-22: grid generator (flat/nested × compact/verbose naming, optional prefix, live preview) + copy-layout endpoint, picker in the add form AND per-row "Duplicate layout…"
 
@@ -21,4 +21,3 @@ the headless chrome can be used for the datasheet fetcher as well if we need to 
 * include a docker build or something? i have no idea how to deploy docker but people will probably appreciate it
 ~~* on desktop hover over a item thumb can open a larger version in a tooltip like popup~~ done 2026-10-22
 * deleting a location with sublocations should have the option to delete all sublocations
-* user pref for new items default visibility (public, private)
