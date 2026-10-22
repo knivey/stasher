@@ -3,6 +3,7 @@ export interface Tag { id: number; name: string; item_count?: number }
 export interface Photo { id: number; storage_key: string; thumb_key?: string | null; caption: string; sort_order: number; created_at: string }
 export interface Doc { id: number; storage_key: string; filename: string; mime_type: string; size_bytes: number; created_at: string }
 export interface ItemProject { id: number; name: string; status: string; qty_used: number | null }
+export interface Note { id: number; body: string; created_at: string }
 export interface Item {
   id: number; name: string; description: string; qty: number; unit: string
   location_id: number | null; visibility: 'private' | 'shared'
@@ -10,6 +11,7 @@ export interface Item {
   photo_count?: number; thumb_key?: string | null
   created_at: string; updated_at: string
   tags?: Tag[]; photos?: Photo[]; documents?: Doc[]; projects?: ItemProject[]; owner_name?: string
+  notes?: Note[]
 }
 export interface LedgerEntry {
   id: number; delta: number; resulting_qty: number

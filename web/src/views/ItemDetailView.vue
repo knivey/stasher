@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, ApiError } from '../api/client'
-import type { Breadcrumb, Doc, Item, LedgerEntry, ListResponse, Location, Photo, Project } from '../api/types'
+import type { Breadcrumb, Doc, Item, LedgerEntry, ListResponse, Location, Note, Photo, Project } from '../api/types'
 import { useItemsStore } from '../stores/items'
 import { toast } from '../utils/toast'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -44,6 +44,37 @@ function filterByTag(name: string) {
   itemsStore.filters.tag = name
   itemsStore.filters.page = 1
   router.push('/items')
+}
+
+// ---- Notes (timestamped log: add + delete only, newest first) ----
+
+const noteBody = ref('')
+const noteSaving = ref(false)
+
+async function submitNote() {
+  if (noteSaving.value || !noteBody.value.trim()) return
+  noteSaving.value = true
+  try {
+    // trimmed body: the backend validates 1-2000 chars AFTER its own trim
+    await api.post(`/api/v1/items/${route.params.id}/notes`, { body: noteBody.value.trim() })
+    toast('Note added', 'success')
+    noteBody.value = ''
+    await fetchItem() // notes[] rides the item detail
+  } catch (e) {
+    toast(e instanceof ApiError ? e.message : 'Failed to add note', 'error') // textarea keeps its text
+  } finally {
+    noteSaving.value = false
+  }
+}
+
+async function deleteNote(n: Note) {
+  try {
+    await api.del(`/api/v1/items/${route.params.id}/notes/${n.id}`)
+    toast('Note deleted', 'success')
+    await fetchItem()
+  } catch (e) {
+    toast((e as Error).message, 'error')
+  }
 }
 
 // photos[] is (sort_order, id) ordered — photos[0] is the current main.
@@ -290,6 +321,30 @@ onMounted(async () => {
         <button v-for="t in item.tags" :key="t.id" @click="filterByTag(t.name)"
           class="bg-slate-100 dark:bg-slate-700 dark:text-slate-100 rounded-full px-3 py-1 text-sm hover:bg-slate-200 dark:hover:bg-slate-600">#{{ t.name }}</button>
       </div>
+    </section>
+
+    <!-- Notes: timestamped log, newest first (api-notes "Item notes") -->
+    <section data-notes>
+      <h2 class="font-semibold mb-2 dark:text-slate-100">Notes</h2>
+      <form data-note-form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3 mb-3" @submit.prevent="submitNote">
+        <textarea v-model="noteBody" data-note-body rows="3" maxlength="2000" placeholder="Add a note…"
+          class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm"></textarea>
+        <div class="flex justify-end">
+          <button type="submit" data-note-add :disabled="noteSaving || !noteBody.trim()"
+            class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50">
+            {{ noteSaving ? 'Adding…' : 'Add note' }}</button>
+        </div>
+      </form>
+      <ul v-if="item.notes?.length" class="bg-white dark:bg-slate-800 rounded-xl shadow divide-y dark:divide-slate-700 text-sm">
+        <li v-for="n in item.notes" :key="n.id" class="px-4 py-2">
+          <p class="whitespace-pre-line dark:text-slate-100">{{ n.body }}</p>
+          <div class="flex items-center justify-between gap-2 mt-1">
+            <span class="text-xs text-slate-400 dark:text-slate-500">{{ n.created_at.slice(0, 10) }}</span>
+            <button @click="deleteNote(n)" class="text-red-600 dark:text-red-400">Delete</button>
+          </div>
+        </li>
+      </ul>
+      <p v-else class="text-slate-400 dark:text-slate-500 text-sm">No notes yet.</p>
     </section>
 
     <section>

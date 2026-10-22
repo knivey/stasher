@@ -480,4 +480,107 @@ describe('ItemDetailView', () => {
     expect(w.find('[data-log-form]').exists()).toBe(true) // form stays open
     expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(1) // no refetch
   })
+
+  // ---- Notes (timestamped log, newest first; add + delete only) ----
+
+  const itemWithNotes = {
+    ...item,
+    notes: [
+      { id: 72, body: 'second note', created_at: '2026-10-22T00:00:00Z' },
+      { id: 71, body: 'first note', created_at: '2026-10-21T00:00:00Z' },
+    ],
+  }
+
+  // Mock that understands the detail-view surface plus the notes endpoints;
+  // every request lands in `calls`.
+  function notesFetch(opts: { item?: unknown; postStatus?: number } = {}) {
+    const shown = opts.item ?? item
+    const calls: { method: string; url: string; body?: string }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ method: init?.method ?? 'GET', url, body: init?.body as string | undefined })
+      if (url.includes('/items/9/notes') && init?.method === 'POST') {
+        if (opts.postStatus)
+          return new Response(JSON.stringify({ error: { code: 'validation_error', message: 'note must be 1-2000 characters' } }), { status: opts.postStatus })
+        return new Response(JSON.stringify({ id: 73, body: JSON.parse(String(init!.body)).body, created_at: '2026-10-23T00:00:00Z' }), { status: 201 })
+      }
+      if (url.includes('/items/9/notes') && init?.method === 'DELETE') return new Response(null, { status: 204 })
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify(shown), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    return calls
+  }
+
+  it('renders notes newest-first with body and date', async () => {
+    notesFetch({ item: itemWithNotes })
+    const { w } = await mountView()
+    const section = w.find('[data-notes]')
+    expect(section.exists()).toBe(true)
+    const text = section.text()
+    expect(text).toContain('second note')
+    expect(text).toContain('first note')
+    expect(text.indexOf('second note')).toBeLessThan(text.indexOf('first note'))
+    expect(text).toContain('2026-10-22')
+    expect(text).toContain('2026-10-21')
+  })
+
+  it('adds a note: POSTs the trimmed body to /notes, refetches, clears the textarea, toasts', async () => {
+    const calls = notesFetch()
+    const { w } = await mountView()
+    const ta = w.find('[data-note-body]')
+    expect(ta.exists()).toBe(true)
+    ;(ta.element as HTMLTextAreaElement).value = '  fresh idea  '
+    await ta.trigger('input')
+    await w.find('[data-note-form]').trigger('submit')
+    await flushPromises()
+    const post = calls.find(c => c.method === 'POST')
+    expect(post?.url).toBe('/api/v1/items/9/notes')
+    expect(JSON.parse(post!.body!)).toEqual({ body: 'fresh idea' })
+    // refetched the item after the POST
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(2)
+    expect((w.find('[data-note-body]').element as HTMLTextAreaElement).value).toBe('')
+    expect(toasts.some(t => t.message === 'Note added' && t.type === 'success')).toBe(true)
+  })
+
+  it('disables the add-note button on empty or whitespace-only body and shows the empty state', async () => {
+    notesFetch()
+    const { w } = await mountView()
+    const btn = w.find('[data-note-add]')
+    expect((btn.element as HTMLButtonElement).disabled).toBe(true)
+    const ta = w.find('[data-note-body]')
+    ;(ta.element as HTMLTextAreaElement).value = '   '
+    await ta.trigger('input')
+    expect((btn.element as HTMLButtonElement).disabled).toBe(true)
+    expect(w.find('[data-notes]').text()).toContain('No notes yet.')
+    ;(ta.element as HTMLTextAreaElement).value = 'ok'
+    await ta.trigger('input')
+    expect((btn.element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('deletes a note via DELETE then refetches the item', async () => {
+    const calls = notesFetch({ item: itemWithNotes })
+    const { w } = await mountView()
+    const del = w.find('[data-notes]').findAll('button').find(b => b.text() === 'Delete')
+    expect(del).toBeTruthy()
+    await del!.trigger('click')
+    await flushPromises()
+    expect(calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/items/9/notes/72')).toBe(true)
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(2)
+    expect(toasts.some(t => t.message === 'Note deleted' && t.type === 'success')).toBe(true)
+  })
+
+  it('toasts the error and preserves the textarea when the note POST fails', async () => {
+    const calls = notesFetch({ postStatus: 400 })
+    const { w } = await mountView()
+    const ta = w.find('[data-note-body]')
+    ;(ta.element as HTMLTextAreaElement).value = 'a note'
+    await ta.trigger('input')
+    await w.find('[data-note-form]').trigger('submit')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'note must be 1-2000 characters' && t.type === 'error')).toBe(true)
+    expect(toasts.some(t => t.message === 'Note added')).toBe(false)
+    expect((w.find('[data-note-body]').element as HTMLTextAreaElement).value).toBe('a note')
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(1) // no refetch
+  })
 })
