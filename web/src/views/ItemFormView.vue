@@ -121,11 +121,11 @@ const saving = ref(false)
 
 async function save(again: boolean = false) {
   if (saving.value) return
-  // "Save & add another" is type="button", so the browser never runs the
-  // name field's required validation for it. Mirror that behavior: an empty
-  // form has nothing to save — focus the field and stay silent (no POST, no
-  // reset, no error toast), exactly like native validation would.
-  if (again && !form.name.trim()) {
+  // Whitespace-only name = empty form. Native `required` accepts " ", and
+  // "Save & add another" is type="button" so it never runs native validation
+  // at all — guard both paths here: focus the field and stay silent (no
+  // POST, no reset, no error toast), exactly like native validation would.
+  if (!form.name.trim()) {
     nameInput.value?.focus()
     return
   }

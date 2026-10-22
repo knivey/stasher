@@ -16,7 +16,11 @@ export interface Item {
 export interface LedgerEntry {
   id: number; delta: number; resulting_qty: number
   kind: 'used' | 'sold' | 'lost' | 'found' | 'restock' | 'disposed' | 'adjustment'
-  project_id: number | null; note: string; created_at: string
+  project_id: number | null
+  // server-resolved project name; null when the project was deleted
+  // (absent in old payloads)
+  project_name?: string | null
+  note: string; created_at: string
 }
 export interface Location { id: number; name: string; parent_id: number | null; notes: string; created_at: string; updated_at: string }
 export interface Breadcrumb { id: number; name: string }

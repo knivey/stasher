@@ -19,8 +19,15 @@ export const useItemsStore = defineStore('items', () => {
   const filters = reactive(defaultFilters())
   // ItemsView calls this on unmount so returning to the page starts clean;
   // filters set from another view before navigating are applied AFTER the
-  // previous page's reset, so the tag-chip flow still works.
-  function resetFilters() { Object.assign(filters, defaultFilters()) }
+  // previous page's reset, so the tag-chip flow still works. The result set
+  // clears too — a remounted view must not flash the previous page's items
+  // while its own fetch is in flight. loading is untouched: the view drives
+  // it around its own fetch.
+  function resetFilters() {
+    Object.assign(filters, defaultFilters())
+    items.value = []
+    total.value = 0
+  }
 
   async function fetch() {
     loading.value = true

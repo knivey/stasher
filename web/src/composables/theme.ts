@@ -32,8 +32,14 @@ if (typeof matchMedia === 'function') {
 export function useTheme() {
   function toggle() {
     isDark.value = !isDark.value
-    localStorage.setItem(KEY, isDark.value ? 'dark' : 'light')
     apply()
+    try {
+      localStorage.setItem(KEY, isDark.value ? 'dark' : 'light')
+    } catch {
+      // Blocked storage (private-mode quota etc.) must not leave the class
+      // unapplied — apply() already ran, so the theme works for the session
+      // and only the persistence is lost. Silent by design.
+    }
   }
   return { isDark, toggle }
 }

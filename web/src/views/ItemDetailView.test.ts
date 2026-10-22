@@ -179,6 +179,52 @@ describe('ItemDetailView', () => {
     expect(calls.filter(c => c === 'GET /api/v1/items/9')).toHaveLength(2)
   })
 
+  it('Make main: toasts the ApiError and leaves the gallery unchanged when the POST fails', async () => {
+    const calls: { method: string; url: string }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ method: init?.method ?? 'GET', url })
+      if (url.endsWith('/photos/12/main'))
+        return new Response(JSON.stringify({ error: { code: 'internal', message: 'main photo failed' } }), { status: 500 })
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify(twoPhotos), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    const { w } = await mountView()
+    await w.find('button[aria-label="Make main"]').trigger('click')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'main photo failed' && t.type === 'error')).toBe(true)
+    // no refetch after the failure: exactly the initial item GET
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(1)
+    // gallery state unchanged: both photos still render, Make main still offered
+    const photos = w.findAll('section').find(s => s.text().includes('Photos'))
+    expect(photos!.findAll('img')).toHaveLength(2)
+    expect(w.find('button[aria-label="Make main"]').exists()).toBe(true)
+  })
+
+  it('Make main: two rapid clicks issue exactly one POST (in-flight guard)', async () => {
+    const calls: { method: string; url: string }[] = []
+    let releasePost!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ method: init?.method ?? 'GET', url })
+      if (url.endsWith('/photos/12/main'))
+        return new Promise<Response>(res => { releasePost = res }) // hold: clicks stay inside the guard window
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify(twoPhotos), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    const { w } = await mountView()
+    const makeMain = w.find('button[aria-label="Make main"]')
+    const first = makeMain.trigger('click')
+    const second = makeMain.trigger('click') // while the first POST is still pending
+    await Promise.all([first, second])
+    expect(calls.filter(c => c.method === 'POST' && c.url.endsWith('/photos/12/main'))).toHaveLength(1)
+    releasePost(new Response(null, { status: 204 }))
+    await flushPromises()
+    expect(calls.filter(c => c.method === 'POST' && c.url.endsWith('/photos/12/main'))).toHaveLength(1) // still exactly one
+  })
+
   it('hero click opens the lightbox overlay', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
@@ -440,6 +486,22 @@ describe('ItemDetailView', () => {
     expect(chip.text()).toContain('3D printer build')
   })
 
+  it('history project chip prefers the ledger row\'s project_name, falling back when it is null', async () => {
+    const entries = [
+      { id: 3, delta: -1, resulting_qty: 1, kind: 'used', project_id: 31, project_name: 'Speaker repair', note: '', created_at: '2026-10-03T10:00:00Z' },
+      { id: 2, delta: -2, resulting_qty: 2, kind: 'used', project_id: 31, project_name: null, note: '', created_at: '2026-10-02T10:00:00Z' },
+    ]
+    const { stub } = usageFetch({ entries, total: 2 })
+    vi.stubGlobal('fetch', stub)
+    const { w } = await mountView()
+    // scope to the history section: "Used in projects" links /projects/31 too
+    const chips = w.find('[data-usage]').findAll('a[href="/projects/31"]')
+    expect(chips).toHaveLength(2)
+    expect(chips[0].text()).toContain('Speaker repair') // server-resolved name wins
+    expect(chips[0].text()).not.toContain('3D printer build')
+    expect(chips[1].text()).toContain('3D printer build') // null (deleted project / old payload) → client fallback
+  })
+
   it('advances the history page via Pagination and fetches page 2', async () => {
     const entries = [{ id: 2, delta: -3, resulting_qty: 2, kind: 'used', project_id: null, note: '', created_at: '2026-10-02T10:00:00Z' }]
     const { stub, calls } = usageFetch({ entries, total: 25 })
@@ -568,6 +630,30 @@ describe('ItemDetailView', () => {
     expect(calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/items/9/notes/72')).toBe(true)
     expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(2)
     expect(toasts.some(t => t.message === 'Note deleted' && t.type === 'success')).toBe(true)
+  })
+
+  it('deleting the only note falls back to the "No notes yet." empty state', async () => {
+    const singleNote = { ...item, notes: [{ id: 71, body: 'first note', created_at: '2026-10-21T00:00:00Z' }] }
+    let deleted = false
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/items/9/notes/71') && init?.method === 'DELETE') {
+        deleted = true
+        return new Response(null, { status: 204 })
+      }
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      // after the DELETE the refetch serves the item with notes gone
+      if (url.includes('/items/9')) return new Response(JSON.stringify(deleted ? item : singleNote), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    const { w } = await mountView()
+    expect(w.find('[data-notes]').text()).toContain('first note')
+    const del = w.find('[data-notes]').findAll('button').find(b => b.text() === 'Delete')
+    await del!.trigger('click')
+    await flushPromises()
+    const text = w.find('[data-notes]').text()
+    expect(text).toContain('No notes yet.')
+    expect(text).not.toContain('first note')
   })
 
   it('toasts the error and preserves the textarea when the note POST fails', async () => {

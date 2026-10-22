@@ -5,9 +5,11 @@ export interface LocationRow { loc: Location; depth: number }
 
 // Flattened tree rows for the locations management view: each root in name
 // order, immediately followed by its descendants in name order (path-name
-// order). The visited set makes a corrupt parent cycle unable to loop
-// forever; cycle members are unreachable from any root, so they are appended
-// at the end (still rendered exactly once).
+// order). The visited set keeps a corrupt parent chain from recursing
+// forever — but where corrupt members land depends on reachability: a pure
+// cycle (no path from any root) is appended at depth 0 by the final pass,
+// while a cycle reached through a tail under a real root is walked in place.
+// Either way every location renders exactly once.
 export function locationTreeRows(locations: Location[]): LocationRow[] {
   const byId = new Map(locations.map(l => [l.id, l]))
   const childrenOf = new Map<number, Location[]>()
@@ -34,8 +36,9 @@ export function locationTreeRows(locations: Location[]): LocationRow[] {
 // Indented <option> lists, in TREE PRE-ORDER: each parent immediately
 // followed by its own descendants (same walk as locationTreeRows), so the
 // select mirrors the tree instead of a depth-major alphabet that files
-// children under the wrong parent visually. Corrupt-cycle members surface
-// at the end at depth 0, exactly once.
+// children under the wrong parent visually. Corrupt-cycle members that no
+// root reaches surface at the end at depth 0, exactly once; ones reached
+// through a tail render in place.
 export function locationDepthOptions(locations: Location[]): LocationOption[] {
   return locationTreeRows(locations).map(r => ({ id: r.loc.id, name: r.loc.name, depth: r.depth }))
 }

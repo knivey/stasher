@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // The composable initializes from localStorage/matchMedia at module import
 // time, so each test sets the mock FIRST and then dynamically imports a
@@ -22,6 +22,7 @@ async function freshTheme() {
 
 describe('useTheme', () => {
   beforeEach(() => { localStorage.clear(); document.documentElement.className = '' })
+  afterEach(() => vi.restoreAllMocks())
 
   it('defaults to system preference', async () => {
     mockMatchMedia(true)
@@ -38,6 +39,16 @@ describe('useTheme', () => {
     toggle()
     expect(isDark.value).toBe(false)
     expect(localStorage.getItem('stasher-theme')).toBe('light')
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+  })
+
+  it('toggle still applies the class when localStorage is blocked', async () => {
+    mockMatchMedia(true)
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError') })
+    const { useTheme } = await freshTheme()
+    const { isDark, toggle } = useTheme()
+    expect(() => toggle()).not.toThrow() // blocked storage must not break the toggle
+    expect(isDark.value).toBe(false)
     expect(document.documentElement.classList.contains('dark')).toBe(false)
   })
 

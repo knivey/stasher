@@ -193,8 +193,10 @@ function fmtDelta(d: number): string {
   return d > 0 ? `+${d}` : d < 0 ? `−${Math.abs(d)}` : '±0'
 }
 
-// Ledger rows carry project_id only — the chip label falls back through the
-// item's linked projects, then the log form's list, then a bare id.
+// Ledger rows carry project_name (nullable: null when the project was
+// deleted, absent in old payloads) — the chip prefers it and falls back
+// through the item's linked projects, then the log form's list, then a
+// bare id.
 function projectName(id: number): string {
   return item.value?.projects?.find(p => p.id === id)?.name
     ?? logProjects.value.find(p => p.id === id)?.name
@@ -379,7 +381,7 @@ onMounted(async () => {
             <span class="font-medium tabular-nums dark:text-slate-100">{{ fmtDelta(e.delta) }}</span>
             <span data-kind-badge class="rounded-full px-2 py-0.5 text-xs font-medium" :class="kindBadgeClass[e.kind]">{{ e.kind }}</span>
             <router-link v-if="e.project_id" :to="`/projects/${e.project_id}`"
-              class="bg-slate-100 dark:bg-slate-700 dark:text-slate-100 rounded-full px-2 py-0.5 text-xs hover:bg-slate-200 dark:hover:bg-slate-600">🧵 {{ projectName(e.project_id) }}</router-link>
+              class="bg-slate-100 dark:bg-slate-700 dark:text-slate-100 rounded-full px-2 py-0.5 text-xs hover:bg-slate-200 dark:hover:bg-slate-600">🧵 {{ e.project_name ?? projectName(e.project_id) }}</router-link>
             <span v-if="e.note" class="text-slate-500 dark:text-slate-400">“{{ e.note }}”</span>
             <span class="text-slate-500 dark:text-slate-400">→ {{ e.resulting_qty }} left</span>
             <span class="ml-auto text-xs text-slate-400 dark:text-slate-500">{{ e.created_at.slice(0, 10) }}</span>

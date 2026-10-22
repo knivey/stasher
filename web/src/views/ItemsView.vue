@@ -152,10 +152,10 @@ function showPopup(key: string, name: string, el: EventTarget | null) {
               <span v-else class="text-slate-400 dark:text-slate-500">—</span>
             </td>
             <td class="px-3 py-2"><router-link :to="`/items/${i.id}`" class="hover:underline">{{ i.name }}</router-link><span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 dark:bg-slate-700 text-gray-500 dark:text-slate-300 px-1.5 py-0.5 text-xs align-middle">disposed</span></td>
-            <td class="px-3 py-2">{{ i.qty }}{{ i.unit ? ` ${i.unit}` : '' }}</td>
-            <td class="px-3 py-2">{{ i.location_id && locationName.get(i.location_id) || '—' }}</td>
-            <td class="px-3 py-2 text-slate-500 dark:text-slate-400">{{ i.tags?.length ? i.tags.map(t => t.name).join(', ') : '—' }}</td>
-            <td class="px-3 py-2 text-slate-500 dark:text-slate-400">{{ i.updated_at?.slice(0, 10) }}</td>
+            <td class="px-3 py-2 dark:text-slate-100">{{ i.qty }}{{ i.unit ? ` ${i.unit}` : '' }}</td>
+            <td class="px-3 py-2 dark:text-slate-300">{{ i.location_id && locationName.get(i.location_id) || '—' }}</td>
+            <td class="px-3 py-2 text-slate-500 dark:text-slate-300">{{ i.tags?.length ? i.tags.map(t => t.name).join(', ') : '—' }}</td>
+            <td class="px-3 py-2 text-slate-500 dark:text-slate-300">{{ i.updated_at?.slice(0, 10) }}</td>
             <td class="px-3 py-2">{{ i.photo_count ? `📷 ${i.photo_count}` : '—' }}</td>
           </tr>
         </tbody>

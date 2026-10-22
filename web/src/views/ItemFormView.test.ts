@@ -117,6 +117,20 @@ describe('ItemFormView create', () => {
     expect(toasts.some(t => t.type === 'error')).toBe(false) // no toast storm
   })
 
+  it('silently ignores a non-numeric ?location value: no prefill, no toast, mounts clean', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url.includes('/locations')
+        ? new Response(JSON.stringify({ data: [{ id: 3, name: 'Bin', parent_id: null }], total: 1 }), { status: 200 })
+        : new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
+    const router = newRouter()
+    await router.push('/items/new?location=abc')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    expect((w.vm as any).form.location_id).toBe(0) // no prefill
+    expect((w.find('select[aria-label="Location"]').element as HTMLSelectElement).value).toBe('0')
+    expect(toasts.some(t => t.type === 'error')).toBe(false) // stale/garbage link: silent
+  })
+
   it('uploads queued photos (downscaled at pick time) and docs after create, then navigates', async () => {
     const calls: string[] = []
     let uploadedBlob: Blob | undefined
@@ -259,6 +273,7 @@ describe('ItemFormView create', () => {
     Object.defineProperty(docInput.element, 'files', { value: [new File(['x'], 'a.txt', { type: 'text/plain' })] })
     await docInput.trigger('change')
     await flushPromises()
+    ;(w.vm as any).form.name = 'Docs' // the whitespace guard would otherwise block save before the uploads
     await (w.vm as any).save()
     await flushPromises()
     expect(router.currentRoute.value.path).toBe('/items/42') // item exists: navigate anyway
@@ -293,6 +308,33 @@ describe('ItemFormView create', () => {
     await flushPromises()
     expect(posts).toBe(1) // still exactly one item POST
     expect(router.currentRoute.value.path).toBe('/items/42')
+  })
+
+  it('silently focuses the name field when the name is whitespace-only (native required accepts " ")', async () => {
+    let posts = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST') posts++
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    await router.push('/items/new')
+    const pushSpy = vi.spyOn(router, 'push')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    const vm = w.vm as any
+    vm.form.name = '   '
+    vm.form.qty = 3 // would be reset to 1 if a save actually ran
+    // focus (not document.activeElement): VTU mounts detached from the
+    // document, so happy-dom treats focus() on it as a no-op.
+    const focusSpy = vi.spyOn(w.find('input').element, 'focus')
+    await vm.save()
+    await flushPromises()
+    expect(posts).toBe(0) // nothing to save: no POST
+    expect(vm.form.qty).toBe(3) // …and no reset either
+    expect(pushSpy).not.toHaveBeenCalled()
+    expect(toasts.some(t => t.message === 'Saved')).toBe(false)
+    expect(toasts.some(t => t.type === 'error')).toBe(false) // silent, like native validation
+    expect(focusSpy).toHaveBeenCalled() // name field is focused
   })
 })
 

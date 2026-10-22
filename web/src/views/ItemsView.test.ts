@@ -201,8 +201,10 @@ describe('ItemsView', () => {
     expect(urls.some(u => u.includes('location_id=7'))).toBe(true)
   })
 
-  it('resets the filters back to their defaults when leaving the page', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
+  it('resets the filters (and the stale result set) back to their defaults when leaving the page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 5, name: 'M3 screws', qty: 250 }], total: 1,
+    }), { status: 200 })))
     setActivePinia(createPinia())
     const store = useItemsStore()
     store.filters.tag = 'hardware'
@@ -211,11 +213,16 @@ describe('ItemsView', () => {
     store.filters.page = 3
     const w = mount(ItemsView)
     await flushPromises()
+    expect(store.items).toHaveLength(1) // precondition: the page rendered rows
     w.unmount()
     expect(store.filters).toEqual({
       q: '', location_id: 0, tag: '', project_id: 0,
       visibility: '', sort: 'updated_at', order: 'desc', page: 1, page_size: 50,
     })
+    // the result set clears too: a remounted view must not flash the stale
+    // previous result while its own fetch is in flight
+    expect(store.items).toEqual([])
+    expect(store.total).toBe(0)
   })
 
   it('still applies a filter set from another view before mount (tag-chip flow survives)', async () => {
@@ -259,20 +266,27 @@ describe('ItemsView', () => {
       return new Response(JSON.stringify({ data: [{ id: 5, name: 'M3 screws', qty: 250, photo_count: 2, thumb_key: '2026/10/abc.jpg' }], total: 1 }), { status: 200 })
     }))
     setActivePinia(createPinia())
-    const w = mount(ItemsView)
+    // attachTo: the event must propagate window → … → target during the
+    // capture phase, which needs a tree attached to the document (VTU's
+    // default mount is detached).
+    const w = mount(ItemsView, { attachTo: document.body })
     await flushPromises()
     const thumb = w.find('table img')
     await thumb.trigger('mouseenter')
     expect(w.find('[data-thumb-popup]').exists()).toBe(true)
-    window.dispatchEvent(new Event('scroll'))
+    // Dispatched on an inner element, not window: scroll events don't bubble,
+    // so only the view's CAPTURE-phase listener sees this — a bubble-phase
+    // regression would leave the popup open and fail the test.
+    w.element.dispatchEvent(new Event('scroll'))
     await flushPromises()
     expect(w.find('[data-thumb-popup]').exists()).toBe(false)
     // reopening (hover again) registers the scroll tracking once more
     await thumb.trigger('mouseenter')
     expect(w.find('[data-thumb-popup]').exists()).toBe(true)
-    window.dispatchEvent(new Event('scroll'))
+    w.element.dispatchEvent(new Event('scroll'))
     await flushPromises()
     expect(w.find('[data-thumb-popup]').exists()).toBe(false)
+    w.unmount() // remove the attached tree from document.body
   })
 
   it('shows a muted disposed badge on disposed items in both the table and the mobile cards', async () => {
