@@ -407,9 +407,9 @@ git commit -m "feat: pure-Go thumbnail generation (EXIF-aware, <=480px)"
 - Consumes: none.
 - Produces (relied on by Tasks 3–7):
   - `dbpkg.AddItemPhotoParams` gains `ThumbKey sql.NullString`
-  - `dbpkg.SetItemPhotoThumb(ctx, dbpkg.SetItemPhotoThumbParams{ThumbKey string, ID int64}) error`
+  - `dbpkg.SetItemPhotoThumb(ctx, dbpkg.SetItemPhotoThumbParams{ThumbKey sql.NullString, ID int64}) error`
   - `dbpkg.ListPhotosMissingThumbs(ctx) ([]dbpkg.ItemPhoto, error)`
-  - `dbpkg.GetPhotoByKey(ctx, dbpkg.GetPhotoByKeyParams{Key string}) (dbpkg.GetPhotoByKeyRow, error)` — now matches `storage_key = key OR thumb_key = key`
+  - `dbpkg.GetPhotoByKey(ctx, key string)` — signature UNCHANGED (sqlc collapses the two `sqlc.arg('key')` refs to one param); semantics now match `storage_key = key OR thumb_key = key`
   - `dbpkg.ItemPhoto` gains `ThumbKey sql.NullString`
 
 - [ ] **Step 1: Write the migration**
@@ -973,7 +973,7 @@ func (s *Server) BackfillThumbs(ctx context.Context) {
 			continue
 		}
 		if err := s.q.SetItemPhotoThumb(ctx, dbpkg.SetItemPhotoThumbParams{
-			ThumbKey: tkey, ID: p.ID,
+			ThumbKey: sql.NullString{String: tkey, Valid: true}, ID: p.ID,
 		}); err != nil {
 			slog.Warn("thumb backfill: update failed", "photo", p.ID, "err", err)
 			s.st.Delete(tkey)
