@@ -13,7 +13,7 @@
         <button class="w-full text-left rounded-lg px-3 py-2 hover:bg-slate-700" @click="logout">Sign out</button>
       </div>
       <button @click="theme.toggle()" :aria-label="theme.isDark.value ? 'Switch to light theme' : 'Switch to dark theme'"
-        class="mt-auto inline-flex min-w-11 min-h-11 items-center justify-center rounded-lg hover:bg-slate-700">{{ theme.isDark.value ? '☀️' : '🌙' }}</button>
+        class="inline-flex min-w-11 min-h-11 items-center justify-center rounded-lg hover:bg-slate-700">{{ theme.isDark.value ? '☀️' : '🌙' }}</button>
     </aside>
     <!-- mobile top bar + bottom nav. Settings/Shared/Trash live as compact
          icon-links in the top bar (Admin too, for admins) so every
