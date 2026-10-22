@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import type { Breadcrumb, Doc, Item, LedgerEntry, ListResponse, Location, Photo, Project } from '../api/types'
 import { useItemsStore } from '../stores/items'
 import { toast } from '../utils/toast'
@@ -44,6 +44,24 @@ function filterByTag(name: string) {
   itemsStore.filters.tag = name
   itemsStore.filters.page = 1
   router.push('/items')
+}
+
+// photos[] is (sort_order, id) ordered — photos[0] is the current main.
+const heroZoom = ref(false)
+const mainPhoto = computed(() => item.value?.photos?.[0] ?? null)
+const mainSaving = ref<Set<number>>(new Set())
+
+async function makeMain(p: Photo) {
+  if (mainSaving.value.has(p.id)) return
+  mainSaving.value.add(p.id)
+  try {
+    await api.post(`/api/v1/items/${route.params.id}/photos/${p.id}/main`)
+    await fetchItem() // refetch: the backend renumbers and reorders photos[]
+  } catch (e) {
+    toast(e instanceof ApiError ? e.message : 'Failed to set main photo', 'error')
+  } finally {
+    mainSaving.value.delete(p.id)
+  }
 }
 
 async function deletePhoto(p: Photo) {
@@ -193,6 +211,14 @@ onMounted(async () => {
       </div>
     </div>
 
+    <img v-if="mainPhoto" :src="`/files/${mainPhoto.storage_key}`" alt="" data-hero
+      class="w-full max-h-80 object-contain rounded-xl bg-slate-100 cursor-zoom-in"
+      @click="heroZoom = true" />
+    <div v-if="heroZoom" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" @click="heroZoom = false">
+      <img v-if="mainPhoto" :src="`/files/${mainPhoto.storage_key}`" class="max-h-full max-w-full object-contain" @click.stop />
+      <button class="absolute top-4 right-4 text-white text-2xl" @click="heroZoom = false">✕</button>
+    </div>
+
     <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
       <span class="font-medium">{{ item.qty }}{{ item.unit ? ` ${item.unit}` : '' }}</span>
       <span v-if="breadcrumbs.length" class="text-slate-500">{{ breadcrumbs.map(b => b.name).join(' › ') }}</span>
@@ -249,7 +275,7 @@ onMounted(async () => {
         <h2 class="font-semibold">Photos</h2>
         <FileUpload kind="photo" :item-id="item.id" @uploaded="fetchItem" />
       </div>
-      <PhotoGallery v-if="item.photos?.length" :photos="item.photos" :can-edit="true" @delete="deletePhoto" />
+      <PhotoGallery v-if="item.photos?.length" :photos="item.photos" :can-edit="true" @delete="deletePhoto" @main="makeMain" />
     </section>
 
     <section>

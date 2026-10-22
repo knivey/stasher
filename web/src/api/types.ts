@@ -1,6 +1,6 @@
 export interface User { id: number; email: string; display_name: string; default_item_visibility: 'private' | 'shared'; is_admin: boolean }
 export interface Tag { id: number; name: string; item_count?: number }
-export interface Photo { id: number; storage_key: string; caption: string; sort_order: number; created_at: string }
+export interface Photo { id: number; storage_key: string; thumb_key?: string | null; caption: string; sort_order: number; created_at: string }
 export interface Doc { id: number; storage_key: string; filename: string; mime_type: string; size_bytes: number; created_at: string }
 export interface ItemProject { id: number; name: string; status: string; qty_used: number | null }
 export interface Item {

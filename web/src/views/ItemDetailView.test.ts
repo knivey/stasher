@@ -16,6 +16,15 @@ const item = {
   projects: [{ id: 31, name: '3D printer build', status: 'active', qty_used: 12 }],
 }
 
+// Two-photo detail (photos[0] is the main — backend orders by sort_order, id).
+const twoPhotos = {
+  ...item,
+  photos: [
+    { id: 11, storage_key: '2026/10/full.jpg', caption: '', sort_order: 0, created_at: '2026-01-01T00:00:00Z' },
+    { id: 12, storage_key: '2026/10/second.jpg', caption: '', sort_order: 1, created_at: '2026-01-01T00:00:00Z' },
+  ],
+}
+
 function okItemFetch() {
   return vi.fn(async (url: string) => {
     if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
@@ -130,6 +139,52 @@ describe('ItemDetailView', () => {
     await flushPromises()
     expect(calls).toContain('DELETE /api/v1/items/9/photos/11')
     expect(calls.filter(c => c === 'GET /api/v1/items/9').length).toBe(2)
+  })
+
+  it('renders a hero image of the main photo with the full-size key', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify(twoPhotos), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    const { w } = await mountView()
+    const hero = w.find('[data-hero]')
+    expect(hero.exists()).toBe(true)
+    expect(hero.attributes('src')).toBe('/files/2026/10/full.jpg')
+  })
+
+  it('★ Make main POSTs to the main endpoint and refetches', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`)
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.endsWith('/photos/12/main')) return new Response(null, { status: 204 })
+      if (url.includes('/items/9') && init?.method !== 'DELETE') return new Response(JSON.stringify(twoPhotos), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    const { w } = await mountView()
+    const makeMain = w.find('button[aria-label="Make main"]')
+    expect(makeMain).toBeTruthy() // on the second photo only
+    await makeMain.trigger('click')
+    await flushPromises()
+    expect(calls).toContain('POST /api/v1/items/9/photos/12/main')
+    expect(calls.filter(c => c === 'GET /api/v1/items/9')).toHaveLength(2)
+  })
+
+  it('hero click opens the lightbox overlay', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify(twoPhotos), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    const { w } = await mountView()
+    await w.find('[data-hero]').trigger('click')
+    const overlay = w.find('.fixed.inset-0')
+    expect(overlay.exists()).toBe(true)
+    expect(overlay.find('img').attributes('src')).toBe('/files/2026/10/full.jpg')
   })
 
   it('deletes a document then refetches the item', async () => {
