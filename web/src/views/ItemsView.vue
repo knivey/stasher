@@ -7,6 +7,7 @@ import { useItemsStore } from '../stores/items'
 import { toast } from '../utils/toast'
 import { locationDepthOptions } from '../utils/locations'
 import Pagination from '../components/Pagination.vue'
+import LocationSelect from '../components/LocationSelect.vue'
 
 const router = useRouter()
 const store = useItemsStore()
@@ -28,6 +29,66 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 // links set store filters from another view BEFORE navigating here — a
 // mount-time reset would wipe them before the first fetch.
 onUnmounted(() => store.resetFilters())
+
+// ---- multi-select move ----
+// Selection is a Set of item ids, deliberately INDEPENDENT of the page and
+// the filters: it survives pagination/filter/search refetches and only
+// clears on a successful move, the Clear button, or unmount (it is
+// view-local state). The bar always reports the true Set size, even when
+// the current page shows none of the selected items.
+const selected = ref(new Set<number>())
+const moveTarget = ref(-1) // -1 = no explicit choice yet ("Move to…" placeholder)
+const moving = ref(false)
+// API caps one bulk move at 200 ids (docs/api-notes.md); the client shows a
+// hint and disables Move beyond that instead of letting the request 400.
+const MAX_BULK = 200
+const overCap = computed(() => selected.value.size > MAX_BULK)
+
+const pageIds = computed(() => store.items.map(i => i.id))
+const allSelected = computed(() =>
+  pageIds.value.length > 0 && pageIds.value.every(id => selected.value.has(id)))
+const someSelected = computed(() =>
+  !allSelected.value && pageIds.value.some(id => selected.value.has(id)))
+
+function toggleRow(id: number) {
+  if (selected.value.has(id)) selected.value.delete(id)
+  else selected.value.add(id)
+}
+
+// The header checkbox follows native checkbox semantics: its checked state
+// (as the user just set it) decides select vs deselect, so clicking through
+// an indeterminate (mixed) header selects the remaining page items.
+function toggleAll(e: Event) {
+  const on = (e.target as HTMLInputElement).checked
+  for (const id of pageIds.value) {
+    if (on) selected.value.add(id)
+    else selected.value.delete(id)
+  }
+}
+
+function clearSelection() {
+  selected.value = new Set()
+  moveTarget.value = -1
+}
+
+async function moveSelected() {
+  if (moving.value || overCap.value || moveTarget.value < 0) return
+  moving.value = true
+  try {
+    const res = await api.post<{ moved: number }>('/api/v1/items/bulk-move', {
+      item_ids: [...selected.value],
+      location_id: moveTarget.value,
+    })
+    toast(`Moved ${res.moved} items`, 'success')
+    clearSelection()
+    await fetch()
+  } catch (e) {
+    // ApiError: keep the selection so the user can retry with another target
+    toast((e as Error).message, 'error')
+  } finally {
+    moving.value = false
+  }
+}
 
 // Locations & tags feed the filter selects. NOTE: these two endpoints
 // ignore pagination entirely — the page_size param is accepted but unused
@@ -126,6 +187,25 @@ function showPopup(key: string, name: string, el: EventTarget | null) {
       </button>
     </div>
 
+    <!-- multi-select bar: only when a selection exists; independent of
+         loading/empty list state so the count always reflects the Set -->
+    <div v-if="selected.size" data-selection-bar
+      class="bg-white dark:bg-slate-800 rounded-xl shadow p-3 flex flex-wrap gap-2 items-center">
+      <span data-selection-count class="text-sm font-medium dark:text-slate-100">{{ selected.size }} selected</span>
+      <LocationSelect v-model="moveTarget" :locations="locations" placeholder="Move to…" class="w-52" />
+      <button data-move-btn :disabled="moving || moveTarget < 0 || overCap" @click="moveSelected"
+        class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+        {{ moving ? 'Moving…' : 'Move' }}
+      </button>
+      <span v-if="overCap" data-cap-hint class="text-sm text-amber-600 dark:text-amber-400">
+        At most {{ MAX_BULK }} items can be moved at once — deselect some.
+      </span>
+      <button data-clear @click="clearSelection"
+        class="ml-auto border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-3 py-1.5 text-sm">
+        Clear
+      </button>
+    </div>
+
     <p v-if="store.loading" class="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>
 
     <template v-else-if="store.items.length">
@@ -133,6 +213,10 @@ function showPopup(key: string, name: string, el: EventTarget | null) {
       <table class="hidden md:table w-full bg-white dark:bg-slate-800 rounded-xl shadow text-sm">
         <thead>
           <tr class="text-left text-slate-500 dark:text-slate-400 border-b dark:border-slate-700">
+            <th class="w-8 px-3 py-2">
+              <input type="checkbox" data-select-all :checked="allSelected" :indeterminate="someSelected"
+                aria-label="Select all on page" @change="toggleAll" />
+            </th>
             <th class="w-12 px-3 py-2"></th>
             <th class="px-3 py-2 font-medium">Name</th>
             <th class="px-3 py-2 font-medium">Qty</th>
@@ -144,6 +228,12 @@ function showPopup(key: string, name: string, el: EventTarget | null) {
         </thead>
         <tbody class="divide-y dark:divide-slate-700">
           <tr v-for="i in store.items" :key="i.id" @click="router.push(`/items/${i.id}`)" class="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50">
+            <!-- selection cell: .stop keeps the click out of the navigable row
+                 (keyboard-activated checkboxes fire click too) -->
+            <td class="px-3 py-2" @click.stop>
+              <input type="checkbox" data-select-row :checked="selected.has(i.id)" :aria-label="`Select ${i.name}`"
+                @change="toggleRow(i.id)" @click.stop />
+            </td>
             <td class="px-3 py-2">
               <img v-if="i.thumb_key" :src="`/files/${i.thumb_key}`" loading="lazy" :alt="i.name" tabindex="0"
                 class="w-10 h-10 object-cover rounded-lg"
@@ -174,7 +264,10 @@ function showPopup(key: string, name: string, el: EventTarget | null) {
       <div data-cards class="md:hidden space-y-2">
         <router-link v-for="i in store.items" :key="i.id" :to="`/items/${i.id}`"
           class="block bg-white dark:bg-slate-800 rounded-xl shadow px-4 py-3 flex items-center justify-between">
-          <div>
+          <!-- .stop: the checkbox sits inside the navigable card link -->
+          <input type="checkbox" data-select-row :checked="selected.has(i.id)" :aria-label="`Select ${i.name}`"
+            class="shrink-0 mr-3" @change="toggleRow(i.id)" @click.stop />
+          <div class="flex-1 min-w-0">
             <div class="font-medium dark:text-slate-100">{{ i.name }}<span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 dark:bg-slate-700 text-gray-500 dark:text-slate-300 px-1.5 py-0.5 text-xs font-normal align-middle">disposed</span></div>
             <img v-if="i.thumb_key" :src="`/files/${i.thumb_key}`" loading="lazy" alt=""
               class="h-24 w-full object-cover rounded-lg" />

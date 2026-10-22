@@ -2,6 +2,7 @@
   <select :value="modelValue" aria-label="Location"
     class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm bg-white"
     @change="emit('update:modelValue', Number(($event.target as HTMLSelectElement).value))">
+    <option v-if="placeholder" :value="-1" disabled>{{ placeholder }}</option>
     <option v-if="allowNone !== false" :value="0">{{ noneLabel ?? 'No location' }}</option>
     <option v-for="o in options" :key="o.id" :value="o.id">{{ '— '.repeat(o.depth) }}{{ o.name }}</option>
   </select>
@@ -18,6 +19,9 @@ import { locationDepthOptions, type LocationOption } from '../utils/locations'
 // (no extra fetch, stays fresh after mutations), `allowNone`/`noneLabel`
 // adapt the zero option for parent picking, and `exclude` hides ids that
 // must not be selectable (a location being moved + its descendants).
+// `placeholder` renders a disabled "Move to…" option with value -1 (sentinel
+// that never collides with a real location or the 0-clear), forcing an
+// explicit choice; bind modelValue to -1 to start on it.
 // NOTE: withDefaults is required — Vue casts absent Boolean props to false,
 // which would hide the none option for callers that don't pass allow-none.
 const props = withDefaults(defineProps<{
@@ -26,6 +30,7 @@ const props = withDefaults(defineProps<{
   allowNone?: boolean
   noneLabel?: string
   exclude?: number[]
+  placeholder?: string
 }>(), { allowNone: true })
 const emit = defineEmits<{ 'update:modelValue': [n: number] }>()
 

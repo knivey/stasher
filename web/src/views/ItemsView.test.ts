@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
 import { useItemsStore } from '../stores/items'
+import { toasts } from '../utils/toast'
 import ItemsView from './ItemsView.vue'
 
-beforeEach(() => { setActivePinia(createPinia()); vi.unstubAllGlobals() })
+beforeEach(() => { setActivePinia(createPinia()); vi.unstubAllGlobals(); toasts.splice(0) })
 
 describe('ItemsView', () => {
   it('fetches with default sort and renders item names', async () => {
@@ -144,7 +146,8 @@ describe('ItemsView', () => {
     await flushPromises()
     const table = w.find('table')
     expect(table.find('img').exists()).toBe(false)
-    const thumbCell = table.findAll('tbody tr')[0].findAll('td')[0]
+    // td[0] is the selection checkbox cell; the thumb placeholder follows it
+    const thumbCell = table.findAll('tbody tr')[0].findAll('td')[1]
     expect(thumbCell.text()).toBe('—')
   })
 
@@ -311,5 +314,183 @@ describe('ItemsView', () => {
     expect(w.find('[data-cards]').find('[data-disposed]').exists()).toBe(true)
     // exactly one badge per branch (only the disposed row carries it)
     expect(w.findAll('[data-disposed]')).toHaveLength(2)
+  })
+
+  // ---- multi-select move ----
+
+  const ITEMS3 = [
+    { id: 1, name: 'M3 screws', qty: 250, photo_count: 0 },
+    { id: 2, name: 'Resistor', qty: 100, photo_count: 0 },
+    { id: 3, name: 'Capacitor', qty: 50, photo_count: 0 },
+  ]
+  const LOCATIONS2 = {
+    data: [{ id: 7, name: 'Shelf', parent_id: null }, { id: 8, name: 'Drawer', parent_id: null }],
+    total: 2,
+  }
+
+  interface Call { method: string; url: string; body?: string }
+
+  function mockSelectionFetch(items: any[], opts: { moveStatus?: number; moveError?: string; moveMoved?: number } = {}) {
+    const calls: Call[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      calls.push({ method, url, body: init?.body as string | undefined })
+      if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/locations')) return new Response(JSON.stringify(LOCATIONS2), { status: 200 })
+      if (url.includes('/items/bulk-move')) {
+        if (opts.moveStatus) {
+          return new Response(JSON.stringify({ error: { code: 'not_found', message: opts.moveError ?? 'location not found' } }), { status: opts.moveStatus })
+        }
+        return new Response(JSON.stringify({ moved: opts.moveMoved ?? 2 }), { status: 200 })
+      }
+      if (url.includes('/items?')) return new Response(JSON.stringify({ data: items, total: items.length }), { status: 200 })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    return calls
+  }
+
+  async function mountWithRouter(items: any[] = ITEMS3, opts: Parameters<typeof mockSelectionFetch>[1] = {}) {
+    const calls = mockSelectionFetch(items, opts)
+    const router: Router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: { template: '<div />' } },
+        { path: '/items', component: { template: '<div />' } },
+        { path: '/items/:id', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/items')
+    const w = mount(ItemsView, { global: { plugins: [router] } })
+    await flushPromises()
+    return { w, router, calls }
+  }
+
+  it('row checkboxes toggle ids and the selection bar shows the live count', async () => {
+    const { w } = await mountWithRouter()
+    expect(w.find('[data-selection-bar]').exists()).toBe(false)
+    const boxes = w.find('table').findAll('[data-select-row]')
+    expect(boxes).toHaveLength(3)
+    await boxes[0].setValue(true)
+    expect(w.find('[data-selection-bar]').exists()).toBe(true)
+    expect(w.find('[data-selection-count]').text()).toContain('1 selected')
+    await boxes[2].setValue(true)
+    expect(w.find('[data-selection-count]').text()).toContain('2 selected')
+    await boxes[0].setValue(false)
+    expect(w.find('[data-selection-count]').text()).toContain('1 selected')
+    await boxes[2].setValue(false)
+    expect(w.find('[data-selection-bar]').exists()).toBe(false)
+  })
+
+  it('the header toggle selects and deselects the whole page and is indeterminate in between', async () => {
+    const { w } = await mountWithRouter()
+    const all = () => w.find('[data-select-all]')
+    await all().setValue(true)
+    expect(w.find('[data-selection-count]').text()).toContain('3 selected')
+    for (const b of w.findAll('[data-select-row]')) {
+      expect((b.element as HTMLInputElement).checked).toBe(true)
+    }
+    // one deselected -> mixed: header is indeterminate, not checked
+    await w.findAll('[data-select-row]')[0].setValue(false)
+    let el = all().element as HTMLInputElement
+    expect(el.indeterminate).toBe(true)
+    expect(el.checked).toBe(false)
+    // clicking through an indeterminate header selects the rest (checked=true)
+    await all().setValue(true)
+    expect(w.find('[data-selection-count]').text()).toContain('3 selected')
+    // full deselect
+    await all().setValue(false)
+    expect(w.find('[data-selection-bar]').exists()).toBe(false)
+    el = all().element as HTMLInputElement
+    expect(el.indeterminate).toBe(false)
+    expect(el.checked).toBe(false)
+  })
+
+  it('Clear empties the selection and hides the bar', async () => {
+    const { w } = await mountWithRouter()
+    await w.findAll('[data-select-row]')[0].setValue(true)
+    await w.find('[data-selection-bar]').find('button[data-clear]').trigger('click')
+    expect(w.find('[data-selection-bar]').exists()).toBe(false)
+    expect((w.findAll('[data-select-row]')[0].element as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('Move POSTs the exact {item_ids, location_id} body, toasts success, refetches, clears selection', async () => {
+    const { w, calls } = await mountWithRouter()
+    await w.findAll('[data-select-row]')[0].setValue(true) // id 1
+    await w.findAll('[data-select-row]')[2].setValue(true) // id 3
+    const bar = w.find('[data-selection-bar]')
+    const select = bar.find('select')
+    ;(select.element as HTMLSelectElement).value = '8'
+    await select.trigger('change')
+    await bar.find('button[data-move-btn]').trigger('click')
+    await flushPromises()
+    const post = calls.find(c => c.method === 'POST' && c.url.includes('/items/bulk-move'))
+    expect(post).toBeTruthy()
+    expect(JSON.parse(post!.body!)).toEqual({ item_ids: [1, 3], location_id: 8 })
+    expect(toasts.some(t => t.message === 'Moved 2 items' && t.type === 'success')).toBe(true)
+    expect(w.find('[data-selection-bar]').exists()).toBe(false) // selection cleared
+    // refetched the list after the move (initial fetch + refetch)
+    expect(calls.filter(c => c.method === 'GET' && c.url.includes('/items?')).length).toBe(2)
+  })
+
+  it('Move is disabled until a target location is chosen (Move to… placeholder)', async () => {
+    const { w } = await mountWithRouter()
+    await w.findAll('[data-select-row]')[0].setValue(true)
+    const btn = w.find('[data-selection-bar]').find('button[data-move-btn]')
+    expect((btn.element as HTMLButtonElement).disabled).toBe(true)
+    const select = w.find('[data-selection-bar]').find('select')
+    expect((select.element as HTMLSelectElement).value).toBe('-1') // placeholder
+    ;(select.element as HTMLSelectElement).value = '0' // "No location" is a valid target (0 = clear)
+    await select.trigger('change')
+    expect((w.find('[data-selection-bar]').find('button[data-move-btn]').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('a failed bulk move toasts the ApiError and keeps the selection', async () => {
+    const { w, calls } = await mountWithRouter(ITEMS3, { moveStatus: 404, moveError: 'location not found' })
+    await w.findAll('[data-select-row]')[0].setValue(true)
+    const select = w.find('[data-selection-bar]').find('select')
+    ;(select.element as HTMLSelectElement).value = '8'
+    await select.trigger('change')
+    await w.find('[data-selection-bar]').find('button[data-move-btn]').trigger('click')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'location not found' && t.type === 'error')).toBe(true)
+    expect(toasts.some(t => t.type === 'success')).toBe(false)
+    // selection kept, no refetch
+    expect(w.find('[data-selection-count]').text()).toContain('1 selected')
+    expect(calls.filter(c => c.method === 'GET' && c.url.includes('/items?')).length).toBe(1)
+  })
+
+  it('selection persists across a filter change (Set of ids, not page state)', async () => {
+    const { w } = await mountWithRouter()
+    await w.findAll('[data-select-row]')[0].setValue(true)
+    // change the tag filter -> refetch (same mocked items come back)
+    await w.find('select[aria-label="Filter by tag"]').setValue('hardware')
+    await flushPromises()
+    expect(w.find('[data-selection-count]').text()).toContain('1 selected')
+    expect((w.findAll('[data-select-row]')[0].element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('selecting more than 200 items disables Move and shows the cap hint', async () => {
+    const many = Array.from({ length: 201 }, (_, i) => ({ id: i + 1, name: `item ${i + 1}`, qty: 1 }))
+    const { w } = await mountWithRouter(many)
+    await w.find('[data-select-all]').setValue(true)
+    expect(w.find('[data-selection-count]').text()).toContain('201 selected')
+    expect(w.find('[data-cap-hint]').exists()).toBe(true)
+    expect((w.find('[data-selection-bar]').find('button[data-move-btn]').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('clicking a desktop row checkbox does not navigate to the item', async () => {
+    const { w, router } = await mountWithRouter()
+    await w.find('table').find('[data-select-row]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/items')
+  })
+
+  it('mobile cards carry a selection checkbox that does not navigate either', async () => {
+    const { w, router } = await mountWithRouter()
+    const cards = w.find('[data-cards]')
+    expect(cards.findAll('[data-select-row]')).toHaveLength(3)
+    await cards.find('[data-select-row]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/items')
   })
 })
