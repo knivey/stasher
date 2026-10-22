@@ -346,7 +346,7 @@ onMounted(async () => {
     </section>
 
     <ConfirmDialog :open="confirmDelete" :title="`Delete '${item.name}'`"
-      message="The item will be moved to trash. You can restore it from Trash before it is permanently purged."
+      :message="`The item will be moved to trash. You can restore it from Trash before it is permanently purged.\nIf you just used some up, 'Log usage' is probably what you want — deleting is for mistakes.`"
       confirm-label="Delete" @confirm="deleteItem" @cancel="confirmDelete = false" />
   </div>
   <p v-else class="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>
