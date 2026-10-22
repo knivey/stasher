@@ -122,7 +122,8 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id": photo.ID, "storage_key": photo.StorageKey, "caption": photo.Caption,
+		"id": photo.ID, "storage_key": photo.StorageKey, "thumb_key": thumbJSON(photo.ThumbKey),
+		"caption":    photo.Caption,
 		"sort_order": photo.SortOrder, "created_at": photo.CreatedAt,
 	})
 }

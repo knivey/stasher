@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -186,6 +187,14 @@ func TestUploadPhotoGeneratesThumb(t *testing.T) {
 	}
 	if photos[0].ThumbKey.String == photos[0].StorageKey {
 		t.Fatal("thumb_key must be a derived file, not the original")
+	}
+	// the /items/{id}/photos response surface exposes the derived key too
+	var uploaded struct {
+		ThumbKey json.RawMessage `json:"thumb_key"`
+	}
+	decodeBody(t, resp, &uploaded)
+	if got := string(uploaded.ThumbKey); got != jsonString(photos[0].ThumbKey.String) {
+		t.Fatalf("upload response thumb_key = %s, want %s", got, jsonString(photos[0].ThumbKey.String))
 	}
 	tf, err := s.Storage().Open(photos[0].ThumbKey.String)
 	if err != nil {

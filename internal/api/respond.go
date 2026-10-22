@@ -71,3 +71,13 @@ func sqlNullInt64(i int64) sql.NullInt64 { return sql.NullInt64{Int64: i, Valid:
 func sqlNullString(s string) sql.NullString { return sql.NullString{String: s, Valid: true} }
 
 func sqlNullFloat64(f float64) sql.NullFloat64 { return sql.NullFloat64{Float64: f, Valid: true} }
+
+// thumbJSON renders a photo's thumb_key for JSON: the derived key, or an
+// explicit null when generation failed (list SQL COALESCEs to the original
+// storage_key instead; photo objects sit next to their storage_key).
+func thumbJSON(ns sql.NullString) any {
+	if !ns.Valid || ns.String == "" {
+		return nil
+	}
+	return ns.String
+}

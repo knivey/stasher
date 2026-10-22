@@ -87,12 +87,20 @@ Facts discovered by the frontend round, kept here so they survive:
   harmless no-op) but must not rely on it; the `page_size=200 = backend
   max` comments that used to sit next to those calls were wrong and are
   gone.
-- **List responses carry `thumb_key`** (2026-10-21): `GET /items` and
-  `GET /shared` rows include `thumb_key` — the item's first photo's
-  `storage_key` (ordered by `sort_order, id`), `null` when the item has no
-  photos. Fetch thumbnails via `/files/{thumb_key}` (same owner-or-shared
-  gate as all files). `photo_count` remains on rows; the SPA renders the
-  image when `thumb_key` is present and the 📷 count badge otherwise.
+- **`thumb_key` is a derived thumbnail** (2026-10-22, supersedes the
+  2026-10-21 storage_key note): on `GET /items` and `GET /shared` rows,
+  `thumb_key` is the item's first photo's (ordered by `sort_order, id`)
+  **derived ≤480px file** (`jpg`/`png`/`gif`), selected as
+  `COALESCE(thumb_key, storage_key)` — when generation failed (legacy
+  photos until backfill, corrupt images) the original key is returned
+  instead; `null` when the item has no photos. `GET /items/{id}`
+  `photos[]` and the `POST /items/{id}/photos` response carry the photo's
+  own `thumb_key` (nullable — `null` when generation failed;
+  `storage_key` sits alongside for the fallback). `/files/{thumb_key}`
+  passes the same owner-or-shared gate as all files (matched against
+  `storage_key OR thumb_key`). `photo_count` remains on rows; the SPA
+  renders the image when `thumb_key` is present and the 📷 count badge
+  otherwise.
 
 ## Trash (2026-10-21)
 

@@ -1,6 +1,9 @@
 package api
 
 import (
+	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"stasher/internal/db"
 )
 
 func listItems(t *testing.T, ts *httptest.Server, cookie *http.Cookie, query string) (names []string, total int64) {
@@ -174,7 +179,7 @@ func TestItemListIsolated(t *testing.T) {
 }
 
 func TestItemListThumbKey(t *testing.T) {
-	_, ts := newTestServer(t, nil)
+	s, ts := newTestServer(t, nil)
 	cookie := registerUser(t, ts, "thumb@test.dev", "longpassword1")
 
 	// item A: two photos. The FIRST-uploaded gets sort_order 5, the second
@@ -214,6 +219,20 @@ func TestItemListThumbKey(t *testing.T) {
 	setSort(high.ID, 5)
 	setSort(low.ID, 1)
 
+	// uploads derive real thumbs (Task 3): the expected list value is the
+	// lowest-sort photo's DERIVED thumb_key, read straight from its row
+	rows, err := s.Queries().ListItemPhotos(context.Background(), itemA.ID)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("photos: %v %d", err, len(rows))
+	}
+	derived := map[int64]string{}
+	for _, ph := range rows {
+		if !ph.ThumbKey.Valid || ph.ThumbKey.String == "" || ph.ThumbKey.String == ph.StorageKey {
+			t.Fatalf("photo %d lacks a derived thumb: %+v", ph.ID, ph.ThumbKey)
+		}
+		derived[ph.ID] = ph.ThumbKey.String
+	}
+
 	// item B: no photos at all
 	doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "B"}, cookie)
 
@@ -228,13 +247,170 @@ func TestItemListThumbKey(t *testing.T) {
 	for _, d := range list.Data {
 		byName[d.Name] = d.ThumbKey
 	}
-	// thumb_key is the lowest-sort photo's storage key (raw JSON string)
-	if got := string(byName["A"]); got != jsonString(low.StorageKey) {
-		t.Fatalf("A thumb_key = %s, want %s (sort_order-1 photo, not %q)",
-			got, jsonString(low.StorageKey), high.StorageKey)
+	// thumb_key is the lowest-sort photo's DERIVED key (COALESCE picks the
+	// generated thumb over the original), raw JSON string
+	if got := string(byName["A"]); got != jsonString(derived[low.ID]) {
+		t.Fatalf("A thumb_key = %s, want %s (derived thumb of sort_order-1 photo, not %q)",
+			got, jsonString(derived[low.ID]), high.StorageKey)
 	}
 	// no photos -> explicit null (not absent, not "")
 	if got := string(byName["B"]); got != "null" {
 		t.Fatalf("B thumb_key = %s, want null", got)
+	}
+
+	// detail JSON photos[] carry the same non-null derived thumb_key,
+	// ordered (sort_order, id) like the list's pick
+	detail := doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(itemA.ID), nil, cookie)
+	var d struct {
+		Photos []struct {
+			ID       int64           `json:"id"`
+			ThumbKey json.RawMessage `json:"thumb_key"`
+		} `json:"photos"`
+	}
+	decodeBody(t, detail, &d)
+	if len(d.Photos) != 2 || d.Photos[0].ID != low.ID {
+		t.Fatalf("detail photos = %+v, want low-sort photo first", d.Photos)
+	}
+	if got := string(d.Photos[0].ThumbKey); got != jsonString(derived[low.ID]) {
+		t.Fatalf("detail photos[0] thumb_key = %s, want %s", got, jsonString(derived[low.ID]))
+	}
+	if got := string(d.Photos[1].ThumbKey); got != jsonString(derived[high.ID]) {
+		t.Fatalf("detail photos[1] thumb_key = %s, want %s", got, jsonString(derived[high.ID]))
+	}
+}
+
+// A thumb key from a shared item must serve to the sharee (200), and a
+// private item's thumb key must 404 for a stranger — the /files gate
+// applies to derived files exactly as it does to originals.
+func TestThumbKeyGate(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	alice := registerUser(t, ts, "gate-a@test.dev", "longpassword1")
+	bob := registerUser(t, ts, "gate-b@test.dev", "longpassword1")
+	mallory := registerUser(t, ts, "gate-m@test.dev", "longpassword1")
+
+	mkItem := func(name, visibility string) int64 {
+		resp := doJSON(t, ts, "POST", "/api/v1/items",
+			map[string]any{"name": name, "visibility": visibility}, alice)
+		var item struct {
+			ID int64 `json:"id"`
+		}
+		decodeBody(t, resp, &item)
+		return item.ID
+	}
+	sharedID := mkItem("gated widget", "shared")
+	mkItem("bare widget", "shared") // shared, no photos: NULL thumb path
+	privID := mkItem("secret widget", "private")
+	for _, id := range []int64{sharedID, privID} {
+		pr := postFile(t, ts, "/api/v1/items/"+fmtInt64(id)+"/photos",
+			"file", "widget.jpg", jpegBytes(t, 900, 600), alice)
+		if pr.StatusCode != http.StatusCreated {
+			t.Fatalf("photo upload = %d", pr.StatusCode)
+		}
+	}
+	thumbOf := func(itemID int64) string {
+		rows, err := s.Queries().ListItemPhotos(context.Background(), itemID)
+		if err != nil || len(rows) != 1 || !rows[0].ThumbKey.Valid || rows[0].ThumbKey.String == rows[0].StorageKey {
+			t.Fatalf("photos for item %d: %v %+v", itemID, err, rows)
+		}
+		return rows[0].ThumbKey.String
+	}
+	sharedThumb := thumbOf(sharedID)
+	privThumb := thumbOf(privID)
+
+	// the owner's detail JSON photos[] carry the non-null derived thumb_key
+	var detail struct {
+		Photos []struct {
+			ThumbKey json.RawMessage `json:"thumb_key"`
+		} `json:"photos"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(sharedID), nil, alice), &detail)
+	if len(detail.Photos) != 1 || string(detail.Photos[0].ThumbKey) != jsonString(sharedThumb) {
+		t.Fatalf("detail photos thumb_key = %+v, want %s", detail.Photos, jsonString(sharedThumb))
+	}
+
+	// bob (sharee) sees the shared items in /shared: the photo-bearing row
+	// with the derived thumb, the photoless row with an explicit null (the
+	// NULL-scan path the query's NULLIF wrapper protects)
+	var list struct {
+		Data []struct {
+			Name     string          `json:"name"`
+			ThumbKey json.RawMessage `json:"thumb_key"`
+		} `json:"data"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/shared", nil, bob), &list)
+	byName := map[string]json.RawMessage{}
+	for _, d := range list.Data {
+		byName[d.Name] = d.ThumbKey
+	}
+	if len(byName) != 2 {
+		t.Fatalf("shared list = %+v, want the two shared items", list)
+	}
+	if got := string(byName["gated widget"]); got != jsonString(sharedThumb) {
+		t.Fatalf("shared thumb_key = %s, want %s", got, jsonString(sharedThumb))
+	}
+	if got := string(byName["bare widget"]); got != "null" {
+		t.Fatalf("photoless shared thumb_key = %s, want null", got)
+	}
+
+	getFile := func(key string, cookie *http.Cookie) int {
+		req, _ := http.NewRequest("GET", ts.URL+"/files/"+key, nil)
+		req.AddCookie(cookie)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	// the sharee can fetch the derived thumb (gate matches thumb_key)
+	if c := getFile(sharedThumb, bob); c != http.StatusOK {
+		t.Fatalf("sharee thumb fetch = %d, want 200", c)
+	}
+	// strangers get 404 (not 403) for a private item's derived thumb
+	if c := getFile(privThumb, mallory); c != http.StatusNotFound {
+		t.Fatalf("stranger private thumb fetch = %d, want 404", c)
+	}
+	if c := getFile(privThumb, bob); c != http.StatusNotFound {
+		t.Fatalf("sharee private-item thumb fetch = %d, want 404", c)
+	}
+}
+
+// A photo with no derived thumb (legacy row, corrupt original) surfaces its
+// ORIGINAL storage_key as thumb_key on lists — the COALESCE fallback
+// documented in docs/api-notes.md.
+func TestItemListThumbKeyFallsBackToOriginal(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "thumb-null@test.dev", "longpassword1")
+	resp := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": "legacy"}, cookie)
+	var item struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &item)
+
+	// real file on disk, row inserted with a NULL thumb (pre-thumb-era
+	// shape, as left behind by failed generation or a legacy photo)
+	key, _, err := s.Storage().Save(bytes.NewReader(png1x1), "png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Queries().AddItemPhoto(context.Background(), db.AddItemPhotoParams{
+		ItemID: item.ID, StorageKey: key, ThumbKey: sql.NullString{},
+		Caption: "", SortOrder: 0, CreatedAt: timeNow(t),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var list struct {
+		Data []struct {
+			Name     string          `json:"name"`
+			ThumbKey json.RawMessage `json:"thumb_key"`
+		} `json:"data"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items", nil, cookie), &list)
+	if len(list.Data) != 1 || list.Data[0].Name != "legacy" {
+		t.Fatalf("list = %+v", list)
+	}
+	if got := string(list.Data[0].ThumbKey); got != jsonString(key) {
+		t.Fatalf("thumb_key = %s, want original storage_key %s (COALESCE fallback)", got, jsonString(key))
 	}
 }

@@ -1575,7 +1575,7 @@ const listSharedItemsFromOthers = `-- name: ListSharedItemsFromOthers :many
 SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id, i.visibility,
        i.created_at, i.updated_at, i.disposed AS disposed, u.display_name AS owner_name,
        (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
-       tp.storage_key AS thumb_key,
+       COALESCE(tp.thumb_key, NULLIF(tp.storage_key, '')) AS thumb_key,
        count(*) OVER () AS total_count
 FROM items i
 JOIN users u ON u.id = i.user_id
@@ -1621,7 +1621,12 @@ type ListSharedItemsFromOthersRow struct {
 // JOIN onto the subquery-picked row, so sqlc emits a nullable sql.NullString
 // (a bare scalar subquery is inferred NOT NULL and would fail to Scan the
 // no-photo NULL). Join is on the photo primary key: at most one row, so
-// multiplicity and total_count are unchanged.
+// multiplicity and total_count are unchanged. The COALESCE surfaces the
+// derived thumb with the original storage_key as fallback (legacy/corrupt).
+// The NULLIF wrapper is a no-op on real keys (a storage key is never the
+// empty string), needed because a bare tp.storage_key arg is declared
+// NOT NULL: sqlc would then infer the whole COALESCE NOT NULL and NULL
+// (no-photo LEFT JOIN miss) would fail to Scan into a string.
 func (q *Queries) ListSharedItemsFromOthers(ctx context.Context, arg ListSharedItemsFromOthersParams) ([]ListSharedItemsFromOthersRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSharedItemsFromOthers,
 		arg.UserID,

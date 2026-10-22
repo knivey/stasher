@@ -54,8 +54,8 @@ func (s *Server) itemDetailJSON(r *http.Request, i dbpkg.Item) (map[string]any, 
 	photoList := make([]map[string]any, 0, len(photos))
 	for _, p := range photos {
 		photoList = append(photoList, map[string]any{
-			"id": p.ID, "storage_key": p.StorageKey, "caption": p.Caption,
-			"sort_order": p.SortOrder, "created_at": p.CreatedAt,
+			"id": p.ID, "storage_key": p.StorageKey, "thumb_key": thumbJSON(p.ThumbKey),
+			"caption": p.Caption, "sort_order": p.SortOrder, "created_at": p.CreatedAt,
 		})
 	}
 	docs, err := s.q.ListItemDocuments(r.Context(), i.ID)
@@ -440,13 +440,15 @@ type itemFilters struct {
 // project_id, visibility, limit, offset) is a ? placeholder arg. WHERE
 // semantics match the previous sqlc query exactly: FTS via items_fts
 // MATCH, location subtree via json_each of the pre-resolved id array (R5
-// fallback), tag/project/visibility filters, photo_count subquery, and
-// count(*) OVER() AS total_count for the pre-pagination total.
+// fallback), tag/project/visibility filters, photo_count subquery, the
+// COALESCE(thumb_key, storage_key) thumb subselect (derived thumb with
+// original-file fallback), and count(*) OVER() AS total_count for the
+// pre-pagination total.
 func buildItemListSQL(f itemFilters, sortCol, dir string) (string, []any) {
 	stmt := `SELECT i.id, i.name, i.description, i.qty, i.unit, i.location_id,
        i.visibility, i.disposed, i.created_at, i.updated_at,
        (SELECT COUNT(*) FROM item_photos p WHERE p.item_id = i.id) AS photo_count,
-       (SELECT p.storage_key FROM item_photos p WHERE p.item_id = i.id ORDER BY p.sort_order, p.id LIMIT 1) AS thumb_key,
+       (SELECT COALESCE(p.thumb_key, p.storage_key) FROM item_photos p WHERE p.item_id = i.id ORDER BY p.sort_order, p.id LIMIT 1) AS thumb_key,
        count(*) OVER () AS total_count
 FROM items i
 WHERE i.user_id = ?`

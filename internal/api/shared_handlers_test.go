@@ -1,13 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
 )
 
 func TestSharedListThumbKey(t *testing.T) {
-	_, ts := newTestServer(t, nil)
+	s, ts := newTestServer(t, nil)
 	alice := registerUser(t, ts, "share-thumb-a@test.dev", "longpassword1")
 	bob := registerUser(t, ts, "share-thumb-b@test.dev", "longpassword1")
 
@@ -27,12 +28,16 @@ func TestSharedListThumbKey(t *testing.T) {
 		ID int64 `json:"id"`
 	}
 	decodeBody(t, shared, &sharedItem)
-	photoResp := postFile(t, ts, "/api/v1/items/"+fmtInt64(sharedItem.ID)+"/photos",
+	postFile(t, ts, "/api/v1/items/"+fmtInt64(sharedItem.ID)+"/photos",
 		"file", "widget.png", png1x1, alice)
-	var photo struct {
-		StorageKey string `json:"storage_key"`
+
+	// uploads derive real thumbs: the expected /shared value is the photo's
+	// DERIVED thumb_key, read straight from its row
+	rows, err := s.Queries().ListItemPhotos(context.Background(), sharedItem.ID)
+	if err != nil || len(rows) != 1 ||
+		!rows[0].ThumbKey.Valid || rows[0].ThumbKey.String == rows[0].StorageKey {
+		t.Fatalf("shared item photos: %v %+v", err, rows)
 	}
-	decodeBody(t, photoResp, &photo)
 
 	var list struct {
 		Data []struct {
@@ -45,8 +50,9 @@ func TestSharedListThumbKey(t *testing.T) {
 	if list.Total != 1 || len(list.Data) != 1 || list.Data[0].Name != "public widget" {
 		t.Fatalf("shared list should hold only the shared item, got %+v", list)
 	}
-	if got := string(list.Data[0].ThumbKey); got != jsonString(photo.StorageKey) {
-		t.Fatalf("shared thumb_key = %s, want %s", got, jsonString(photo.StorageKey))
+	if got := string(list.Data[0].ThumbKey); got != jsonString(rows[0].ThumbKey.String) {
+		t.Fatalf("shared thumb_key = %s, want %s (derived thumb, not the original %q)",
+			got, jsonString(rows[0].ThumbKey.String), rows[0].StorageKey)
 	}
 }
 
