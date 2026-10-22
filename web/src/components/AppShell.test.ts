@@ -32,10 +32,13 @@ async function mountShell(isAdmin = false): Promise<{ w: ReturnType<typeof mount
 beforeEach(() => { setActivePinia(createPinia()); vi.unstubAllGlobals(); vi.restoreAllMocks(); toasts.splice(0) })
 
 describe('AppShell navigation', () => {
-  it('bottom nav shows exactly the five primary destinations', async () => {
+  it('bottom nav shows exactly the five primary destinations with full labels', async () => {
     const { w } = await mountShell()
     const links = w.find('nav.bottom-0').findAll('a')
     expect(links.map(l => l.attributes('href'))).toEqual(['/', '/items', '/locations', '/projects', '/shared'])
+    // full labels, not 5-char truncations ("Dashb/Locat/Proje" were unreadable)
+    expect(links.map(l => l.text())).toEqual(['Dashboard', 'Items', 'Locations', 'Projects', 'Shared'])
+    expect(links.every(l => l.attributes('title') === l.text())).toBe(true)
   })
 
   it('desktop sidebar lists Trash between Shared and Settings', async () => {

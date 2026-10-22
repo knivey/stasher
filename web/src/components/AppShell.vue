@@ -42,8 +42,10 @@
       <div class="p-4 max-w-5xl mx-auto"><router-view /></div>
     </main>
     <nav class="md:hidden fixed bottom-0 inset-x-0 z-10 bg-slate-900 text-slate-100 flex">
-      <router-link v-for="n in mobileNav" :key="n.to" :to="n.to"
-        class="flex-1 text-center text-xs py-2">{{ n.short }}</router-link>
+      <!-- Full labels (11px + tight leading keep five readable on a 375px
+           screen); truncate is overflow safety only. title covers hovers. -->
+      <router-link v-for="n in mobileNav" :key="n.to" :to="n.to" :title="n.label"
+        class="flex-1 text-center text-[11px] leading-tight py-2.5 px-0.5 truncate">{{ n.label }}</router-link>
     </nav>
   </div>
 </template>
@@ -64,7 +66,7 @@ const nav = computed(() => {
   ]
   return auth.user?.is_admin ? [...base, { to: '/admin', label: 'Admin' }] : base
 })
-const mobileNav = computed(() => nav.value.slice(0, 5).map(n => ({ to: n.to, short: n.label.slice(0, 5) })))
+const mobileNav = computed(() => nav.value.slice(0, 5))
 // The logout POST can fail on a dead network — the store still clears the
 // user (finally), so toast the error and land on /login either way instead
 // of leaving an unhandled rejection stranded on the shell.
