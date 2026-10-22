@@ -176,6 +176,58 @@ func TestCopyOwnItem(t *testing.T) {
 	}
 }
 
+// TestCopyDegradesWhenThumbFileMissing: a source photo whose thumb FILE is
+// missing on disk (the row still holds a valid thumb_key, e.g. after disk
+// loss) must not abort the copy — spec §6: thumb copy failure degrades to a
+// null thumb_key while the original still gets copied.
+func TestCopyDegradesWhenThumbFileMissing(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "copy-thumb-missing@test.dev", "longpassword1")
+
+	created := doJSON(t, ts, "POST", "/api/v1/items",
+		map[string]any{"name": "thumb gone"}, cookie)
+	var item struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, created, &item)
+	postFile(t, ts, "/api/v1/items/"+fmtInt64(item.ID)+"/photos",
+		"file", "gone.png", png1x1, cookie)
+
+	src, err := s.Queries().ListItemPhotos(context.Background(), item.ID)
+	if err != nil || len(src) != 1 || !src[0].ThumbKey.Valid {
+		t.Fatalf("source photos: %v %+v", err, src)
+	}
+	// thumb FILE vanishes; the DB row keeps its thumb_key
+	if err := s.st.Delete(src[0].ThumbKey.String); err != nil {
+		t.Fatalf("delete thumb file: %v", err)
+	}
+
+	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(item.ID)+"/copy", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("copy = %d, want 201 (thumb failure must not abort copy)", resp.StatusCode)
+	}
+	var copy struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &copy)
+
+	copied, err := s.Queries().ListItemPhotos(context.Background(), copy.ID)
+	if err != nil || len(copied) != 1 {
+		t.Fatalf("copied photos: %v %d", err, len(copied))
+	}
+	if copied[0].ThumbKey.Valid {
+		t.Fatalf("copied thumb_key = %q, want NULL", copied[0].ThumbKey.String)
+	}
+	if copied[0].StorageKey == src[0].StorageKey {
+		t.Fatalf("original not copied under a fresh key: %q", copied[0].StorageKey)
+	}
+	f, err := s.st.Open(copied[0].StorageKey)
+	if err != nil {
+		t.Fatalf("copied original not on disk: %v", err)
+	}
+	f.Close()
+}
+
 // TestCopyDuplicatesThumb: copying an item duplicates the derived thumb
 // FILE under a fresh key (both openable independently, source untouched).
 func TestCopyDuplicatesThumb(t *testing.T) {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -119,13 +120,14 @@ func (s *Server) handleCopyItem(w http.ResponseWriter, r *http.Request) {
 		}
 		var newThumb sql.NullString
 		if ph.ThumbKey.Valid {
+			// thumb-copy failure degrades to a null thumb (spec §6: never
+			// blocks copy); lists COALESCE to the copied original
 			tk, err := s.st.Copy(ph.ThumbKey.String)
 			if err != nil {
-				s.st.Delete(newKey)
-				s.internalErr(w, err)
-				return
+				slog.Warn("thumb copy failed", "photo", ph.ID, "key", ph.ThumbKey.String, "err", err)
+			} else {
+				newThumb = sql.NullString{String: tk, Valid: true}
 			}
-			newThumb = sql.NullString{String: tk, Valid: true}
 		}
 		if _, err := s.q.AddItemPhoto(r.Context(), dbpkg.AddItemPhotoParams{
 			ItemID: newItem.ID, StorageKey: newKey, ThumbKey: newThumb,

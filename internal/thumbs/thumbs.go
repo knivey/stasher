@@ -4,6 +4,7 @@ package thumbs
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/draw"
 	"image/gif"
@@ -18,10 +19,26 @@ import (
 
 const MaxLongSide = 480
 
+// MaxPixels bounds the header-declared pixel count of images Generate will
+// decode. Decoders allocate from the declared dimensions BEFORE reading
+// pixel data, so a tiny file declaring a huge canvas ("decode bomb") could
+// exhaust memory and kill the process; over-limit images degrade to a null
+// thumb instead (spec §6: never fail the request).
+const MaxPixels = 50_000_000
+
 // Generate returns a preview of src. ext is "jpg", "png", or "gif" (no dot),
 // chosen by source format: jpeg/webp encode as JPEG (photos; webp has no
 // stdlib encoder), png stays PNG (alpha-safe), gif stays GIF (first frame).
 func Generate(src []byte) (thumb []byte, ext string, err error) {
+	// read only the header first: the pixel-count guard must run before any
+	// full decode can allocate from the declared dimensions
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(src))
+	if err != nil {
+		return nil, "", err
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > MaxPixels { // int64: no wrap on 32-bit
+		return nil, "", fmt.Errorf("image too large: %dx%d", cfg.Width, cfg.Height)
+	}
 	img, format, err := image.Decode(bytes.NewReader(src))
 	if err != nil {
 		return nil, "", err

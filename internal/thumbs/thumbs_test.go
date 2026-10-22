@@ -3,11 +3,14 @@ package thumbs
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"strings"
 	"testing"
 )
 
@@ -148,6 +151,73 @@ func TestGenerateCorruptInput(t *testing.T) {
 	}
 	if _, _, err := Generate([]byte("not an image at all")); err == nil {
 		t.Fatal("garbage: expected error, got nil")
+	}
+}
+
+// headerPNG builds a PNG that is only signature + IHDR declaring w*h + IEND:
+// enough for image.DecodeConfig to read the dimensions, and enough for the
+// decode-bomb guard to trip before any pixel allocation. Not a decodable
+// image — that is the point (tiny file, huge declared canvas).
+func headerPNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	chunk := func(typ string, data []byte) []byte {
+		body := append([]byte(typ), data...)
+		var out bytes.Buffer
+		var lenb, crcb [4]byte
+		binary.BigEndian.PutUint32(lenb[:], uint32(len(data)))
+		binary.BigEndian.PutUint32(crcb[:], crc32.ChecksumIEEE(body))
+		out.Write(lenb[:])
+		out.Write(body)
+		out.Write(crcb[:])
+		return out.Bytes()
+	}
+	var ihdr [13]byte
+	binary.BigEndian.PutUint32(ihdr[0:4], uint32(w))
+	binary.BigEndian.PutUint32(ihdr[4:8], uint32(h))
+	ihdr[8] = 8 // bit depth
+	ihdr[9] = 6 // color type RGBA
+	// ihdr[10:13] compression/filter/interlace stay 0
+
+	var buf bytes.Buffer
+	buf.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
+	buf.Write(chunk("IHDR", ihdr[:]))
+	buf.Write(chunk("IEND", nil))
+	return buf.Bytes()
+}
+
+// TestGenerateRejectsDecodeBomb: a header-only PNG declaring extreme
+// dimensions must be rejected by the pixel-count guard BEFORE any full
+// decode — image.Decode allocates from the declared dimensions up front, so
+// a ~17GB RGBA bomb in a ~90-byte file would OOM-kill the process and take
+// the whole request (and server) down with it.
+func TestGenerateRejectsDecodeBomb(t *testing.T) {
+	cases := []struct {
+		name string
+		w, h int
+	}{
+		{"8000x7000 = 56MP", 8000, 7000},
+		{"65535x65535 = ~4.3Gpx", 65535, 65535},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bomb := headerPNG(t, tc.w, tc.h)
+			// the fixture must be header-valid, or a malformed header (not
+			// the guard) would make this test pass vacuously
+			cfg, _, err := image.DecodeConfig(bytes.NewReader(bomb))
+			if err != nil {
+				t.Fatalf("fixture does not pass DecodeConfig: %v", err)
+			}
+			if cfg.Width != tc.w || cfg.Height != tc.h {
+				t.Fatalf("fixture declares %dx%d, want %dx%d", cfg.Width, cfg.Height, tc.w, tc.h)
+			}
+			_, _, err = Generate(bomb)
+			if err == nil {
+				t.Fatal("decode bomb: expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "image too large") {
+				t.Fatalf("err = %q, want it to mention the size guard", err.Error())
+			}
+		})
 	}
 }
 
