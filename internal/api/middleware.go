@@ -47,10 +47,16 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			writeErr(w, http.StatusUnauthorized, "unauthorized", "account disabled")
 			return
 		}
-		if err := s.q.TouchSession(r.Context(), dbpkg.TouchSessionParams{
-			LastSeenAt: time.Now().UTC().Format(time.RFC3339), ID: row.SessionID,
-		}); err != nil {
-			slog.Warn("touch session failed", "err", err)
+		// Throttle the last_seen write to one per minute per session: this
+		// runs on EVERY authed request and the single SQLite conn is the
+		// write bottleneck. A future last_seen (server clock skew) also
+		// skips; an unparseable one falls back to touching.
+		if shouldTouch(row.LastSeenAt, time.Now().UTC()) {
+			if err := s.q.TouchSession(r.Context(), dbpkg.TouchSessionParams{
+				LastSeenAt: time.Now().UTC().Format(time.RFC3339), ID: row.SessionID,
+			}); err != nil {
+				slog.Warn("touch session failed", "err", err)
+			}
 		}
 		u := dbpkg.User{
 			ID: row.UserID, Email: row.Email, DisplayName: row.DisplayName,
@@ -61,6 +67,16 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, sessionIDKey, row.SessionID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// shouldTouch reports whether a session with the given RFC3339 last_seen
+// timestamp should be touched again at now: at most one write per minute.
+func shouldTouch(lastSeen string, now time.Time) bool {
+	t, err := time.Parse(time.RFC3339, lastSeen)
+	if err != nil {
+		return true // unparseable: be safe and refresh it
+	}
+	return now.Sub(t) >= 60*time.Second
 }
 
 // requireAdmin requires an authenticated admin user.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"mime"
@@ -29,7 +30,34 @@ func main() {
 
 	configPath := flag.String("config", "", "path to YAML config file")
 	flag.Parse()
-	cmd := flag.Arg(0) // "" or "serve" runs the server; "migrate" only migrates
+
+	// Validate arguments before touching any data: Go's flag package stops
+	// parsing at the first non-flag arg, so a flag AFTER the subcommand
+	// (`stasher migrate -config x.yaml`) would be silently ignored and the
+	// command could act on the wrong data dir.
+	cmd := ""
+	if args := flag.Args(); len(args) > 0 {
+		cmd = args[0]
+		if len(args) > 1 {
+			for _, a := range args[1:] {
+				if strings.HasPrefix(a, "-") {
+					fmt.Fprintln(os.Stderr, "flags must precede the subcommand (e.g. stasher -config stasher.yaml migrate)")
+					usage()
+					os.Exit(2)
+				}
+			}
+			fmt.Fprintf(os.Stderr, "unknown argument %q\n", args[1])
+			usage()
+			os.Exit(2)
+		}
+	}
+	switch cmd {
+	case "", "serve", "migrate":
+	default:
+		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", cmd)
+		usage()
+		os.Exit(2)
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -111,7 +139,21 @@ func main() {
 	slog.Info("shutting down")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	httpSrv.Shutdown(ctx)
+	if err := httpSrv.Shutdown(ctx); err != nil {
+		slog.Warn("shutdown error", "err", err)
+	}
+}
+
+func usage() {
+	fmt.Fprint(os.Stderr, `usage: stasher [-config path] [serve|migrate]
+
+  stasher [-config path]           start the server (default)
+  stasher [-config path] serve     start the server
+  stasher [-config path] migrate   apply migrations and exit
+
+flags:
+  -config path   path to YAML config file (must precede the subcommand)
+`)
 }
 
 func fatal(err error) {

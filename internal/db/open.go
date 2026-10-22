@@ -37,6 +37,12 @@ var migrationsFS = migrations.FS
 // Migrate applies all embedded migrations.
 func Migrate(d *sql.DB) error {
 	goose.SetBaseFS(migrationsFS)
+	// Silence the per-migration "OK ..." log lines (noise in every test
+	// run). goose v3.29 prints them through its package logger regardless
+	// of SetVerbose (verbose only gates annotation echo and already
+	// defaults false), so swap the logger for a nop. Migration failures
+	// are returned as errors, not logged, so nothing is lost.
+	goose.SetLogger(goose.NopLogger())
 	if err := goose.SetDialect("sqlite"); err != nil {
 		return err
 	}
