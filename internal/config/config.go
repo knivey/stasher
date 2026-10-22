@@ -15,6 +15,11 @@ type Config struct {
 	DataDir      string `yaml:"data_dir"`
 	Registration string `yaml:"registration"` // "invite" | "open"
 	LogLevel     string `yaml:"log_level"`
+	// ChromePath is an explicit chromium/chrome binary for the page
+	// archiver. Empty = auto-detect (chromium, chromium-browser,
+	// google-chrome on PATH); archive fetches fail with an actionable
+	// error when no browser is found.
+	ChromePath string `yaml:"chrome_path"`
 	// TrashRetentionDays is how long trash entries (and their files)
 	// survive before auto-purge. 0 or negative = keep forever.
 	TrashRetentionDays int `yaml:"trash_retention_days"`
@@ -48,6 +53,7 @@ func Load(path string) (Config, error) {
 		"STASHER_DATA_DIR":     &cfg.DataDir,
 		"STASHER_REGISTRATION": &cfg.Registration,
 		"STASHER_LOG_LEVEL":    &cfg.LogLevel,
+		"STASHER_CHROME_PATH":  &cfg.ChromePath,
 	}
 	for k, dst := range env {
 		if v, ok := os.LookupEnv(k); ok && v != "" {

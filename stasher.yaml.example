@@ -4,7 +4,8 @@
 #
 # Every key can be overridden by environment variables:
 #   STASHER_LISTEN_ADDR, STASHER_BASE_URL, STASHER_DATA_DIR,
-#   STASHER_REGISTRATION, STASHER_LOG_LEVEL, STASHER_TRASH_RETENTION_DAYS
+#   STASHER_REGISTRATION, STASHER_LOG_LEVEL, STASHER_TRASH_RETENTION_DAYS,
+#   STASHER_CHROME_PATH
 
 # Address the server listens on. Behind a reverse proxy (Caddy/nginx),
 # keep this on localhost and proxy to it.
@@ -31,3 +32,9 @@ log_level: "info"
 # How many days trashed items are kept before being purged permanently.
 # 0 disables automatic purging (trash keeps until manually emptied).
 trash_retention_days: 30
+
+# Optional: path to a chromium/chrome binary for the page archiver
+# (item product pages → PDF). Empty = auto-detect chromium,
+# chromium-browser, or google-chrome on PATH. Without it, direct URL
+# fetching still works; archiving returns a helpful error.
+chrome_path: ""

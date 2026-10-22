@@ -85,6 +85,39 @@ func TestLoadTrashRetention(t *testing.T) {
 	}
 }
 
+func TestLoadChromePath(t *testing.T) {
+	// default empty (auto-detect)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ChromePath != "" {
+		t.Errorf("ChromePath = %q, want empty default", cfg.ChromePath)
+	}
+
+	// YAML sets, env overrides
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stasher.yaml")
+	os.WriteFile(path, []byte("chrome_path: /usr/bin/chromium\n"), 0o644)
+	t.Setenv("STASHER_CHROME_PATH", "/opt/chrome")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ChromePath != "/opt/chrome" {
+		t.Errorf("ChromePath = %q, want env override", cfg.ChromePath)
+	}
+
+	t.Setenv("STASHER_CHROME_PATH", "")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ChromePath != "/usr/bin/chromium" {
+		t.Errorf("ChromePath = %q, want YAML value", cfg.ChromePath)
+	}
+}
+
 func TestPurgeAfter(t *testing.T) {
 	trashed := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 
