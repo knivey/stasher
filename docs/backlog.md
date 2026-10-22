@@ -77,27 +77,29 @@ File references are to the state at commit `60c61fe`.
 
 ## Frontend v1.1 (from the frontend final review, 2026-10-21)
 
-- **Project delete UI** — backend `DELETE /projects/{id}` exists; every sibling
-  resource has delete-with-confirm but projects don't. Plan gap vs spec §7.
-- **Extended smoke** — log in against the real binary and dump one authed
-  view's DOM at 375px (would guard table-overflow + nav reachability).
-- **`make check`** — single target running go + web (vue-tsc, vitest).
-- **Residual upload race** (narrowed by the final fix wave) — a photo picked
-  DURING an in-flight save (after the second encode drain) still misses the
-  flush; disable the photo input while `saving`.
-- **Negative `qty_used` savable** (backend laxity — client `min=0` advisory).
-- Tap-target size for the mobile header's emoji links; 5-char bottom-nav
-  label truncation; `locations.ts` cycle-comment imprecision.
+- ~~**Project delete UI**~~ — **done 2026-10-22** (detail view, ConfirmDialog
+  reassuring items survive, tests).
+- ~~**Extended smoke**~~ — **done 2026-10-22** (web/scripts/smoke-authed.mjs:
+  puppeteer-core login flow at 375px against the real binary; in CI).
+- ~~**`make check`**~~ — **done 2026-10-22** (runs Go vet+tests, web
+  tests+typecheck, SPA build; CI runs it).
+- ~~**Residual upload race**~~ — **done 2026-10-22** (pick inputs disabled
+  while saving, attribute-pinned test).
+- ~~**Negative `qty_used` savable**~~ — **done 2026-10-22** (backend bounds
+  0..1e12 on add + patch).
+- ~~Tap-target size for the mobile header's emoji links~~ — **done 2026-10-22**
+  (44px targets); 5-char bottom-nav label truncation and the
+  `locations.ts` cycle-comment nit remain.
 - **Usage ledger leftovers** (2026-10-21): disposing a 0-qty item logs a
   delta-0 entry (consider 400 or idempotent no-op); ledger rows carry no
   project name (frontend falls back to `project #id` — backend could join
-  it); `found`/`restock` badges share a color; history pager has no
-  in-flight guard (matches the app-wide pagination pattern).
-- **Trash leftovers** (2026-10-21): purge-404 path is toast-only (restore
-  404 refetches — symmetric one-liner if wanted); disposed-item restore
-  branch untested; post-commit detail-fetch 500 window on restore;
-  purge deletes files before row (failure order); trash sweep on GET is
-  global not per-user; no snapshot size cap; item timestamps reset on
-  restore (ledger timestamps preserved); weak count pin in empty-trash
-  test.
+  it); ~~`found`/`restock` badges share a color~~ **done 2026-10-22**;
+  history pager has no in-flight guard (matches the app-wide pagination
+  pattern).
+- **Trash leftovers** (2026-10-21): ~~purge-404 path is toast-only~~ **done
+  2026-10-22** (refetches like restore); disposed-item restore branch
+  untested; post-commit detail-fetch 500 window on restore; purge deletes
+  files before row (failure order); trash sweep on GET is global not
+  per-user; no snapshot size cap; item timestamps reset on restore (ledger
+  timestamps preserved); weak count pin in empty-trash test.
 

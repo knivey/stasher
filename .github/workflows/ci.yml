@@ -23,3 +23,5 @@ jobs:
         run: go build -o stasher ./cmd/stasher
       - name: Chromium smoke (real binary, real SPA)
         run: ./scripts/smoke-web.sh
+      - name: Authed browser smoke (login flow via puppeteer)
+        run: cd web && node scripts/smoke-authed.mjs
