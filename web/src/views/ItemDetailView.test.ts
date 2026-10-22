@@ -254,6 +254,72 @@ describe('ItemDetailView', () => {
     expect(w.find('.fixed.inset-0').exists()).toBe(false)
   })
 
+  // ---- Visibility toggle ----
+
+  // Mock that understands the detail-view surface and records PATCH bodies.
+  function visibilityFetch(opts: { patchStatus?: number } = {}) {
+    const calls: { method: string; url: string; body?: string }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ method: init?.method ?? 'GET', url, body: init?.body as string | undefined })
+      if (url.includes('/items/9') && init?.method === 'PATCH') {
+        if (opts.patchStatus && opts.patchStatus !== 200)
+          return new Response(JSON.stringify({ error: { code: 'validation_error', message: 'nope' } }), { status: opts.patchStatus })
+        return new Response(JSON.stringify({ ...item, visibility: 'private' }), { status: 200 })
+      }
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify(item), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    return calls
+  }
+
+  it('visibility badge is a toggle button; click PATCHes the flipped value, refetches, toasts success', async () => {
+    const calls = visibilityFetch()
+    const { w } = await mountView()
+    const badge = w.find('button[data-visibility]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.attributes('aria-label')).toBe('Toggle visibility, currently shared')
+    await badge.trigger('click')
+    await flushPromises()
+    const patch = calls.find(c => c.method === 'PATCH')
+    expect(patch?.url).toBe('/api/v1/items/9')
+    expect(JSON.parse(patch!.body!)).toEqual({ visibility: 'private' })
+    // refetched the item after the PATCH
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(2)
+    expect(toasts.some(t => t.message === 'Visibility updated' && t.type === 'success')).toBe(true)
+  })
+
+  it('flips the other way from a private item (patch body shared)', async () => {
+    const calls: { method: string; url: string; body?: string }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ method: init?.method ?? 'GET', url, body: init?.body as string | undefined })
+      if (url.includes('/items/9') && init?.method === 'PATCH')
+        return new Response(JSON.stringify({ ...item, visibility: 'shared' }), { status: 200 })
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify({ ...item, visibility: 'private' }), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    const { w } = await mountView()
+    const badge = w.find('button[data-visibility]')
+    expect(badge.attributes('aria-label')).toBe('Toggle visibility, currently private')
+    await badge.trigger('click')
+    await flushPromises()
+    const patch = calls.find(c => c.method === 'PATCH')
+    expect(JSON.parse(patch!.body!)).toEqual({ visibility: 'shared' })
+  })
+
+  it('toasts the ApiError and does not refetch when the visibility PATCH fails', async () => {
+    const calls = visibilityFetch({ patchStatus: 400 })
+    const { w } = await mountView()
+    await w.find('button[data-visibility]').trigger('click')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'nope' && t.type === 'error')).toBe(true)
+    expect(toasts.some(t => t.message === 'Visibility updated')).toBe(false)
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(1)
+  })
+
   // ---- Usage ledger ----
 
   const project = { id: 31, name: '3D printer build', status: 'active', notes: '', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }

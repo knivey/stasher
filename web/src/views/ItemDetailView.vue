@@ -96,6 +96,25 @@ async function deleteItem() {
   }
 }
 
+// The badge IS the toggle (todo: visibility without a trip through the edit
+// form; this view is owner-only). PATCH the flipped value, refetch, toast.
+const visibilitySaving = ref(false)
+
+async function toggleVisibility() {
+  if (!item.value || visibilitySaving.value) return
+  visibilitySaving.value = true
+  const next = item.value.visibility === 'shared' ? 'private' : 'shared'
+  try {
+    await api.patch(`/api/v1/items/${route.params.id}`, { visibility: next })
+    await fetchItem() // badge text follows the server's answer
+    toast('Visibility updated', 'success')
+  } catch (e) {
+    toast((e as Error).message, 'error') // badge keeps its current state
+  } finally {
+    visibilitySaving.value = false
+  }
+}
+
 // ---- Usage ledger ----
 
 // Mirror of the backend's kind CHECK whitelist (usage_handlers.go).
@@ -222,8 +241,11 @@ onMounted(async () => {
     <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
       <span class="font-medium dark:text-slate-100">{{ item.qty }}{{ item.unit ? ` ${item.unit}` : '' }}</span>
       <span v-if="breadcrumbs.length" class="text-slate-500 dark:text-slate-400">{{ breadcrumbs.map(b => b.name).join(' › ') }}</span>
-      <span :class="item.visibility === 'shared' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'"
-        class="rounded-full px-2 py-0.5 text-xs font-medium">{{ item.visibility === 'shared' ? 'Shared' : 'Private' }}</span>
+      <button data-visibility :disabled="visibilitySaving"
+        :aria-label="`Toggle visibility, currently ${item.visibility}`"
+        :class="item.visibility === 'shared' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'"
+        class="cursor-pointer rounded-full px-2 py-0.5 text-xs font-medium hover:ring-2 hover:ring-slate-300 dark:hover:ring-slate-500 disabled:opacity-50"
+        @click="toggleVisibility">{{ item.visibility === 'shared' ? 'Shared' : 'Private' }}</button>
       <span v-if="item.disposed" data-disposed class="rounded-full bg-gray-200 dark:bg-slate-700 text-gray-500 dark:text-slate-300 px-2 py-0.5 text-xs font-medium">disposed</span>
     </div>
 
