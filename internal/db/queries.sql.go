@@ -47,22 +47,24 @@ func (q *Queries) AddItemDocument(ctx context.Context, arg AddItemDocumentParams
 }
 
 const addItemPhoto = `-- name: AddItemPhoto :one
-INSERT INTO item_photos (item_id, storage_key, caption, sort_order, created_at)
-VALUES (?, ?, ?, ?, ?) RETURNING id, item_id, storage_key, caption, sort_order, created_at
+INSERT INTO item_photos (item_id, storage_key, thumb_key, caption, sort_order, created_at)
+VALUES (?, ?, ?, ?, ?, ?) RETURNING id, item_id, storage_key, caption, sort_order, created_at, thumb_key
 `
 
 type AddItemPhotoParams struct {
-	ItemID     int64  `json:"item_id"`
-	StorageKey string `json:"storage_key"`
-	Caption    string `json:"caption"`
-	SortOrder  int64  `json:"sort_order"`
-	CreatedAt  string `json:"created_at"`
+	ItemID     int64          `json:"item_id"`
+	StorageKey string         `json:"storage_key"`
+	ThumbKey   sql.NullString `json:"thumb_key"`
+	Caption    string         `json:"caption"`
+	SortOrder  int64          `json:"sort_order"`
+	CreatedAt  string         `json:"created_at"`
 }
 
 func (q *Queries) AddItemPhoto(ctx context.Context, arg AddItemPhotoParams) (ItemPhoto, error) {
 	row := q.db.QueryRowContext(ctx, addItemPhoto,
 		arg.ItemID,
 		arg.StorageKey,
+		arg.ThumbKey,
 		arg.Caption,
 		arg.SortOrder,
 		arg.CreatedAt,
@@ -75,6 +77,7 @@ func (q *Queries) AddItemPhoto(ctx context.Context, arg AddItemPhotoParams) (Ite
 		&i.Caption,
 		&i.SortOrder,
 		&i.CreatedAt,
+		&i.ThumbKey,
 	)
 	return i, err
 }
@@ -952,7 +955,7 @@ const getPhotoByKey = `-- name: GetPhotoByKey :one
 SELECT p.id AS photo_id, p.storage_key, p.caption, p.sort_order,
        i.user_id, i.visibility
 FROM item_photos p JOIN items i ON i.id = p.item_id
-WHERE p.storage_key = ?
+WHERE p.storage_key = ?1 OR p.thumb_key = ?1
 `
 
 type GetPhotoByKeyRow struct {
@@ -964,8 +967,8 @@ type GetPhotoByKeyRow struct {
 	Visibility string `json:"visibility"`
 }
 
-func (q *Queries) GetPhotoByKey(ctx context.Context, storageKey string) (GetPhotoByKeyRow, error) {
-	row := q.db.QueryRowContext(ctx, getPhotoByKey, storageKey)
+func (q *Queries) GetPhotoByKey(ctx context.Context, key string) (GetPhotoByKeyRow, error) {
+	row := q.db.QueryRowContext(ctx, getPhotoByKey, key)
 	var i GetPhotoByKeyRow
 	err := row.Scan(
 		&i.PhotoID,
@@ -1336,7 +1339,7 @@ func (q *Queries) ListItemLedgerAll(ctx context.Context, arg ListItemLedgerAllPa
 }
 
 const listItemPhotos = `-- name: ListItemPhotos :many
-SELECT id, item_id, storage_key, caption, sort_order, created_at FROM item_photos WHERE item_id = ? ORDER BY sort_order, id
+SELECT id, item_id, storage_key, caption, sort_order, created_at, thumb_key FROM item_photos WHERE item_id = ? ORDER BY sort_order, id
 `
 
 func (q *Queries) ListItemPhotos(ctx context.Context, itemID int64) ([]ItemPhoto, error) {
@@ -1355,6 +1358,7 @@ func (q *Queries) ListItemPhotos(ctx context.Context, itemID int64) ([]ItemPhoto
 			&i.Caption,
 			&i.SortOrder,
 			&i.CreatedAt,
+			&i.ThumbKey,
 		); err != nil {
 			return nil, err
 		}
@@ -1432,6 +1436,41 @@ func (q *Queries) ListLocations(ctx context.Context, userID int64) ([]Location, 
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPhotosMissingThumbs = `-- name: ListPhotosMissingThumbs :many
+SELECT id, item_id, storage_key, caption, sort_order, created_at, thumb_key FROM item_photos WHERE thumb_key IS NULL ORDER BY id
+`
+
+func (q *Queries) ListPhotosMissingThumbs(ctx context.Context) ([]ItemPhoto, error) {
+	rows, err := q.db.QueryContext(ctx, listPhotosMissingThumbs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ItemPhoto
+	for rows.Next() {
+		var i ItemPhoto
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.StorageKey,
+			&i.Caption,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.ThumbKey,
 		); err != nil {
 			return nil, err
 		}
@@ -1917,6 +1956,20 @@ type ReparentChildrenParams struct {
 
 func (q *Queries) ReparentChildren(ctx context.Context, arg ReparentChildrenParams) error {
 	_, err := q.db.ExecContext(ctx, reparentChildren, arg.ParentID, arg.ParentID_2, arg.UserID)
+	return err
+}
+
+const setItemPhotoThumb = `-- name: SetItemPhotoThumb :exec
+UPDATE item_photos SET thumb_key = ? WHERE id = ?
+`
+
+type SetItemPhotoThumbParams struct {
+	ThumbKey sql.NullString `json:"thumb_key"`
+	ID       int64          `json:"id"`
+}
+
+func (q *Queries) SetItemPhotoThumb(ctx context.Context, arg SetItemPhotoThumbParams) error {
+	_, err := q.db.ExecContext(ctx, setItemPhotoThumb, arg.ThumbKey, arg.ID)
 	return err
 }
 

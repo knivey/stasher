@@ -213,8 +213,8 @@ ORDER BY i.updated_at DESC
 LIMIT @lim OFFSET @off;
 
 -- name: AddItemPhoto :one
-INSERT INTO item_photos (item_id, storage_key, caption, sort_order, created_at)
-VALUES (?, ?, ?, ?, ?) RETURNING *;
+INSERT INTO item_photos (item_id, storage_key, thumb_key, caption, sort_order, created_at)
+VALUES (?, ?, ?, ?, ?, ?) RETURNING *;
 
 -- name: UpdateItemPhoto :exec
 UPDATE item_photos SET caption = ?, sort_order = ? WHERE id = ? AND item_id = ?;
@@ -222,11 +222,17 @@ UPDATE item_photos SET caption = ?, sort_order = ? WHERE id = ? AND item_id = ?;
 -- name: DeleteItemPhoto :exec
 DELETE FROM item_photos WHERE id = ? AND item_id = ?;
 
+-- name: SetItemPhotoThumb :exec
+UPDATE item_photos SET thumb_key = ? WHERE id = ?;
+
+-- name: ListPhotosMissingThumbs :many
+SELECT * FROM item_photos WHERE thumb_key IS NULL ORDER BY id;
+
 -- name: GetPhotoByKey :one
 SELECT p.id AS photo_id, p.storage_key, p.caption, p.sort_order,
        i.user_id, i.visibility
 FROM item_photos p JOIN items i ON i.id = p.item_id
-WHERE p.storage_key = ?;
+WHERE p.storage_key = sqlc.arg('key') OR p.thumb_key = sqlc.arg('key');
 
 -- name: AddItemDocument :one
 INSERT INTO item_documents (item_id, storage_key, filename, mime_type, size_bytes, created_at)

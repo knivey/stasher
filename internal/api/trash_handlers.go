@@ -308,7 +308,7 @@ func (s *Server) handleRestoreTrashEntry(w http.ResponseWriter, r *http.Request)
 	}
 	for _, p := range snap.Photos { // same storage keys: files never moved
 		if _, err := qtx.AddItemPhoto(r.Context(), dbpkg.AddItemPhotoParams{
-			ItemID: item.ID, StorageKey: p.StorageKey, Caption: p.Caption,
+			ItemID: item.ID, StorageKey: p.StorageKey, ThumbKey: sql.NullString{}, Caption: p.Caption,
 			SortOrder: p.SortOrder, CreatedAt: now,
 		}); err != nil {
 			s.internalErr(w, err)

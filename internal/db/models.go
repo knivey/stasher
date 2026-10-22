@@ -54,12 +54,13 @@ type ItemLedger struct {
 }
 
 type ItemPhoto struct {
-	ID         int64  `json:"id"`
-	ItemID     int64  `json:"item_id"`
-	StorageKey string `json:"storage_key"`
-	Caption    string `json:"caption"`
-	SortOrder  int64  `json:"sort_order"`
-	CreatedAt  string `json:"created_at"`
+	ID         int64          `json:"id"`
+	ItemID     int64          `json:"item_id"`
+	StorageKey string         `json:"storage_key"`
+	Caption    string         `json:"caption"`
+	SortOrder  int64          `json:"sort_order"`
+	CreatedAt  string         `json:"created_at"`
+	ThumbKey   sql.NullString `json:"thumb_key"`
 }
 
 type ItemTag struct {

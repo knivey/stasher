@@ -118,7 +118,7 @@ func (s *Server) handleCopyItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, err := s.q.AddItemPhoto(r.Context(), dbpkg.AddItemPhotoParams{
-			ItemID: newItem.ID, StorageKey: newKey, Caption: ph.Caption,
+			ItemID: newItem.ID, StorageKey: newKey, ThumbKey: sql.NullString{}, Caption: ph.Caption,
 			SortOrder: ph.SortOrder, CreatedAt: now,
 		}); err != nil {
 			s.st.Delete(newKey)

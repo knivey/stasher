@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"io"
 	"net/http"
 	"path"
@@ -91,7 +92,7 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	photo, err := s.q.AddItemPhoto(r.Context(), dbpkg.AddItemPhotoParams{
-		ItemID: item.ID, StorageKey: key, Caption: "", SortOrder: 0,
+		ItemID: item.ID, StorageKey: key, ThumbKey: sql.NullString{}, Caption: "", SortOrder: 0,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
