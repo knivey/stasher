@@ -3,14 +3,16 @@
 description="Stasher home inventory server"
 
 # ---- EDIT ME ------------------------------------------------------------
-# Binary, config file, and the user:group the service runs as. The data
-# directory (SQLite DB + uploaded files) is resolved relative to data_dir in
-# the config (default ./data, relative to the config file's directory),
-# or the STASHER_DATA_DIR environment variable. Make sure that user can
-# write to it.
+# Binary, config file, and the user:group the service runs as. The daemon
+# runs with `directory` as its working directory: a relative data_dir in the
+# config (default ./data) resolves against IT — not against the config
+# file's location. Keep directory in sync with the config path, or set an
+# absolute data_dir in stasher.yaml. Make sure the service user can write
+# to the data directory.
 command="/home/USERNAME/stasher"
 command_args="-config /home/USERNAME/stasher.yaml"
 command_user="stasher:stasher"
+directory="/home/USERNAME/stasher"
 # -------------------------------------------------------------------------
 
 supervisor=supervise-daemon

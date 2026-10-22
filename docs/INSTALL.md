@@ -107,5 +107,12 @@ the top (binary path, config path, run-as user), then install it:
     rc-update add stasher default
     rc-service stasher start
 
+The script's `directory=` line is the daemon's working directory: a
+relative `data_dir: "./data"` in `stasher.yaml` resolves against **it**,
+not the config file's location. Keep `directory` in sync with where
+Stasher is deployed, or set an absolute `data_dir` in `stasher.yaml` —
+otherwise the binary would try to create `/data` as the service user and
+fail to start.
+
 Logs go to `/var/log/stasher.log` and `/var/log/stasher.err.log` (see the
 script). Status/restart: `rc-service stasher status|restart`.
