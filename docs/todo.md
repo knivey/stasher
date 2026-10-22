@@ -20,3 +20,4 @@ the headless chrome can be used for the datasheet fetcher as well if we need to 
 ~~* include a systemd user service file and a openrc script and instructions on how to use each~~ done 2026-10-22: scripts/systemd/, scripts/openrc/
 * include a docker build or something? i have no idea how to deploy docker but people will probably appreciate it
 ~~* on desktop hover over a item thumb can open a larger version in a tooltip like popup~~ done 2026-10-22
+* deleting a location with sublocations should have the option to delete all sublocations
