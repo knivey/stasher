@@ -18,6 +18,19 @@ const (
 	argonSaltLen = 16
 )
 
+// Bounds on parameters accepted from a STORED hash string (KiB / rounds /
+// threads). A tampered or corrupted hash must be rejected before
+// argon2.IDKey runs — the KDF allocates m KiB, so an unbounded m is a
+// memory-DoS (a hash claiming m=1<<27 would allocate ~256 GiB). The
+// envelope brackets every hash this package generates (m=64MiB, t=3, p=4)
+// with generous headroom for future tunings.
+const (
+	argonMinMemoryKiB = 8 * 1024
+	argonMaxMemoryKiB = 1 << 26
+	argonMaxTime      = 64
+	argonMaxThreads   = 16
+)
+
 // HashPassword returns an encoded Argon2id hash.
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
@@ -46,8 +59,10 @@ func VerifyPassword(hash, password string) bool {
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil {
 		return false
 	}
-	if t < 1 || p < 1 {
-		return false // argon2.IDKey panics on zero rounds/threads
+	if m < argonMinMemoryKiB || m > argonMaxMemoryKiB ||
+		t < 1 || t > argonMaxTime ||
+		p < 1 || p > argonMaxThreads {
+		return false // out-of-bounds params: reject BEFORE the KDF (m allocates)
 	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
