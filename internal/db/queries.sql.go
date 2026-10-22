@@ -120,6 +120,36 @@ func (q *Queries) AttachItemTag(ctx context.Context, arg AttachItemTagParams) er
 	return err
 }
 
+const bulkMoveItems = `-- name: BulkMoveItems :execrows
+UPDATE items SET location_id = NULLIF(CAST(?1 AS INTEGER), 0), updated_at = ?2
+WHERE user_id = ?3 AND id IN (SELECT value FROM json_each(CAST(?4 AS TEXT)))
+`
+
+type BulkMoveItemsParams struct {
+	LocationID int64  `json:"location_id"`
+	UpdatedAt  string `json:"updated_at"`
+	UserID     int64  `json:"user_id"`
+	ItemIds    string `json:"item_ids"`
+}
+
+// Bulk location change for the items-list multi-select. The id list arrives
+// as a JSON array bound to one placeholder and is expanded via json_each
+// (same IN-list precedent as buildItemListSQL's loc_ids_json). NULLIF(x, 0)
+// turns the API's 0-clears sentinel into SQL NULL. execrows returns the
+// number of matched (moved) rows; foreign/dead ids simply don't match.
+func (q *Queries) BulkMoveItems(ctx context.Context, arg BulkMoveItemsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, bulkMoveItems,
+		arg.LocationID,
+		arg.UpdatedAt,
+		arg.UserID,
+		arg.ItemIds,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const clearItemTags = `-- name: ClearItemTags :exec
 DELETE FROM item_tags WHERE item_id = ?
 `

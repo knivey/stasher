@@ -392,6 +392,70 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
+// ---- Bulk move ----
+
+type bulkMoveReq struct {
+	ItemIDs    []int64 `json:"item_ids"`
+	LocationID *int64  `json:"location_id"`
+}
+
+// handleBulkMoveItems changes the location of 1-200 owned items in one
+// statement (POST /items/bulk-move). location_id 0 clears; a non-zero id
+// must be an owned location (foreign/absent -> 404, same path as item
+// create/PATCH). All validation runs before any write; ids belonging to
+// other users (or to no one) simply don't match the UPDATE and are silently
+// not counted - the response's moved is the number of rows actually moved.
+// One updated_at timestamp is applied to every moved item.
+func (s *Server) handleBulkMoveItems(w http.ResponseWriter, r *http.Request) {
+	u, _ := currentUser(r.Context())
+	var req bulkMoveReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if len(req.ItemIDs) < 1 || len(req.ItemIDs) > 200 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "item_ids must contain 1-200 item ids")
+		return
+	}
+	for _, id := range req.ItemIDs {
+		if id <= 0 {
+			writeErr(w, http.StatusBadRequest, "validation_error", "item_ids must be positive integers")
+			return
+		}
+	}
+	// location_id is REQUIRED (an absent field must not silently clear
+	// every selected item's location); 0 is the explicit clear sentinel.
+	if req.LocationID == nil {
+		writeErr(w, http.StatusBadRequest, "validation_error", "location_id is required (0 clears the location)")
+		return
+	}
+	if *req.LocationID < 0 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "location_id must be 0 or a location id")
+		return
+	}
+	if *req.LocationID != 0 {
+		if _, err := s.q.GetLocation(r.Context(), dbpkg.GetLocationParams{ID: *req.LocationID, UserID: u.ID}); err != nil {
+			writeErr(w, http.StatusNotFound, "not_found", "location not found")
+			return
+		}
+	}
+	ids, err := json.Marshal(req.ItemIDs)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	moved, err := s.q.BulkMoveItems(r.Context(), dbpkg.BulkMoveItemsParams{
+		LocationID: *req.LocationID,
+		UpdatedAt:  time.Now().UTC().Format(time.RFC3339),
+		UserID:     u.ID,
+		ItemIds:    string(ids),
+	})
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"moved": moved})
+}
+
 // itemSortColumns is the STRICT whitelist of ?sort= values to ORDER BY
 // column expressions. The map values are the only strings that ever reach
 // the SQL text as identifiers - raw request input is used solely as a map

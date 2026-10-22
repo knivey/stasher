@@ -172,6 +172,15 @@ SELECT * FROM items WHERE id = ?;
 UPDATE items SET name = ?, description = ?, qty = ?, unit = ?, location_id = ?, visibility = ?, disposed = ?, updated_at = ?
 WHERE id = ? AND user_id = ?;
 
+-- name: BulkMoveItems :execrows
+-- Bulk location change for the items-list multi-select. The id list arrives
+-- as a JSON array bound to one placeholder and is expanded via json_each
+-- (same IN-list precedent as buildItemListSQL's loc_ids_json). NULLIF(x, 0)
+-- turns the API's 0-clears sentinel into SQL NULL. execrows returns the
+-- number of matched (moved) rows; foreign/dead ids simply don't match.
+UPDATE items SET location_id = NULLIF(CAST(sqlc.arg('location_id') AS INTEGER), 0), updated_at = sqlc.arg('updated_at')
+WHERE user_id = sqlc.arg('user_id') AND id IN (SELECT value FROM json_each(CAST(sqlc.arg('item_ids') AS TEXT)));
+
 -- name: DeleteItem :exec
 DELETE FROM items WHERE id = ? AND user_id = ?;
 

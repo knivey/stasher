@@ -166,6 +166,30 @@ thumbnail (thumb_key follows (sort_order, id)).
   `POST /locations` instead treats an explicit `0` as a lookup miss →
   404 — don't copy that behavior to new callers.
 
+## Bulk move (2026-10-22)
+
+`POST /api/v1/items/bulk-move` — authed, owner-only. Body:
+`{ "item_ids": [id, …], "location_id": n }`.
+
+- Changes the location of up to **200 items in one statement**. `200`
+  returns `{"moved": <n>}` where `moved` counts rows that actually
+  matched — ids belonging to **other users or to no item are silently not
+  counted**, never an error (the list view can pass a selection spanning
+  a filter change and only owned items move).
+- Validation (all `400 validation_error`, specific messages, before any
+  write): `item_ids` must have **1–200 entries**; each entry must be a
+  **positive integer**; `location_id` is **REQUIRED** (an absent field
+  must not silently mass-clear) and must be `>= 0`.
+- `location_id: 0` **clears** the selected items' locations (SQL NULL);
+  any other id must be one of YOUR locations — foreign or absent →
+  `404 not_found`, nothing is written (same path as item create/PATCH).
+- `updated_at` is bumped to ONE server-set RFC3339 UTC timestamp shared
+  by every moved item. `disposed` items are movable (no special case).
+  Search needs no reindex: `items_fts` indexes name+description only.
+- Error-precedence: all 400s (shape/count of `item_ids`, `location_id`
+  presence/sign) run before the 404 location check, which runs before
+  the write.
+
 ## Frontend notes
 
 Facts discovered by the frontend round, kept here so they survive:
