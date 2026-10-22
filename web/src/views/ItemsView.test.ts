@@ -59,6 +59,45 @@ describe('ItemsView', () => {
     expect(img.attributes('loading')).toBe('lazy')
   })
 
+  it('hovering a desktop thumb opens a popup with the image + alt, leaving removes it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [{ id: 5, name: 'M3 screws', qty: 250, photo_count: 2, thumb_key: '2026/10/abc.jpg' }], total: 1 }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    const w = mount(ItemsView)
+    await flushPromises()
+    expect(w.find('[data-thumb-popup]').exists()).toBe(false)
+    const thumb = w.find('table img')
+    expect(thumb.attributes('tabindex')).toBe('0') // keyboard-reachable
+    expect(thumb.attributes('alt')).toBe('M3 screws')
+    await thumb.trigger('mouseenter')
+    const popup = w.find('[data-thumb-popup]')
+    expect(popup.exists()).toBe(true)
+    expect(popup.classes()).toContain('pointer-events-none') // never traps the hover
+    expect(popup.find('img').attributes('src')).toBe('/files/2026/10/abc.jpg')
+    expect(popup.find('img').attributes('alt')).toBe('M3 screws')
+    await thumb.trigger('mouseleave')
+    expect(w.find('[data-thumb-popup]').exists()).toBe(false)
+  })
+
+  it('keyboard focus on a desktop thumb shows the same popup; blur removes it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [{ id: 5, name: 'M3 screws', qty: 250, photo_count: 2, thumb_key: '2026/10/abc.jpg' }], total: 1 }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    const w = mount(ItemsView)
+    await flushPromises()
+    const thumb = w.find('table img')
+    await thumb.trigger('focus')
+    expect(w.find('[data-thumb-popup]').exists()).toBe(true)
+    await thumb.trigger('blur')
+    expect(w.find('[data-thumb-popup]').exists()).toBe(false)
+  })
+
   it('shows an em-dash placeholder in the desktop table thumb cell when there is no thumb_key', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
