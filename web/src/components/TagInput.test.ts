@@ -125,6 +125,17 @@ describe('TagInput', () => {
     expect(w.find('[role="listbox"]').exists()).toBe(false)
   })
 
+  it('keeps aria-expanded false when typing a string with no matches (no listbox exists)', async () => {
+    const { w, input } = await mountFocused()
+    expect(input.attributes('aria-expanded')).toBe('false')
+    await input.setValue('zzz') // no tag matches
+    expect(w.find('[role="listbox"]').exists()).toBe(false)
+    expect(input.attributes('aria-expanded')).toBe('false') // must not advertise a missing listbox
+    await input.setValue('scr') // a match appears → now it may point at one
+    expect(w.find('[role="listbox"]').exists()).toBe(true)
+    expect(input.attributes('aria-expanded')).toBe('true')
+  })
+
   it('Escape closes the dropdown without committing and stops propagation', async () => {
     const bubbled = vi.fn()
     vi.stubGlobal('fetch', vi.fn(async () => TAG_RESPONSE()))
@@ -141,7 +152,9 @@ describe('TagInput', () => {
     await input.trigger('keydown', { key: 'Escape' })
     expect(w.find('[role="listbox"]').exists()).toBe(false)
     expect((input.element as HTMLInputElement).value).toBe('scr') // nothing committed
-    expect(w.emitted('update:tags')).toBeUndefined()
+    // assert on the TagInput itself: the wrapper never receives child emits,
+    // so w.emitted(...) here would be vacuously undefined.
+    expect(w.findComponent(TagInput).emitted('update:tags')).toBeUndefined()
     expect(bubbled).not.toHaveBeenCalled()
   })
 

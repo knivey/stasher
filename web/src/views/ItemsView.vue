@@ -71,11 +71,24 @@ onMounted(() => {
 // mouseenter/mouseleave for keyboard users (one showPopup code path for both).
 const hoverThumb = ref<{ key: string; name: string; left: number; top: number } | null>(null)
 
+// The popup is fixed-position, so a wheel/touch scroll of the page makes it
+// detach from its thumb — and mouseleave never fires mid-scroll. While the
+// popup is open, close it on any scroll, capture phase (scroll events don't
+// bubble, capture sees them inside every scroll container).
+function hidePopup() { hoverThumb.value = null }
+
+watch(() => hoverThumb.value !== null, open => {
+  if (open) window.addEventListener('scroll', hidePopup, true)
+  else window.removeEventListener('scroll', hidePopup, true)
+})
+onBeforeUnmount(() => window.removeEventListener('scroll', hidePopup, true))
+
 function showPopup(key: string, name: string, el: EventTarget | null) {
   const r = (el as HTMLElement | null)?.getBoundingClientRect()
   if (!r) return
+  // 334 = the popup's real outer width: w-80 (320) + p-1.5×2 (12) + border×2 (2).
   const rightOfThumb = r.left + r.width + 12
-  const left = rightOfThumb + 320 > window.innerWidth ? r.left - 332 : rightOfThumb
+  const left = rightOfThumb + 334 > window.innerWidth ? r.left - 334 : rightOfThumb
   hoverThumb.value = { key, name, left, top: Math.max(r.top - 8, 8) }
 }
 </script>
@@ -134,8 +147,8 @@ function showPopup(key: string, name: string, el: EventTarget | null) {
             <td class="px-3 py-2">
               <img v-if="i.thumb_key" :src="`/files/${i.thumb_key}`" loading="lazy" :alt="i.name" tabindex="0"
                 class="w-10 h-10 object-cover rounded-lg"
-                @mouseenter="showPopup(i.thumb_key, i.name, $event.target)" @mouseleave="hoverThumb = null"
-                @focus="showPopup(i.thumb_key, i.name, $event.target)" @blur="hoverThumb = null" />
+                @mouseenter="showPopup(i.thumb_key, i.name, $event.target)" @mouseleave="hidePopup"
+                @focus="showPopup(i.thumb_key, i.name, $event.target)" @blur="hidePopup" />
               <span v-else class="text-slate-400 dark:text-slate-500">—</span>
             </td>
             <td class="px-3 py-2"><router-link :to="`/items/${i.id}`" class="hover:underline">{{ i.name }}</router-link><span v-if="i.disposed" data-disposed class="ml-1.5 rounded-full bg-gray-200 dark:bg-slate-700 text-gray-500 dark:text-slate-300 px-1.5 py-0.5 text-xs align-middle">disposed</span></td>

@@ -439,6 +439,30 @@ describe('ItemFormView save & add another', () => {
     expect(toasts.some(t => t.message === 'boom' && t.type === 'error')).toBe(true)
   })
 
+  it('"Save & add another" with an empty name does nothing but focus the field', async () => {
+    let posts = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST') posts++
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    const replaceSpy = vi.spyOn(router, 'replace')
+    const w = await mountCreate(router)
+    const vm = w.vm as any
+    vm.form.qty = 3 // would be reset to 1 if a save actually ran
+    // focus (not document.activeElement): VTU mounts detached from the
+    // document, so happy-dom treats focus() on it as a no-op.
+    const focusSpy = vi.spyOn(w.find('input').element, 'focus')
+    await againButton(w).trigger('click') // type="button": native required-validation never runs
+    await flushPromises()
+    expect(posts).toBe(0) // nothing to save: no POST
+    expect(vm.form.qty).toBe(3) // …and no reset either
+    expect(replaceSpy).not.toHaveBeenCalled()
+    expect(toasts.some(t => t.message === 'Saved')).toBe(false)
+    expect(toasts.some(t => t.type === 'error')).toBe(false) // silent, like native validation
+    expect(focusSpy).toHaveBeenCalled() // name field is focused
+  })
+
   it('replaces to bare /items/new when no location is set', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
       if (url.endsWith('/api/v1/items') && init?.method === 'POST')

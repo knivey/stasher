@@ -7,7 +7,7 @@
       </span>
       <div class="relative flex-1 min-w-24">
         <input v-model="input" placeholder="Add tag… (Enter)" aria-label="Add tag"
-          role="combobox" :aria-expanded="open" :aria-controls="listboxId"
+          role="combobox" :aria-expanded="open && suggestions.length > 0" :aria-controls="listboxId"
           :aria-activedescendant="active >= 0 ? optionId(active) : undefined" aria-autocomplete="list"
           class="w-full outline-none text-sm dark:text-slate-100"
           @keydown="onKeydown" @blur="add" @focus="ensureSuggestions" />
@@ -76,8 +76,9 @@ async function ensureSuggestions() {
   if (suggestionsTried) return
   suggestionsTried = true
   try {
-    // page_size=200 is the API max (docs/api-notes.md); plenty for a home
-    // inventory's tag set. One fetch per component, on first focus only.
+    // page_size is a no-op for /tags (api-notes: lists ignore pagination);
+    // the full list always comes back. One fetch per component, on first
+    // focus only.
     const res = await api.get<ListResponse<Tag>>('/api/v1/tags?page_size=200')
     allTags.value = res.data
   } catch (e) {

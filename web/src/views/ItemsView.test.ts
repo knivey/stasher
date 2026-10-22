@@ -123,12 +123,13 @@ describe('ItemsView', () => {
     await thumb.trigger('mouseleave')
     expect(w.find('[data-thumb-popup]').exists()).toBe(false)
 
-    // near-right-edge: 900 + 40 + 12 + 320 > 1024 → flips to the left of the thumb
+    // near-right-edge: 900 + 40 + 12 + 334 > 1024 → flips to the left of the thumb.
+    // 334 = real outer width: w-80 (320) + p-1.5×2 (12) + border×2 (2).
     thumb.element.getBoundingClientRect = () => ({ left: 900, top: 50, width: 40, height: 40 } as DOMRect)
     await thumb.trigger('mouseenter')
     popup = w.find('[data-thumb-popup]')
     expect(popup.exists()).toBe(true)
-    expect(popup.attributes('style')).toContain('left: 568px') // 900 - 332
+    expect(popup.attributes('style')).toContain('left: 566px') // 900 - 334
     await thumb.trigger('mouseleave')
   })
 
@@ -249,6 +250,29 @@ describe('ItemsView', () => {
     await flushPromises()
     expect((w.find('input').element as HTMLInputElement).value).toBe('')
     expect(urls.some(u => u.includes('q='))).toBe(false) // the stale q never reaches the API
+  })
+
+  it('hides the hover popup when the page scrolls while it is open', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/tags')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [{ id: 5, name: 'M3 screws', qty: 250, photo_count: 2, thumb_key: '2026/10/abc.jpg' }], total: 1 }), { status: 200 })
+    }))
+    setActivePinia(createPinia())
+    const w = mount(ItemsView)
+    await flushPromises()
+    const thumb = w.find('table img')
+    await thumb.trigger('mouseenter')
+    expect(w.find('[data-thumb-popup]').exists()).toBe(true)
+    window.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(w.find('[data-thumb-popup]').exists()).toBe(false)
+    // reopening (hover again) registers the scroll tracking once more
+    await thumb.trigger('mouseenter')
+    expect(w.find('[data-thumb-popup]').exists()).toBe(true)
+    window.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(w.find('[data-thumb-popup]').exists()).toBe(false)
   })
 
   it('shows a muted disposed badge on disposed items in both the table and the mobile cards', async () => {

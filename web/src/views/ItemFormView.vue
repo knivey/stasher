@@ -121,6 +121,14 @@ const saving = ref(false)
 
 async function save(again: boolean = false) {
   if (saving.value) return
+  // "Save & add another" is type="button", so the browser never runs the
+  // name field's required validation for it. Mirror that behavior: an empty
+  // form has nothing to save — focus the field and stay silent (no POST, no
+  // reset, no error toast), exactly like native validation would.
+  if (again && !form.name.trim()) {
+    nameInput.value?.focus()
+    return
+  }
   saving.value = true
   try {
     // Drain any in-flight pick encodes first so the item isn't created
