@@ -560,6 +560,55 @@ func TestTrashIsolation(t *testing.T) {
 	}
 }
 
+// TestTrashRestoreSameSecondNoteOrder: two notes created in the SAME
+// second tie-break by id (created_at DESC, id DESC). The snapshot stores
+// them newest-first, so restore must insert them oldest-first — otherwise
+// the new ids invert the tie-break and the restored order flips.
+func TestTrashRestoreSameSecondNoteOrder(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "trash-noteorder@test.dev", "longpassword1")
+
+	id := createQtyItem(t, ts, cookie, "same second", 1)
+	addItemNote(t, ts, cookie, id, "first note")  // lower id
+	addItemNote(t, ts, cookie, id, "second note") // higher id
+	// pin both to the SAME second: order now decided purely by id DESC
+	mustExec(t, s, "UPDATE item_notes SET created_at = ? WHERE item_id = ?",
+		"2026-01-15T10:00:00Z", id)
+
+	noteOrder := func(itemID int64) []string {
+		t.Helper()
+		var d struct {
+			Notes []noteJSON `json:"notes"`
+		}
+		decodeBody(t, doJSON(t, ts, "GET", "/api/v1/items/"+fmtInt64(itemID), nil, cookie), &d)
+		bodies := make([]string, 0, len(d.Notes))
+		for _, n := range d.Notes {
+			bodies = append(bodies, n.Body)
+		}
+		return bodies
+	}
+	if got := noteOrder(id); len(got) != 2 || got[0] != "second note" || got[1] != "first note" {
+		t.Fatalf("pre-trash order = %v, want [second note first note] (id tiebreak)", got)
+	}
+
+	doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(id), nil, cookie)
+	entries, _ := listTrash(t, ts, cookie)
+	if len(entries) != 1 {
+		t.Fatalf("trash entries = %d, want 1", len(entries))
+	}
+	resp := doJSON(t, ts, "POST", "/api/v1/trash/"+fmtInt64(entries[0].ID)+"/restore", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("restore = %d", resp.StatusCode)
+	}
+	var restored struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &restored)
+	if got := noteOrder(restored.ID); len(got) != 2 || got[0] != "second note" || got[1] != "first note" {
+		t.Fatalf("restored order = %v, want original [second note first note]", got)
+	}
+}
+
 // TestTrashRestorePreservesNotes: notes ride the trash snapshot and come
 // back on restore with their ORIGINAL created_at (ledger precedent); the
 // trash LISTING stays note-free (no notes payload in the row envelope).

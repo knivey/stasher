@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -160,16 +161,24 @@ func buildTrashSnapshot(ctx context.Context, q *dbpkg.Queries, item dbpkg.Item) 
 
 // deleteSnapshotFiles removes every file a trash snapshot references,
 // including derived thumbnails. Missing files are not an error
-// (Storage.Delete treats them as no-ops).
+// (Storage.Delete treats them as no-ops); a failed delete is logged and
+// swallowed — a leaked file beats a wedged purge, and the DB row is
+// already gone by the time this runs on the manual purge path.
 func (s *Server) deleteSnapshotFiles(snap trashSnapshot) {
 	for _, p := range snap.Photos {
-		s.st.Delete(p.StorageKey)
+		if err := s.st.Delete(p.StorageKey); err != nil {
+			slog.Warn("file delete failed", "key", p.StorageKey, "err", err)
+		}
 		if p.ThumbKey != "" {
-			s.st.Delete(p.ThumbKey)
+			if err := s.st.Delete(p.ThumbKey); err != nil {
+				slog.Warn("file delete failed", "key", p.ThumbKey, "err", err)
+			}
 		}
 	}
 	for _, d := range snap.Documents {
-		s.st.Delete(d.StorageKey)
+		if err := s.st.Delete(d.StorageKey); err != nil {
+			slog.Warn("file delete failed", "key", d.StorageKey, "err", err)
+		}
 	}
 }
 
@@ -352,7 +361,12 @@ func (s *Server) handleRestoreTrashEntry(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	for _, n := range snap.Notes { // original created_at (ledger precedent)
+	// The snapshot stores notes newest-first (ListItemNotes order), but
+	// inserting in that order hands the LOWEST new id to the NEWEST note,
+	// inverting the same-second (created_at DESC, id DESC) tie-break.
+	// Iterate in reverse so ids ascend with original chronology.
+	for i := len(snap.Notes) - 1; i >= 0; i-- { // original created_at (ledger precedent)
+		n := snap.Notes[i]
 		if _, err := qtx.AddItemNote(r.Context(), dbpkg.AddItemNoteParams{
 			ItemID: item.ID, Body: n.Body, CreatedAt: n.CreatedAt,
 		}); err != nil {
@@ -439,13 +453,17 @@ func (s *Server) handlePurgeTrashEntry(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
-	s.deleteSnapshotFiles(snap)
+	// delete the ROW first, files second: if the row delete failed after
+	// the files were gone, the entry would dangle pointing at nothing.
+	// (A failed file delete afterwards only leaks bytes — deleteSnapshotFiles
+	// logs it — which is the safer failure direction.)
 	if err := s.q.DeleteTrashEntry(r.Context(), dbpkg.DeleteTrashEntryParams{
 		ID: entry.ID, UserID: u.ID,
 	}); err != nil {
 		s.internalErr(w, err)
 		return
 	}
+	s.deleteSnapshotFiles(snap)
 	w.WriteHeader(http.StatusNoContent)
 }
 
