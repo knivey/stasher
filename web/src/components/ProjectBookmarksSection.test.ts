@@ -110,6 +110,22 @@ describe('ProjectBookmarksSection', () => {
     expect(w.find('[data-archive]').attributes('disabled')).toBeUndefined() // row back to Archive state
   })
 
+  it('owner can delete a bookmark (DELETE + refresh); viewer sees no delete', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`)
+      return new Response(null, { status: 204 })
+    }))
+    const w = mount(ProjectBookmarksSection, { props: { projectId: 1, owner: true, bookmarks: [bm()] } })
+    expect(w.findAll('[data-bm-delete]')).toHaveLength(1) // owner-only
+    await w.find('[data-bm-delete]').trigger('click')
+    await flushPromises()
+    expect(calls).toContain('DELETE /api/v1/projects/1/bookmarks/1')
+    expect(w.emitted('refresh')).toBeTruthy()
+    const viewer = mount(ProjectBookmarksSection, { props: { projectId: 1, owner: false, bookmarks: [bm()] } })
+    expect(viewer.find('[data-bm-delete]').exists()).toBe(false)
+  })
+
   it('links archived PDFs and hides owner controls from viewers', () => {
     const archived = bm({
       archived_file: { id: 9, storage_key: 'pdf1', thumb_key: null, filename: 'Build log.pdf', mime_type: 'application/pdf', size_bytes: 5, created_at: '' },

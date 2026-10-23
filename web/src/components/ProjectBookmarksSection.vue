@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref } from 'vue'
-import { addProjectBookmark, archiveProjectBookmark, api, ApiError } from '../api/client'
+import { addProjectBookmark, archiveProjectBookmark, deleteProjectBookmark, api, ApiError } from '../api/client'
 import type { FetchJob, ProjectBookmark } from '../api/types'
 import { toast } from '../utils/toast'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -125,6 +125,23 @@ async function archive(b: ProjectBookmark) {
     archiving.value.delete(b.id) // the row returns to its Archive state
   }
 }
+// ---- Delete (inline, no dialog — matching the file rows' delete
+// affordance; the archived file row AND its bytes are retired server-side) ----
+const deleting = ref(new Set<number>())
+
+async function removeBookmark(b: ProjectBookmark) {
+  if (deleting.value.has(b.id)) return
+  deleting.value.add(b.id)
+  try {
+    await deleteProjectBookmark(props.projectId, b.id)
+    toast('Bookmark deleted', 'success')
+    emit('refresh')
+  } catch (e) {
+    toast((e as Error).message, 'error')
+  } finally {
+    deleting.value.delete(b.id)
+  }
+}
 </script>
 <template>
   <!-- Mirrors ItemDetailView's external-fetch affordances -->
@@ -154,6 +171,9 @@ async function archive(b: ProjectBookmark) {
           <button v-if="owner" data-archive :disabled="archiving.has(b.id)"
             class="text-slate-600 dark:text-slate-300 hover:underline disabled:opacity-50" @click="archive(b)">
             {{ archiving.has(b.id) ? 'Archiving…' : b.archived_file ? 'Re-archive' : 'Archive' }}</button>
+          <button v-if="owner" data-bm-delete :disabled="deleting.has(b.id)"
+            class="shrink-0 text-red-600 dark:text-red-400 disabled:opacity-50"
+            @click="removeBookmark(b)">Delete</button>
         </span>
       </li>
     </ul>
