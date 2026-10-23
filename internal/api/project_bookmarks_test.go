@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"stasher/internal/config"
 	"stasher/internal/db"
@@ -107,6 +108,60 @@ func serveArchiveFailure(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// Titles flow into stored rows AND archived-PDF filenames
+// (Content-Disposition): control characters are stripped and the 200 cap
+// counts runes, never splitting a multi-byte character.
+func TestBookmarkTitleControlStripAndRuneCap(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	owner := registerUser(t, ts, "pb10@test.dev", "longpassword1")
+	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "T"}, owner)
+	var proj struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &proj)
+	bmURL := "/api/v1/projects/" + fmtInt64(proj.ID) + "/bookmarks"
+
+	// explicit title with control characters (newline, tab, BEL)
+	r := doJSON(t, ts, "POST", bmURL,
+		map[string]any{"url": "https://example.com/a", "title": "Li\nne1\tX\x07Y"}, owner)
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("add = %d, want 201", r.StatusCode)
+	}
+	var bm struct {
+		ID    int64  `json:"id"`
+		Title string `json:"title"`
+	}
+	decodeBody(t, r, &bm)
+	if bm.Title != "Line1XY" {
+		t.Fatalf("title = %q, want Line1XY", bm.Title)
+	}
+
+	// 201-rune CJK title (603 bytes) truncates to 200 runes, no U+FFFD tail
+	r = doJSON(t, ts, "POST", bmURL,
+		map[string]any{"url": "https://example.com/b", "title": strings.Repeat("漢", 201)}, owner)
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("add cjk = %d, want 201", r.StatusCode)
+	}
+	decodeBody(t, r, &bm)
+	if n := utf8.RuneCountInString(bm.Title); n != 200 {
+		t.Fatalf("cjk title runes = %d, want 200", n)
+	}
+	if strings.ContainsRune(bm.Title, '\uFFFD') {
+		t.Fatal("cjk title truncation split a rune (U+FFFD present)")
+	}
+
+	// PATCH path runs through the same clamp
+	r = doJSON(t, ts, "PATCH", bmURL+"/"+fmtInt64(bm.ID),
+		map[string]any{"title": "P\x07Q\nR"}, owner)
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("patch = %d, want 200", r.StatusCode)
+	}
+	decodeBody(t, r, &bm)
+	if bm.Title != "PQR" {
+		t.Fatalf("patched title = %q, want PQR", bm.Title)
+	}
 }
 
 func TestBookmarkArchiveJob(t *testing.T) {

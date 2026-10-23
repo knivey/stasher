@@ -6,18 +6,38 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 
 	dbpkg "stasher/internal/db"
 )
 
-// clampBookmarkTitle trims an explicit title and caps it at 200 chars
-// (matching FetchTitle's own cap).
+// stripControl removes C0/C1 control characters (newline, tab, BEL, DEL,
+// ...) so titles stay single-line and filename-safe (they reach archived
+// PDF filenames via Content-Disposition).
+func stripControl(s string) string {
+	if !strings.ContainsFunc(s, unicode.IsControl) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !unicode.IsControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// clampBookmarkTitle strips control characters and caps an explicit title at
+// 200 runes (matching FetchTitle's own cap). The cap counts RUNES and never
+// splits a multi-byte character, so a 200-rune CJK title exceeds 200 bytes —
+// runes are the contract.
 func clampBookmarkTitle(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) > 200 {
-		s = s[:200]
+	s = strings.TrimSpace(stripControl(s))
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:200])
 	}
 	return s
 }

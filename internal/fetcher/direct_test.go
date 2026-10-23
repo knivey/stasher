@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestDirectFetchPDF(t *testing.T) {
@@ -323,6 +324,34 @@ func TestFetchTitle(t *testing.T) {
 	}
 	if got := d.FetchTitle(context.Background(), "not a url"); got != "not a url" {
 		t.Fatalf("garbage url title = %q, want raw string", got)
+	}
+}
+
+func TestTruncateTitleControlStripAndRuneCap(t *testing.T) {
+	// titles feed archived-PDF filenames via Content-Disposition: control
+	// characters (newline, tab, BEL, DEL, ...) must never reach one
+	if got := truncateTitle("A\x07B\nC\tD"); got != "ABCD" {
+		t.Fatalf("control strip = %q, want ABCD", got)
+	}
+	if got := truncateTitle("\x00\x1f\x7f"); got != "untitled" {
+		t.Fatalf("control-only = %q, want untitled", got)
+	}
+	// 201 CJK runes = 603 bytes: the old s[:200] byte slice split a rune and
+	// surfaced U+FFFD. The cap must count runes.
+	cjk := strings.Repeat("漢", 201)
+	got := truncateTitle(cjk)
+	if n := utf8.RuneCountInString(got); n != 200 {
+		t.Fatalf("rune count = %d, want 200", n)
+	}
+	if strings.ContainsRune(got, '\uFFFD') {
+		t.Fatal("truncation split a multi-byte rune (U+FFFD present)")
+	}
+	if got != strings.Repeat("漢", 200) {
+		t.Fatal("truncated title content mismatch")
+	}
+	// short ASCII passes through untouched
+	if got := truncateTitle("plain title"); got != "plain title" {
+		t.Fatalf("short ascii = %q", got)
 	}
 }
 

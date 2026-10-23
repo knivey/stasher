@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -238,10 +239,31 @@ func (d *DirectEngine) FetchTitle(ctx context.Context, rawURL string) string {
 
 var titleRe = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 
+// stripControl removes C0/C1 control characters (newline, tab, BEL, DEL,
+// ...). Titles flow into archived-PDF filenames via Content-Disposition and
+// must stay single-line and filename-safe.
+func stripControl(s string) string {
+	if !strings.ContainsFunc(s, unicode.IsControl) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !unicode.IsControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// truncateTitle caps s at 200 runes — the cap counts RUNES and never splits
+// a multi-byte character, so a 200-rune CJK title exceeds 200 bytes (runes
+// are the contract, not bytes). Control characters are stripped first so
+// neither the stored title nor a derived filename carries them.
 func truncateTitle(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) > 200 {
-		s = s[:200]
+	s = strings.TrimSpace(stripControl(s))
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:200])
 	}
 	if s == "" {
 		return "untitled"
