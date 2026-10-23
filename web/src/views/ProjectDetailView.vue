@@ -6,6 +6,8 @@ import type { Item, ListResponse, Project, ProjectDetail, ProjectItem, ProjectNo
 import { toast } from '../utils/toast'
 import { PROJECT_STATUSES, statusBadgeClass, visibilityBadgeClass } from '../utils/projects'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import ProjectNotesSection from '../components/ProjectNotesSection.vue'
+import ProjectCommentsSection from '../components/ProjectCommentsSection.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -354,6 +356,12 @@ async function addProjectItem() {
         </p>
       </form>
     </div>
+
+    <!-- Notes (owner-only log) + comments (public thread) — presentational
+         sections that refetch the whole detail after each mutation. -->
+    <ProjectNotesSection v-if="detail?.owner_view" :project-id="project.id" :notes="notes" @refresh="fetchDetail" />
+    <ProjectCommentsSection :project-id="project.id" :comments="detail?.comments ?? []"
+      :can-post="!!detail?.owner_view || project.visibility === 'shared'" @refresh="fetchDetail" />
 
     <ConfirmDialog :open="confirmDelete" :title="`Delete '${project.name}'`"
       message="Permanently delete this project? Linked items are NOT deleted — only their links to this project are removed."
