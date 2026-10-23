@@ -582,9 +582,13 @@ POST   /api/v1/projects/{id}/bookmarks — {url, title?}; owner only
        NEVER blocks the add: any failure (dead host, non-HTML, policy
        rejection) falls back to the URL hostname; unparseable URLs fall
        back to the raw string. An explicit `title` wins untouched
-       (trimmed, ≤200 chars).
+       (trimmed, control chars stripped, ≤200 runes); one that is EMPTY
+       after stripping (blank or control-only, e.g. "\x07") is treated
+       as absent → auto-title path.
 PATCH  /api/v1/projects/{id}/bookmarks/{bid} — {url?, title?} → 200 with
-       the updated row. Absent field = keep. A provided `url` is
+       the updated row. Absent field = keep; a `title` that clamps to
+       empty (empty/blank/control-only) also keeps the current title
+       (empty-name sentinel). A provided `url` is
        re-validated (400 on violation). 200/404 semantics as usual.
 DELETE /api/v1/projects/{id}/bookmarks/{bid} — 204; absent/foreign →
        404. When the bookmark has an archived file (Task 7+), the

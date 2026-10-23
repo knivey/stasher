@@ -33,7 +33,9 @@ func stripControl(s string) string {
 // clampBookmarkTitle strips control characters and caps an explicit title at
 // 200 runes (matching FetchTitle's own cap). The cap counts RUNES and never
 // splits a multi-byte character, so a 200-rune CJK title exceeds 200 bytes —
-// runes are the contract.
+// runes are the contract. An empty result (blank or control-only input) is
+// treated as ABSENT by both callers: POST falls through to the auto-title
+// path, PATCH keeps the current title.
 func clampBookmarkTitle(s string) string {
 	s = strings.TrimSpace(stripControl(s))
 	if r := []rune(s); len(r) > 200 {
@@ -60,11 +62,13 @@ func (s *Server) handleAddProjectBookmark(w http.ResponseWriter, r *http.Request
 		return
 	}
 	title := ""
-	if req.Title != nil && strings.TrimSpace(*req.Title) != "" {
+	if req.Title != nil {
 		title = clampBookmarkTitle(*req.Title)
-	} else if s.fetchDirect != nil {
+	}
+	if title == "" && s.fetchDirect != nil {
 		// best-effort auto-title: never blocks the add (hostname fallback
-		// on any failure, including a nil engine)
+		// on any failure, including a nil engine). An absent/blank or
+		// control-only title clamps to "" and lands here too.
 		title = s.fetchDirect.FetchTitle(r.Context(), req.URL)
 	}
 	bm, err := s.q.AddProjectBookmark(r.Context(), dbpkg.AddProjectBookmarkParams{
@@ -119,8 +123,9 @@ func (s *Server) handlePatchProjectBookmark(w http.ResponseWriter, r *http.Reque
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	// absent field = keep (PATCH semantics); empty-string title is a real
-	// value here — only an absent key preserves the current title
+	// absent field = keep (PATCH semantics); a title that clamps to empty
+	// (empty, blank, or control-only) also keeps the current title — the
+	// same empty-name sentinel semantics as items/locations
 	url, title := bm.Url, bm.Title
 	if req.URL != nil {
 		if !validExternalURL(*req.URL) {
@@ -130,7 +135,9 @@ func (s *Server) handlePatchProjectBookmark(w http.ResponseWriter, r *http.Reque
 		url = *req.URL
 	}
 	if req.Title != nil {
-		title = clampBookmarkTitle(*req.Title)
+		if t := clampBookmarkTitle(*req.Title); t != "" {
+			title = t
+		}
 	}
 	if err := s.q.UpdateProjectBookmark(r.Context(), dbpkg.UpdateProjectBookmarkParams{
 		Url: url, Title: title, ID: bm.ID, ProjectID: p.ID,

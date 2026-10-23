@@ -61,6 +61,18 @@ func TestProjectBookmarksCRUD(t *testing.T) {
 		t.Fatalf("auto title = %q", bm.Title)
 	}
 
+	// control-only explicit title clamps to "" → treated as absent →
+	// auto-title path (not stored as empty)
+	r = doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks",
+		map[string]any{"url": srv.URL + "/page", "title": "\x07"}, owner)
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("add control-only title bookmark = %d", r.StatusCode)
+	}
+	decodeBody(t, r, &bm)
+	if bm.Title != "LM358 Datasheet" {
+		t.Fatalf("control-only title → auto title = %q, want LM358 Datasheet", bm.Title)
+	}
+
 	// invalid urls → 400
 	for _, bad := range []string{"", "javascript:alert(1)", "ftp://x/y", strings.Repeat("https://a/", 500)} {
 		if r := doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks", map[string]any{"url": bad}, owner); r.StatusCode != http.StatusBadRequest {
@@ -83,8 +95,8 @@ func TestProjectBookmarksCRUD(t *testing.T) {
 	// detail carries bookmarks for sharee too (archived_file null for now)
 	var detail map[string]any
 	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/projects/"+pid, nil, sharee), &detail)
-	if bms := detail["bookmarks"].([]any); len(bms) != 2 {
-		t.Fatalf("sharee bookmarks = %d, want 2", len(bms))
+	if bms := detail["bookmarks"].([]any); len(bms) != 3 {
+		t.Fatalf("sharee bookmarks = %d, want 3", len(bms))
 	}
 
 	// delete → 204 then 404
@@ -161,6 +173,18 @@ func TestBookmarkTitleControlStripAndRuneCap(t *testing.T) {
 	decodeBody(t, r, &bm)
 	if bm.Title != "PQR" {
 		t.Fatalf("patched title = %q, want PQR", bm.Title)
+	}
+
+	// PATCH with a control-only title clamps to "" → keeps the current
+	// title (empty-name sentinel semantics)
+	r = doJSON(t, ts, "PATCH", bmURL+"/"+fmtInt64(bm.ID),
+		map[string]any{"title": "\x07\n"}, owner)
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("patch control-only = %d, want 200", r.StatusCode)
+	}
+	decodeBody(t, r, &bm)
+	if bm.Title != "PQR" {
+		t.Fatalf("control-only patch title = %q, want unchanged PQR", bm.Title)
 	}
 }
 

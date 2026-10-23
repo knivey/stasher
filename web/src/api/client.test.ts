@@ -26,7 +26,7 @@ describe('api client', () => {
 
   it('throws ApiError with code+message from error shape', async () => {
     vi.stubGlobal('fetch', mockFetch(409, { error: { code: 'tag_exists', message: 'tag already exists' } }))
-    const err = (await api.post('/api/v1/tags', { name: 'x' }).catch(e => e)) as ApiError
+    const err = (await api.post('/api/v1/items', { name: 'x' }).catch(e => e)) as ApiError
     expect(err).toBeInstanceOf(ApiError)
     expect(err.status).toBe(409)
     expect(err.code).toBe('tag_exists')
