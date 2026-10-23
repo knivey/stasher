@@ -1,159 +1,120 @@
 # Stasher Backlog
 
-Items accepted as-is by the final whole-branch review (2026-10-21) or deferred
-by task reviews with rulings. None block v1; triage into v1.1 as desired.
-File references are to the state at commit `60c61fe`.
+Record of deferred findings and their dispositions. The 2026-10-23 backlog
+round resolved or closed every open item except two deliberately deferred
+below. Kept for history; strikethrough = resolved.
 
 ## Security hardening
 
-- ~~Last-admin / self-demotion guard~~ — **done 2026-10-22** (cannot_demote_self
-  + cannot_demote_last_admin, disabled admins don't count).
-- ~~Rate-limit `/auth/register`~~ — **done 2026-10-22** (per-IP 10/min, before
-  any DB work).
-- ~~`X-Content-Type-Options: nosniff` on `/files/*`~~ — **done 2026-10-22**
-  (all serve paths + 404 variants; 401s from requireAuth still lack it —
-  JSON bodies, negligible).
-- ~~Login timing side-channel~~ — **done 2026-10-22** (dummy-hash verify on
-  unknown email, computed once at init).
-- ~~Huge-`m` stored-hash allocation~~ — **done 2026-10-22** (VerifyPassword
-  bounds-checks m ≤ 1 GiB / t ≤ 64 / p ≤ 16 before the KDF runs).
+- ~~Last-admin / self-demotion guard~~ — **done 2026-10-22**.
+- ~~Rate-limit `/auth/register`~~ — **done 2026-10-22**.
+- ~~`nosniff` on `/files/*`~~ — **done 2026-10-22** (401s from requireAuth
+  still lack it — JSON bodies, negligible; **closed accepted**).
+- ~~Login timing side-channel~~ — **done 2026-10-22**.
+- ~~Huge-`m` stored-hash allocation~~ — **done 2026-10-22**.
 
 ## API consistency
 
-- ~~`DELETE /projects/{id}/items/{itemId}` returns 204 for absent rows~~ —
-  **done 2026-10-22** (`:execrows` → 404, double-delete test).
-- **Project-item PATCH can't clear `qty_used`/`notes`** — pointer semantics;
-  workaround is set 0/"". (`internal/api/projects_handlers.go`)
-- **`PATCH /items` with `name: ""` silently keeps the name** (sentinel for
-  "absent"); same for locations. Documented in AGENTS.md/api-notes; rejecting
-  explicitly remains a v1.1 option.
-- **Tag rename 409-before-404** — foreign id + colliding name returns 409, not
-  404. Documented in `docs/api-notes.md`; acceptable.
-- **`GET /items` empty page reports `total: 0`** — `count(*) OVER()` needs a
-  row; page-1 reads are unaffected. Documented in api-notes; trash view clamps.
-- ~~**FTS whole-token semantics** — `q=rasp` doesn't match "raspberry" without
-  `*`~~ — **done 2026-10-22** (trigram tokenizer, migration 00005: substring
-  matching for terms ≥ 3 chars; shorter terms return empty — see api-notes).
-- ~~qty_used unbounded~~ — **done 2026-10-22** (0..1e12 on add + patch,
-  matching items.qty).
-- ~~Usage rows carry no project name~~ — **done 2026-10-22** (LEFT JOIN,
-  `project_name` on rows + 201 body; frontend prefers it, `project #id`
-  fallback kept).
-- ~~Disposing a 0-qty item logs a delta-0 entry~~ — **done 2026-10-22**
-  (idempotent 204, no ledger write, no updated_at bump).
+- ~~`DELETE /projects/{id}/items/{itemId}` 204-for-absent~~ — **done
+  2026-10-22** (`:execrows` → 404).
+- **Project-item PATCH can't clear `qty_used`/`notes`** — **closed accepted
+  2026-10-23**: JSON null is indistinguishable from absent (the app-wide
+  PATCH wart); workaround is set 0/"". No natural sentinel exists for a
+  numeric nullable; changing it means a RawMessage decode — not worth it.
+- **`PATCH` with `name: ""` keeps the name** (items, locations; bookmarks
+  title mirrors it) — **closed accepted 2026-10-23**: the sentinel is
+  load-bearing for diff-PATCH flows and documented in api-notes.
+- ~~**Tag rename 409-before-404**~~ — **done 2026-10-23** (ownership check
+  first; collision still 409 `tag_exists`).
+- ~~**Tag create check-then-insert race (UNIQUE → 500)**~~ — **done
+  2026-10-23** (insert-only; UNIQUE violation → 409 `duplicate_tag`).
+- **`GET /items` empty page reports `total: 0`** — **closed accepted
+  2026-10-23**: `count(*) OVER()` needs a row; page-1 reads unaffected,
+  trash clamps. A separate count query costs more than it buys.
+- ~~FTS whole-token semantics~~ — **done 2026-10-22** (trigram).
+- ~~qty_used unbounded~~ — **done 2026-10-22**.
+- ~~Usage rows carry no project name~~ — **done 2026-10-22**.
+- ~~0-qty dispose logs delta-0~~ — **done 2026-10-22**.
 
-## Concurrency (all accepted: single-user windows, SQLite single-writer)
+## Concurrency — **all closed accepted 2026-10-23**
 
-- Bootstrap-admin race (two concurrent first registrations both admin).
-- Invite double-consume race (`GetInvite` → `MarkInviteUsed` not atomic).
-- ~~Location PATCH cycle-check/uniqueness outside the write tx~~ —
-  **mitigated 2026-10-22**: both recursive CTEs are depth-capped (< 50), so a
-  formed cycle can no longer hang the breadcrumbs/descendants queries. The
-  PATCH itself remains non-tx (cycle formation still possible under
-  concurrent same-user PATCHes, now harmless to query).
-- Tag create check-then-insert race (UNIQUE backstop surfaces as 500 not 409).
-- Item copy half-apply without rollback (partial duplicate on mid-copy failure;
-  retry-safe, user can delete).
-- Limiter 10k map reset wipes all buckets under key spray (bounded memory by
-  design; oldest-eviction would be kinder).
+Single-user windows under SQLite's single-writer + one-connection pool;
+recorded, not scheduled: bootstrap-admin race; invite double-consume;
+location PATCH cycle-check outside write tx (formed cycles are harmless
+since the depth caps — mitigated 2026-10-22); item copy half-apply
+(retry-safe); limiter 10k map reset (bounded by design). (Tag create race
+was the one with user impact — fixed above.)
 
 ## Ops / QoL
 
-- ~~**CLI**: unknown subcommand silently serves; flags after the subcommand
-  ignored~~ — **done 2026-10-22** (usage + exit 2 for unknown subcommands and
-  flag-after-subcommand; `-h`/`--help` still uses flag's default output).
-- ~~**Shutdown error ignored**~~ — **done 2026-10-22** (slog.Warn on drain
-  failure).
-- ~~**`TouchSession` writes on every authed request**~~ — **done 2026-10-22**
-  (shouldTouch helper: skip writes < 60s, fail-safe on parse errors).
-- ~~**Orphan files on failed deletes**~~ — **partially done 2026-10-22**:
-  photo/trash-delete failures now `slog.Warn` instead of silent, backfill
-  deletes its orphaned thumb when the row vanished mid-loop, and single-entry
-  purge deletes the row BEFORE files. Still unlogged: document-upload rollback
-  delete and `handleDeleteDocument` (files_handlers.go:375/:412). A periodic
-  orphan sweep remains unimplemented.
-- ~~**goose log noise**~~ — **done 2026-10-22** (`goose.SetLogger(NopLogger)`;
-  SetVerbose was a no-op in v3.29.0 — errors still propagate).
-- ~~**Modernc DSN pragmas**~~ — **done 2026-10-22** (WAL/foreign_keys/
-  busy_timeout in the DSN so any pooled connection gets them; post-open loop
-  kept as belt-and-suspenders).
-- **goose global API** — deprecated `SetBaseFS/SetDialect/Up`; migrate to
-  `goose.NewProvider` when convenient.
+- ~~CLI unknown subcommand~~ / ~~shutdown error~~ / ~~TouchSession write
+  churn~~ / ~~goose log noise~~ / ~~DSN pragmas~~ — **done 2026-10-22**.
+- ~~**Unlogged file deletes**~~ — **done 2026-10-23** (doc-upload rollback
+  + handleDeleteDocument now warn-log via `deleteFileBytes`; every storage
+  delete in the codebase now logs failures).
+- **Periodic orphan-file sweep** — **open, deferred**: all delete paths now
+  warn-log, so orphans are visible in logs; a sweep needs a files↔DB
+  reconciliation walk. Do if orphan warnings ever show up in practice.
+- **goose global API → NewProvider** — **open, deliberately deferred**: the
+  deprecated calls work identically; the migration touches startup on the
+  deployment-critical path for zero behavior change. Revisit when a goose
+  upgrade forces it.
 
 ## Docs
 
-- ~~locations `name` row should note provided-`""`-keeps; error-precedence
-  asymmetry undocumented~~ — **done 2026-10-22** (AGENTS.md + api-notes).
-- ~~CI actions target Node 20 runtime~~ — **done 2026-10-22**
-  (checkout@v5, setup-go@v6, setup-node@v5).
+- ~~locations `""`-keeps + error-precedence~~ — **done 2026-10-22**.
+- ~~CI actions Node 20~~ — **done 2026-10-22**.
 
-## Frontend v1.1 (from the frontend final review, 2026-10-21)
+## Frontend v1.1 (2026-10-21 review)
 
-- ~~**Project delete UI**~~ — **done 2026-10-22** (detail view, ConfirmDialog
-  reassuring items survive, tests).
-- ~~**Extended smoke**~~ — **done 2026-10-22** (web/scripts/smoke-authed.mjs:
-  puppeteer-core login flow at 375px against the real binary; in CI).
-- ~~**`make check`**~~ — **done 2026-10-22** (runs Go vet+tests, web
-  tests+typecheck, SPA build; CI runs it).
-- ~~**Residual upload race**~~ — **done 2026-10-22** (pick inputs disabled
-  while saving, attribute-pinned test).
-- ~~**Negative `qty_used` savable**~~ — **done 2026-10-22** (backend bounds
-  0..1e12 on add + patch).
-- ~~Tap-target size for the mobile header's emoji links~~ — **done 2026-10-22**
-  (44px targets); ~~5-char bottom-nav label truncation~~ **done 2026-10-22**
-  (full labels, 11px); the `locations.ts` cycle-comment operative claims were
-  corrected 2026-10-22 — one illustrative clause (tail-reached cycle) describes
-  an impossible state and may be pruned someday.
-- **Usage ledger leftovers** (2026-10-21): ~~disposing a 0-qty item logs a
-  delta-0 entry~~ **done 2026-10-22**; ~~ledger rows carry no project
-  name~~ **done 2026-10-22**; ~~`found`/`restock` badges share a color~~
-  **done 2026-10-22**; history pager has no in-flight guard (matches the
-  app-wide pagination pattern).
-- **Trash leftovers** (2026-10-21): ~~purge-404 path is toast-only~~ **done
-  2026-10-22** (refetches like restore); ~~disposed-item restore branch
-  untested~~ **done 2026-10-22**; post-commit detail-fetch 500 window on
-  restore; ~~purge deletes files before row (failure order)~~ **done
-  2026-10-22** (row first now); trash sweep on GET is global not per-user; no
-  snapshot size cap; item timestamps reset on restore (ledger/note timestamps
-  preserved); ~~weak count pin in empty-trash test~~ **judged fine 2026-10-22**
-  (page-1 leak surfaces in count).
+- Project delete UI / extended smoke / `make check` / upload race /
+  negative qty_used / tap targets / label truncation / found-restock badge
+  colors / purge-404 refetch / disposed-restore test / purge delete order /
+  empty-trash count pin — **all done 2026-10-22**.
+- ~~locations.ts impossible tail-reached-cycle clause~~ — **pruned
+  2026-10-23**.
+- History pager in-flight guard — **closed accepted**: matches the
+  app-wide pagination pattern.
+- **Trash leftovers — closed accepted 2026-10-23**: post-commit
+  detail-fetch 500 window on restore (narrow); trash sweep on GET global
+  not per-user (only expired entries, no leak); no snapshot size cap (scale
+  target); item timestamps reset on restore (ledger/note timestamps
+  preserved; documented).
 
-## External content (2026-10-22, task 1 review)
+## External content (2026-10-22)
 
-- Per-hop 30s timeout: a 5-hop redirect chain can run ~3 minutes under the
-  direct engine's 30s-per-request client timeout. The job layer (task 2)
-  should impose an overall deadline on fetch jobs rather than relying on the
-  engine's per-request timeout.
-- SSRF policy rejects the spec-exact Global-Constraint list only; still
-  allowed (future hardening candidates): 0.0.0.0/8, 240.0.0.0/4 (reserved +
-  broadcast), and IPv4-compatible IPv6 ::/96. PublicPolicy is hard-coded, so
-  widening it is a one-place change when ruled on.
+- ~~Per-hop 30s timeout → unbounded chains~~ — **was already resolved** by
+  the job layer's 90s overall `jobDeadline` (covers queue wait + fetch);
+  struck 2026-10-23 when verified.
+- ~~SSRF policy gaps: 0.0.0.0/8, 240.0.0.0/4, ::/96~~ — **done 2026-10-23**
+  (PublicPolicy widened; loopback pinned still-allowed for tests).
 
-## Notes feature review minors (2026-10-22)
+## Notes feature (2026-10-22) — closed accepted 2026-10-23
 
-- Note body cap counts bytes not runes (consistent with other limits; client
-  maxlength counts chars — CJK edge mismatch documented in api-notes).
-- No cap on notes per item (scale target: fine).
-- Fetch-in-flight at ItemsView unmount repopulates the cleared list (narrow
-  stale-flash window; needs request cancellation to fully fix).
+Byte-count caps with char-count maxlength (CJK edge, documented);
+uncapped notes per item (scale target); ItemsView unmount stale-flash
+(needs request cancellation — an app-wide client concern, not worth a
+one-off).
 
-## Projects flesh-out (2026-10-23, final review)
+## Projects flesh-out (2026-10-23) — resolved in the backlog round
 
-- Bookmark PATCH `title: ""` clears while POST blank auto-titles — asymmetry
-  undocumented in api-notes.
-- Explicit bookmark titles may contain newlines → the archived-PDF filename
-  can break its own Content-Disposition download; strip control chars in
-  clampBookmarkTitle/sanitizeFilename.
-- Sharee BOM rows keyed by `item_name` — duplicate Vue keys possible with
-  same-named items.
-- Sharee detail fires an unused /items?page_size=200 picker load; one-line
-  `owner_view` gate when the view is next touched.
-- SharedView empty-state flash while the projects fetch is in flight.
-- Multi-file upload: one refetch per file; batch error toasts don't name the
-  failing file.
-- Owner deleting others' comments has no UI (API allows; `mine`-flag-driven
-  affordance by design).
-- Bookmark PATCH-title UI deferred past v1 (ruling: auto-title suffices —
-  Task 11 ruling).
-- No committed thumb-degradation test for project files (live-verified during
-  review); byte-200 title cap can split a rune (harmless U+FFFD).
+- ~~Bookmark `title: ""` asymmetry~~ — **resolved 2026-10-23**: PATCH
+  empty/control-only title now KEEPS the current title (empty-name sentinel
+  semantics, matching items/locations); documented in api-notes.
+- ~~Titles with newlines break archived-PDF filenames~~ — **done
+  2026-10-23** (control chars stripped in both title paths; rune-safe
+  200-char cap).
+- ~~Sharee BOM rows keyed by item_name~~ — **done 2026-10-23**
+  (item_id-or-name+index; re-render test pins no duplicate-key warning).
+- ~~Sharee picker load~~ — **done 2026-10-23** (owner_view-gated).
+- ~~SharedView empty-state flash~~ — **done 2026-10-23** (projectsLoaded
+  gate, error-safe).
+- ~~Multi-file upload churn~~ — **done 2026-10-23** (single refresh;
+  filename-prefixed error toasts; per-file isolation kept).
+- ~~Owner deleting others' comments has no UI~~ — **done 2026-10-23**
+  (`owner` prop; mine-or-owner affordance).
+- Bookmark PATCH-title UI — **closed by ruling**: auto-title + the
+  control-char hardening suffice; inline title editing adds surface for
+  marginal value. Reopen if users ask.
+- ~~No thumb-degradation test for project files~~ / ~~byte-cap rune
+  split~~ — **done 2026-10-23** (test ported; cap now rune-safe).
