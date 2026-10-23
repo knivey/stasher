@@ -118,3 +118,17 @@ create `/data` as the service user and fail to start.
 
 Logs go to `/var/log/stasher.log` and `/var/log/stasher.err.log` (see the
 script). Status/restart: `rc-service stasher status|restart`.
+
+## Optional: headless chromium (page archiving)
+
+Direct URL fetching (datasheet/manual PDFs, images) needs nothing extra.
+Rendering a web page to a PDF archive uses headless chromium:
+
+- Alpine: `apk add chromium`
+- Debian: `apt install chromium`
+- Arch: `pacman -S chromium`
+
+Stasher auto-detects `chromium`, `chromium-browser`, or `google-chrome` on
+PATH; set `chrome_path` (or `STASHER_CHROME_PATH`) to point at a specific
+binary. Without chromium, archive requests fail with a hint — everything
+else works.
