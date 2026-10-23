@@ -340,6 +340,14 @@ func TestItemProductURL(t *testing.T) {
 			t.Fatalf("create product_url %.30q... = %d, want 400", bad, r.StatusCode)
 		}
 	}
+	// the 2000-char boundary is inclusive: exactly 2000 chars creates fine
+	resp = doJSON(t, ts, "POST", "/api/v1/items", map[string]any{
+		"name":        "boundary",
+		"product_url": "https://example.com/" + strings.Repeat("a", 1980), // 20 + 1980 = 2000
+	}, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("2000-char product_url = %d, want 201", resp.StatusCode)
+	}
 	var errBody struct {
 		Error struct {
 			Code    string `json:"code"`

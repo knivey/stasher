@@ -710,7 +710,7 @@ func TestTrashRestorePreservesNotes(t *testing.T) {
 // item id). Legacy snapshots predating the field restore to a null
 // product_url (absent JSON key unmarshals to "" -> NULL).
 func TestTrashRestoreCarriesProductURL(t *testing.T) {
-	_, ts := newTestServer(t, nil)
+	s, ts := newTestServer(t, nil)
 	cookie := registerUser(t, ts, "trash-purl@test.dev", "longpassword1")
 
 	resp := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{
@@ -758,4 +758,54 @@ func TestTrashRestoreCarriesProductURL(t *testing.T) {
 	if restored.ProductURL == nil || *restored.ProductURL != "https://example.com/ds18b20" {
 		t.Fatalf("restored product_url = %v, want https://example.com/ds18b20", restored.ProductURL)
 	}
+
+	// legacy snapshot (pre-product_url): the absent JSON key restores a NULL
+	// product_url, not an empty string
+	if resp := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{
+		"name": "legacy sensor", "product_url": "https://example.com/legacy",
+	}, cookie); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("legacy create item = %d", resp.StatusCode)
+	} else {
+		decodeBody(t, resp, &item)
+	}
+	if resp := doJSON(t, ts, "DELETE", "/api/v1/items/"+fmtInt64(item.ID), nil, cookie); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("legacy delete = %d", resp.StatusCode)
+	}
+	entries, _ = listTrash(t, ts, cookie)
+	if len(entries) != 1 {
+		t.Fatalf("legacy trash entries = %d, want 1", len(entries))
+	}
+	stripProductURLFromSnapshot(t, s, entries[0].ID)
+	resp = doJSON(t, ts, "POST", "/api/v1/trash/"+fmtInt64(entries[0].ID)+"/restore", nil, cookie)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("legacy restore = %d", resp.StatusCode)
+	}
+	var legacy struct {
+		ProductURL *string `json:"product_url"`
+	}
+	decodeBody(t, resp, &legacy)
+	if legacy.ProductURL != nil {
+		t.Fatalf("legacy restored product_url = %v, want null", *legacy.ProductURL)
+	}
+}
+
+// stripProductURLFromSnapshot rewrites a trash row's snapshot JSON without
+// the product_url field, simulating an entry stored before the field
+// existed (old snapshots unmarshal with ProductUrl == "" -> restores NULL).
+func stripProductURLFromSnapshot(t *testing.T, s *Server, trashID int64) {
+	t.Helper()
+	var blob string
+	if err := s.raw.QueryRow("SELECT snapshot FROM trash WHERE id = ?", trashID).Scan(&blob); err != nil {
+		t.Fatal(err)
+	}
+	var snap map[string]any
+	if err := json.Unmarshal([]byte(blob), &snap); err != nil {
+		t.Fatal(err)
+	}
+	delete(snap, "product_url")
+	out, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s, "UPDATE trash SET snapshot = ? WHERE id = ?", string(out), trashID)
 }

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestArchiveFetchWithStubChrome drives the archive engine through the stub
@@ -42,6 +43,37 @@ func TestArchiveFetchWithStubChrome(t *testing.T) {
 	}, "\n") + "\n"
 	if string(got) != want {
 		t.Fatalf("chrome args:\n got %q\nwant %q", string(got), want)
+	}
+}
+
+// TestArchiveFilenamePinnedUTC: the archived filename's date is the UTC
+// date (house rule: UTC everywhere), not the server's local date. The
+// injected instant is 2026-01-15 23:30 UTC and TZ is pinned to UTC+14 —
+// locally that is already the 16th, so this passes only if the engine
+// formats the injected time in UTC.
+func TestArchiveFilenamePinnedUTC(t *testing.T) {
+	t.Setenv("TZ", "Pacific/Kiritimati") // UTC+14: local date != UTC date
+	eng := NewArchiveEngine(LoopbackPolicy(), "./testdata/stub-chrome.sh")
+	eng.now = func() time.Time {
+		return time.Date(2026, 1, 15, 23, 30, 0, 0, time.UTC)
+	}
+	res, err := eng.Fetch(context.Background(), "https://example.com/docs/page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Filename != "example.com 2026-01-15.pdf" {
+		t.Fatalf("filename = %q, want %q (UTC date, not local)", res.Filename, "example.com 2026-01-15.pdf")
+	}
+}
+
+// TestArchiveRejectsUserinfo: credentials embedded in the URL are rejected
+// before any exec — same rule as the direct engine. The stub chrome WOULD
+// produce a valid PDF, so the only way this fetch fails is the userinfo gate.
+func TestArchiveRejectsUserinfo(t *testing.T) {
+	eng := NewArchiveEngine(LoopbackPolicy(), "./testdata/stub-chrome.sh")
+	_, err := eng.Fetch(context.Background(), "http://user:pass@example.com/x")
+	if err == nil || !strings.Contains(err.Error(), "userinfo") {
+		t.Fatalf("want userinfo rejection, got %v", err)
 	}
 }
 

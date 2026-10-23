@@ -40,12 +40,14 @@ func ChromePath(explicit string) string {
 type ArchiveEngine struct {
 	policy Policy
 	chrome string
+	// now is a test seam (nil = time.Now); filenames use the UTC date.
+	now func() time.Time
 }
 
 var _ Engine = (*ArchiveEngine)(nil)
 
 func NewArchiveEngine(p Policy, chrome string) *ArchiveEngine {
-	return &ArchiveEngine{policy: p, chrome: chrome}
+	return &ArchiveEngine{policy: p, chrome: chrome, now: time.Now}
 }
 
 // checkURL mirrors DirectEngine.checkURL's scheme/userinfo/policy semantics
@@ -111,6 +113,10 @@ func (a *ArchiveEngine) Fetch(ctx context.Context, rawURL string) (Result, error
 		"--virtual-time-budget="+chromeBudgetMs,
 		"--print-to-pdf=-", u.String())
 	cmd.Stdout = &out
+	// Bound the post-kill pipe drain: after the context kill, Wait would
+	// otherwise block indefinitely on a stdout pipe a wedged child never
+	// closes. WaitDelay abandons it 5s after the process dies.
+	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Run(); err != nil {
 		if out.over {
 			return Result{}, errOverCap
@@ -131,7 +137,7 @@ func (a *ArchiveEngine) Fetch(ctx context.Context, rawURL string) (Result, error
 		Body:        body,
 		ContentType: "application/pdf",
 		// UTC everywhere (house rule)
-		Filename: fmt.Sprintf("%s %s.pdf", u.Hostname(), time.Now().UTC().Format("2006-01-02")),
+		Filename: fmt.Sprintf("%s %s.pdf", u.Hostname(), a.now().UTC().Format("2006-01-02")),
 	}, nil
 }
 
