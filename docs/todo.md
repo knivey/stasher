@@ -21,4 +21,4 @@ the headless chrome can be used for the datasheet fetcher as well if we need to 
 * include a docker build or something? i have no idea how to deploy docker but people will probably appreciate it
 ~~* on desktop hover over a item thumb can open a larger version in a tooltip like popup~~ done 2026-10-22
 * deleting a location with sublocations should have the option to delete all sublocations
-* add ability to add a picture of locations, same thumbnail behaviour as items, but we only need the 1 pic not multiple
+* ~~add ability to add a picture of locations, same thumbnail behaviour as items, but we only need the 1 pic not multiple~~ done 2026-10-23
