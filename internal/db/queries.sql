@@ -351,6 +351,21 @@ WHERE project_id = ? ORDER BY created_at DESC, id DESC;
 -- execrows so the handler can 404 an absent note (item-notes semantics)
 DELETE FROM project_notes WHERE id = ? AND project_id = ?;
 
+-- name: AddProjectComment :one
+INSERT INTO project_comments (project_id, user_id, body, created_at) VALUES (?, ?, ?, ?)
+RETURNING id, project_id, user_id, body, created_at;
+
+-- name: ListProjectComments :many
+SELECT c.id, c.user_id, c.body, c.created_at, u.display_name AS author_name
+FROM project_comments c JOIN users u ON u.id = c.user_id
+WHERE c.project_id = ? ORDER BY c.created_at, c.id;
+
+-- name: GetProjectComment :one
+SELECT id, project_id, user_id FROM project_comments WHERE id = ?;
+
+-- name: DeleteProjectComment :execrows
+DELETE FROM project_comments WHERE id = ?;
+
 -- name: CreateItemLedger :one
 INSERT INTO item_ledger (item_id, user_id, delta, resulting_qty, kind, project_id, note, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)

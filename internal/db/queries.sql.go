@@ -106,6 +106,36 @@ func (q *Queries) AddItemPhoto(ctx context.Context, arg AddItemPhotoParams) (Ite
 	return i, err
 }
 
+const addProjectComment = `-- name: AddProjectComment :one
+INSERT INTO project_comments (project_id, user_id, body, created_at) VALUES (?, ?, ?, ?)
+RETURNING id, project_id, user_id, body, created_at
+`
+
+type AddProjectCommentParams struct {
+	ProjectID int64  `json:"project_id"`
+	UserID    int64  `json:"user_id"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (q *Queries) AddProjectComment(ctx context.Context, arg AddProjectCommentParams) (ProjectComment, error) {
+	row := q.db.QueryRowContext(ctx, addProjectComment,
+		arg.ProjectID,
+		arg.UserID,
+		arg.Body,
+		arg.CreatedAt,
+	)
+	var i ProjectComment
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.UserID,
+		&i.Body,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const addProjectNote = `-- name: AddProjectNote :one
 INSERT INTO project_notes (project_id, body, created_at) VALUES (?, ?, ?)
 RETURNING id, project_id, body, created_at
@@ -784,6 +814,18 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 	return err
 }
 
+const deleteProjectComment = `-- name: DeleteProjectComment :execrows
+DELETE FROM project_comments WHERE id = ?
+`
+
+func (q *Queries) DeleteProjectComment(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProjectComment, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteProjectItem = `-- name: DeleteProjectItem :execrows
 DELETE FROM project_items WHERE project_id = ? AND item_id = ?
 `
@@ -1188,6 +1230,23 @@ func (q *Queries) GetProjectAnyOwner(ctx context.Context, id int64) (Project, er
 		&i.UpdatedAt,
 		&i.Visibility,
 	)
+	return i, err
+}
+
+const getProjectComment = `-- name: GetProjectComment :one
+SELECT id, project_id, user_id FROM project_comments WHERE id = ?
+`
+
+type GetProjectCommentRow struct {
+	ID        int64 `json:"id"`
+	ProjectID int64 `json:"project_id"`
+	UserID    int64 `json:"user_id"`
+}
+
+func (q *Queries) GetProjectComment(ctx context.Context, id int64) (GetProjectCommentRow, error) {
+	row := q.db.QueryRowContext(ctx, getProjectComment, id)
+	var i GetProjectCommentRow
+	err := row.Scan(&i.ID, &i.ProjectID, &i.UserID)
 	return i, err
 }
 
@@ -1698,6 +1757,49 @@ func (q *Queries) ListPhotosMissingThumbs(ctx context.Context) ([]ItemPhoto, err
 			&i.SortOrder,
 			&i.CreatedAt,
 			&i.ThumbKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectComments = `-- name: ListProjectComments :many
+SELECT c.id, c.user_id, c.body, c.created_at, u.display_name AS author_name
+FROM project_comments c JOIN users u ON u.id = c.user_id
+WHERE c.project_id = ? ORDER BY c.created_at, c.id
+`
+
+type ListProjectCommentsRow struct {
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"user_id"`
+	Body       string `json:"body"`
+	CreatedAt  string `json:"created_at"`
+	AuthorName string `json:"author_name"`
+}
+
+func (q *Queries) ListProjectComments(ctx context.Context, projectID int64) ([]ListProjectCommentsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectComments, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectCommentsRow
+	for rows.Next() {
+		var i ListProjectCommentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Body,
+			&i.CreatedAt,
+			&i.AuthorName,
 		); err != nil {
 			return nil, err
 		}

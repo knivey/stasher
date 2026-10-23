@@ -172,6 +172,20 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		}
 		body["notes_log"] = noteList
 	}
+	// comments are the public thread: present in BOTH projections.
+	comments, err := s.q.ListProjectComments(r.Context(), p.ID)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	comList := make([]map[string]any, 0, len(comments))
+	for _, c := range comments {
+		comList = append(comList, map[string]any{
+			"id": c.ID, "author": c.AuthorName, "mine": c.UserID == u.ID,
+			"body": c.Body, "created_at": c.CreatedAt,
+		})
+	}
+	body["comments"] = comList
 	writeJSON(w, http.StatusOK, body)
 }
 

@@ -456,7 +456,8 @@ Facts discovered by the frontend round, kept here so they survive:
 - **Mutating project routes stay owner-only**: `PATCH`/`DELETE`
   `/projects/{id}` and all `/projects/{id}/items[/...]` routes still
   answer `404` for sharees **even on shared projects**. `visibility`
-  itself is only changeable by the owner.
+  itself is only changeable by the owner. (**Exception**: the comments
+  thread below is sharee-writable by design.)
 
 ## Project notes (2026-10-23)
 
@@ -478,3 +479,27 @@ Facts discovered by the frontend round, kept here so they survive:
   `{id, body, created_at}`. The **sharee projection OMITS `notes_log`
   entirely** (absent, not empty/null) — the log is owner-private,
   unlike the project's top-level `notes` field.
+
+## Project comments (2026-10-23)
+
+- `POST /api/v1/projects/{id}/comments` `{body}` — the **public thread**:
+  the owner can always comment (even on a **private** project — a solo
+  thread), and **any logged-in user** can comment when the project is
+  `shared`. Everyone else gets `404` via the shared-view gate (no
+  existence leak). Body semantics are identical to item/project notes:
+  **trimmed**, **1-2000 bytes after the trim** (whitespace-only = empty →
+  `400 validation_error`, message `comment must be 1-2000 characters`).
+  201 returns `{id, author, mine, body, created_at}` — `author` is the
+  commenting user's **display name**, `mine` is `true`.
+- `DELETE /api/v1/projects/{id}/comments/{cid}` — deletion matrix:
+  **the comment's author** or **the project owner**; everyone else —
+  including sharees who can read the thread — gets `404 not_found`
+  (**never 403**). A comment id from a *different* project is also `404`.
+  204 on success; non-numeric `cid` → `400 invalid_id`; absent /
+  already-deleted → `404`.
+- **`GET /api/v1/projects/{id}`** carries a `comments` array in **BOTH**
+  projections (owner and sharee — comments are public), **oldest first**
+  (`ORDER BY created_at, id` — the opposite of the notes ordering:
+  same-second comments tie-break by id ascending, oldest first). Rows:
+  `{id, author, mine, body, created_at}` where `author` is the author's
+  display name and `mine` is relative to the **viewer** of the response.
