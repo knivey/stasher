@@ -133,3 +133,23 @@ PATH; set `chrome_path` (or `STASHER_CHROME_PATH`) to point at a specific
 binary. The chrome path is resolved once at startup — installing chromium
 later requires a restart to pick it up. Without chromium, archive requests
 fail with a hint — everything else works.
+
+## Optional: AI autofill (photo → prefilled item fields)
+
+"Autofill from photos" on the add/edit item form proposes field values
+from the item's photos using an OpenAI-compatible chat-completions
+service — OpenAI, OpenRouter, Groq, or a local ollama/vLLM server. It is
+off by default; enable it with `ai_api_key` + `ai_model` in
+`stasher.yaml` (or `STASHER_AI_API_KEY` / `STASHER_AI_MODEL`):
+
+    ai_api_key: "sk-..."
+    ai_model: "gpt-4o-mini"
+    # ai_base_url: "http://localhost:11434/v1"   # local ollama
+
+An empty `ai_api_key` disables the feature entirely. `ai_model` is
+required when the key is set (no default — a wrong-vendor model name
+errors confusingly). `ai_base_url` overrides the OpenAI default
+(`https://api.openai.com/v1`) — e.g. `http://localhost:11434/v1` for a
+local ollama. **Enabling it means item photos are sent to the configured
+AI service**; pointing `ai_base_url` at a local model keeps them on your
+network.

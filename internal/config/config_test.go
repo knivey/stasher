@@ -151,6 +151,78 @@ func TestLoadBraveAPIKey(t *testing.T) {
 	}
 }
 
+func TestAIAutofillConfig(t *testing.T) {
+	// defaults: key empty (feature disabled), OpenAI base URL, model empty
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AIAPIKey != "" {
+		t.Errorf("AIAPIKey = %q, want empty default", cfg.AIAPIKey)
+	}
+	if cfg.AIBaseURL != "https://api.openai.com/v1" {
+		t.Errorf("AIBaseURL = %q, want https://api.openai.com/v1", cfg.AIBaseURL)
+	}
+	if cfg.AIModel != "" {
+		t.Errorf("AIModel = %q, want empty default", cfg.AIModel)
+	}
+
+	// YAML sets all three; explicit empty base URL still gets the default
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stasher.yaml")
+	os.WriteFile(path, []byte("ai_api_key: yaml-key\nai_base_url: \"\"\nai_model: qwen2.5-vl\n"), 0o644)
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AIAPIKey != "yaml-key" {
+		t.Errorf("AIAPIKey = %q, want YAML value", cfg.AIAPIKey)
+	}
+	if cfg.AIBaseURL != "https://api.openai.com/v1" {
+		t.Errorf("AIBaseURL = %q, want default for empty YAML value", cfg.AIBaseURL)
+	}
+	if cfg.AIModel != "qwen2.5-vl" {
+		t.Errorf("AIModel = %q, want YAML value", cfg.AIModel)
+	}
+
+	// env overrides each
+	os.WriteFile(path, []byte("ai_api_key: yaml-key\nai_base_url: http://localhost:11434/v1\nai_model: qwen2.5-vl\n"), 0o644)
+	t.Setenv("STASHER_AI_API_KEY", "env-key")
+	t.Setenv("STASHER_AI_BASE_URL", "https://openrouter.ai/api/v1")
+	t.Setenv("STASHER_AI_MODEL", "gpt-4o-mini")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AIAPIKey != "env-key" {
+		t.Errorf("AIAPIKey = %q, want env override", cfg.AIAPIKey)
+	}
+	if cfg.AIBaseURL != "https://openrouter.ai/api/v1" {
+		t.Errorf("AIBaseURL = %q, want env override", cfg.AIBaseURL)
+	}
+	if cfg.AIModel != "gpt-4o-mini" {
+		t.Errorf("AIModel = %q, want env override", cfg.AIModel)
+	}
+
+	// empty env falls back to YAML
+	t.Setenv("STASHER_AI_API_KEY", "")
+	t.Setenv("STASHER_AI_BASE_URL", "")
+	t.Setenv("STASHER_AI_MODEL", "")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AIAPIKey != "yaml-key" {
+		t.Errorf("AIAPIKey = %q, want YAML value", cfg.AIAPIKey)
+	}
+	if cfg.AIBaseURL != "http://localhost:11434/v1" {
+		t.Errorf("AIBaseURL = %q, want YAML value", cfg.AIBaseURL)
+	}
+	if cfg.AIModel != "qwen2.5-vl" {
+		t.Errorf("AIModel = %q, want YAML value", cfg.AIModel)
+	}
+}
+
 func TestPurgeAfter(t *testing.T) {
 	trashed := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 

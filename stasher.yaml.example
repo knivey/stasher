@@ -5,7 +5,8 @@
 # Every key can be overridden by environment variables:
 #   STASHER_LISTEN_ADDR, STASHER_BASE_URL, STASHER_DATA_DIR,
 #   STASHER_REGISTRATION, STASHER_LOG_LEVEL, STASHER_TRASH_RETENTION_DAYS,
-#   STASHER_CHROME_PATH, STASHER_BRAVE_API_KEY
+#   STASHER_CHROME_PATH, STASHER_BRAVE_API_KEY,
+#   STASHER_AI_API_KEY, STASHER_AI_BASE_URL, STASHER_AI_MODEL
 
 # Address the server listens on. Behind a reverse proxy (Caddy/nginx),
 # keep this on localhost and proxy to it.
@@ -45,3 +46,15 @@ chrome_path: ""
 # candidate datasheets and returns only URLs that verify as downloadable
 # PDFs; picking one downloads it through the normal fetch endpoint.
 brave_api_key: ""
+
+# Optional: AI autofill ("Autofill from photos" on the add/edit item
+# form) via an OpenAI-compatible chat-completions service. Empty
+# ai_api_key disables the feature (default). ai_model is required when
+# the key is set — there is no default, a wrong-vendor model name
+# errors confusingly. ai_base_url lets you point at OpenRouter, Groq,
+# or a local ollama/vLLM server instead of OpenAI
+# (default https://api.openai.com/v1; ollama http://localhost:11434/v1).
+# Enabling sends item photos to the configured AI service.
+#ai_api_key: ""
+#ai_base_url: "https://api.openai.com/v1"
+#ai_model: ""

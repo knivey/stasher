@@ -23,6 +23,17 @@ type Config struct {
 	// BraveAPIKey is the Brave Search API key for the document finder.
 	// Empty disables document search (the endpoint answers search_disabled).
 	BraveAPIKey string `yaml:"brave_api_key"`
+	// AI autofill ("Autofill from photos" on the add/edit form) talks to
+	// an OpenAI-compatible chat-completions service. AIAPIKey is its API
+	// key; empty (default) disables the feature entirely. AIModel is
+	// required when the key is set — deliberately no default, a
+	// wrong-vendor model name errors confusingly. AIBaseURL points at
+	// OpenAI or any compatible endpoint (OpenRouter, Groq, local
+	// ollama/vLLM); Load fills the OpenAI default when empty. Enabling
+	// sends item photos to the configured service.
+	AIAPIKey  string `yaml:"ai_api_key"`
+	AIBaseURL string `yaml:"ai_base_url"`
+	AIModel   string `yaml:"ai_model"`
 	// TrashRetentionDays is how long trash entries (and their files)
 	// survive before auto-purge. 0 or negative = keep forever.
 	TrashRetentionDays int `yaml:"trash_retention_days"`
@@ -58,11 +69,19 @@ func Load(path string) (Config, error) {
 		"STASHER_LOG_LEVEL":     &cfg.LogLevel,
 		"STASHER_CHROME_PATH":   &cfg.ChromePath,
 		"STASHER_BRAVE_API_KEY": &cfg.BraveAPIKey,
+		"STASHER_AI_API_KEY":    &cfg.AIAPIKey,
+		"STASHER_AI_BASE_URL":   &cfg.AIBaseURL,
+		"STASHER_AI_MODEL":      &cfg.AIModel,
 	}
 	for k, dst := range env {
 		if v, ok := os.LookupEnv(k); ok && v != "" {
 			*dst = v
 		}
+	}
+	// Default the AI base URL last: empty means stock OpenAI wherever it
+	// came from (no config, or an explicit empty yaml/env value).
+	if cfg.AIBaseURL == "" {
+		cfg.AIBaseURL = "https://api.openai.com/v1"
 	}
 	if v, ok := os.LookupEnv("STASHER_TRASH_RETENTION_DAYS"); ok && v != "" {
 		n, err := strconv.Atoi(v)
