@@ -127,12 +127,17 @@ func (s *Server) handleUploadLocationPhoto(w http.ResponseWriter, r *http.Reques
 }
 
 // handleDeleteLocationPhoto clears the location's picture. Idempotent: a
-// location without a picture still answers 204 (a foreign location still
+// location without a picture still answers 204 — without rewriting the row,
+// so a repeat delete leaves updated_at untouched (a foreign location still
 // 404s first — no existence leaks).
 func (s *Server) handleDeleteLocationPhoto(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
 	loc, ok := s.requireOwnedLocation(w, r, u)
 	if !ok {
+		return
+	}
+	if !loc.PhotoKey.Valid { // no picture: skip the write entirely
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if err := s.q.ClearLocationPhoto(r.Context(), dbpkg.ClearLocationPhotoParams{

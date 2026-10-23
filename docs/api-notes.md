@@ -149,8 +149,10 @@ thumbnail (thumb_key follows (sort_order, id)).
 
 A location carries **at most one optional picture** (columns, not a table):
 `photo_key` + derived `photo_thumb_key`, both nullable. Same upload rules
-as item photos (20 MB cap, sniffed `image/*` only, thumb generation that
-degrades to null).
+as item photos (sniffed `image/*` only, thumb generation that degrades to
+null). **Oversize is pinned**: a body over the 20 MB cap (`MaxBytesReader`)
+is rejected as `400 invalid_upload` — exactly what `POST /items/{id}/photos`
+returns for the same oversized payload.
 
 ```
 POST   /api/v1/locations/{id}/photo — multipart field `file`; owner-only,

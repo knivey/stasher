@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"stasher/internal/db"
@@ -45,6 +47,37 @@ func fileOnDisk(t *testing.T, s *Server, key string) bool {
 	}
 	f.Close()
 	return true
+}
+
+// storageFileCount counts regular files under the test server's uploads dir
+// (newTestServer puts storage at <DataDir>/uploads). 0 means nothing was
+// written to disk.
+func storageFileCount(t *testing.T, s *Server) int {
+	t.Helper()
+	n := 0
+	err := filepath.WalkDir(filepath.Join(s.cfg.DataDir, "uploads"),
+		func(_ string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() {
+				n++
+			}
+			return nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// backdateLocation forces a location's updated_at to a fixed past instant so
+// an updated_at bump is assertable despite RFC3339's one-second granularity
+// (same trick as backdateItem).
+func backdateLocation(t *testing.T, s *Server, id int64) {
+	t.Helper()
+	mustExec(t, s, "UPDATE locations SET updated_at = ? WHERE id = ?",
+		"2000-01-01T00:00:00Z", id)
 }
 
 func TestLocationPhotoUploadServeAndGate(t *testing.T) {
@@ -168,6 +201,10 @@ func TestLocationPhotoRejects(t *testing.T) {
 	if resp.StatusCode != http.StatusUnsupportedMediaType {
 		t.Fatalf("non-image = %d, want 415", resp.StatusCode)
 	}
+	// the 415 must not leave bytes on disk
+	if n := storageFileCount(t, s); n != 0 {
+		t.Fatalf("non-image rejection wrote %d file(s) to storage", n)
+	}
 	// empty file -> 400 (mirrors handleUploadPhoto)
 	resp = postFile(t, ts, "/api/v1/locations/"+fmtInt64(locID)+"/photo",
 		"file", "empty.png", nil, owner)
@@ -180,10 +217,14 @@ func TestLocationPhotoRejects(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("foreign location upload = %d, want 404", resp.StatusCode)
 	}
-	// no files leaked for rejected uploads
+	// no files leaked for rejected uploads: neither DB columns set nor
+	// bytes on disk (covers the empty-file 400 and foreign 404 paths too)
 	n := 0
 	if err := s.raw.QueryRow(`SELECT COUNT(*) FROM locations WHERE id = ? AND photo_key IS NOT NULL`, locID).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("rejected upload set photo_key: %v n=%d", err, n)
+	}
+	if n := storageFileCount(t, s); n != 0 {
+		t.Fatalf("rejected uploads left %d file(s) in storage", n)
 	}
 }
 
@@ -272,6 +313,23 @@ func TestLocationPhotoDelete(t *testing.T) {
 	locID := createLocation(t, ts, owner, "Cabinet", nil)
 	foreignID := createLocation(t, ts, other, "Foreign", nil)
 
+	// idempotent no-picture delete: 204 and updated_at UNTOUCHED (the
+	// handler must skip the write, not rewrite the same columns)
+	var fresh struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/locations/"+fmtInt64(locID), nil, owner), &fresh)
+	if r := doJSON(t, ts, "DELETE", "/api/v1/locations/"+fmtInt64(locID)+"/photo", nil, owner); r.StatusCode != http.StatusNoContent {
+		t.Fatalf("no-picture delete = %d, want 204", r.StatusCode)
+	}
+	var freshAfter struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/locations/"+fmtInt64(locID), nil, owner), &freshAfter)
+	if freshAfter.UpdatedAt != fresh.UpdatedAt {
+		t.Fatalf("no-picture delete rewrote updated_at: %s -> %s", fresh.UpdatedAt, freshAfter.UpdatedAt)
+	}
+
 	up := postFile(t, ts, "/api/v1/locations/"+fmtInt64(locID)+"/photo",
 		"file", "c.jpg", jpegBytes(t, 600, 400), owner)
 	if up.StatusCode != http.StatusOK {
@@ -288,8 +346,18 @@ func TestLocationPhotoDelete(t *testing.T) {
 		t.Fatalf("foreign delete = %d, want 404", r.StatusCode)
 	}
 
+	// a delete that DOES remove a picture still bumps updated_at (backdate
+	// first so the bump is assertable despite one-second RFC3339 granularity)
+	backdateLocation(t, s, locID)
 	if r := doJSON(t, ts, "DELETE", "/api/v1/locations/"+fmtInt64(locID)+"/photo", nil, owner); r.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete = %d, want 204", r.StatusCode)
+	}
+	var cleared struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/locations/"+fmtInt64(locID), nil, owner), &cleared)
+	if cleared.UpdatedAt == "2000-01-01T00:00:00Z" {
+		t.Fatal("delete that removed a picture did not bump updated_at")
 	}
 	photoKey, thumbKey := locationPhotoRow(t, s, locID)
 	if photoKey.Valid || thumbKey.Valid {
@@ -305,9 +373,16 @@ func TestLocationPhotoDelete(t *testing.T) {
 		t.Fatalf("deleted photo get = %d, want 404", r.StatusCode)
 	}
 
-	// idempotent: deleting again is still 204
+	// idempotent: deleting again is still 204 and does not touch updated_at
 	if r := doJSON(t, ts, "DELETE", "/api/v1/locations/"+fmtInt64(locID)+"/photo", nil, owner); r.StatusCode != http.StatusNoContent {
 		t.Fatalf("second delete = %d, want 204", r.StatusCode)
+	}
+	var afterRepeat struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/locations/"+fmtInt64(locID), nil, owner), &afterRepeat)
+	if afterRepeat.UpdatedAt != cleared.UpdatedAt {
+		t.Fatalf("repeat delete rewrote updated_at: %s -> %s", cleared.UpdatedAt, afterRepeat.UpdatedAt)
 	}
 }
 
