@@ -118,3 +118,19 @@ one-off).
   marginal value. Reopen if users ask.
 - ~~No thumb-degradation test for project files~~ / ~~byte-cap rune
   split~~ — **done 2026-10-23** (test ported; cap now rune-safe).
+
+## AI autofill (2026-10-23, final review)
+
+- Rate check runs after full body buffering — an authenticated hammerer
+  forces repeated ~80MB buffering before each 429 (ceiling is
+  spec-mandated; moving Allow earlier trades 415-burns for tokens).
+- Multipart temp files (parts >1MB) never RemoveAll'd — repo-wide pattern
+  across all ParseMultipartForm sites; fix repo-wide or never.
+- No-content sentinel branch (`{"choices":[]}` → 400) untested — two-line
+  addition to internal/ai tests.
+- Edit-form originals fetch: `resp.blob()` outside the guarded block (rare
+  mid-read failure toasts unprefixed); `Promise.all` surfaces only the
+  first failure (allSettled + joined message would report all).
+- `truncateUTF8` rune-safety has no direct unit test (ASCII lengths pinned
+  only). Byte-measured clamps vs spec "chars" is deliberate (item
+  validator enforces bytes — prefill must survive create); don't "fix".
