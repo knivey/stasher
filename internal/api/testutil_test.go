@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"stasher/internal/auth"
 	"stasher/internal/config"
 	"stasher/internal/db"
+	"stasher/internal/fetcher"
 	"stasher/internal/files"
 )
 
@@ -50,9 +52,17 @@ func (s *Server) lastUserID(t *testing.T) int64 {
 	return id
 }
 
+// stubChromePath resolves the fetcher package's stub-chrome fixture from
+// this file's location (tests may run from any working directory).
+func stubChromePath() string {
+	_, thisFile, _, _ := runtime.Caller(0) // .../internal/api/testutil_test.go
+	return filepath.Join(filepath.Dir(thisFile), "..", "fetcher", "testdata", "stub-chrome.sh")
+}
+
 // newTestServer returns a Server backed by a fresh temp SQLite DB and a test
 // HTTP server running the real router. mutate (optional) adjusts config before
-// construction (e.g. switch Registration to "invite").
+// construction (e.g. switch Registration to "invite"). The fetch engines use
+// the loopback policy + the stub chrome so tests can fetch real httptest URLs.
 func newTestServer(t *testing.T, mutate func(*config.Config)) (*Server, *httptest.Server) {
 	t.Helper()
 	dir := t.TempDir()
@@ -75,7 +85,9 @@ func newTestServer(t *testing.T, mutate func(*config.Config)) (*Server, *httptes
 	if mutate != nil {
 		mutate(cfg)
 	}
-	s := New(cfg, sqlDB, st)
+	s := New(cfg, sqlDB, st,
+		fetcher.NewDirectEngine(fetcher.LoopbackPolicy()),
+		fetcher.NewArchiveEngine(fetcher.LoopbackPolicy(), stubChromePath()))
 	ts := httptest.NewServer(s.Router())
 	t.Cleanup(ts.Close)
 	return s, ts

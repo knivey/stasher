@@ -19,6 +19,7 @@ import (
 	"stasher/internal/api"
 	"stasher/internal/config"
 	"stasher/internal/db"
+	"stasher/internal/fetcher"
 	"stasher/internal/files"
 	"stasher/internal/webfs"
 )
@@ -86,7 +87,12 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	srv := api.New(&cfg, sqlDB, storage)
+	// engines are wired unconditionally: with no chromium found, archive
+	// jobs fail with an actionable message and direct fetch is unaffected
+	chrome := fetcher.ChromePath(cfg.ChromePath)
+	srv := api.New(&cfg, sqlDB, storage,
+		fetcher.NewDirectEngine(fetcher.PublicPolicy()),
+		fetcher.NewArchiveEngine(fetcher.PublicPolicy(), chrome))
 
 	// sweep trash whose retention window closed while the server was down
 	// (entries trashed while running are swept on GET /trash)

@@ -26,10 +26,11 @@ type itemReq struct {
 	Tags        []string `json:"tags"`
 }
 
-// validProductURL enforces the product_url contract: an http(s) URL of at
-// most 2000 bytes. An unparseable URL or any other scheme is rejected; the
-// scheme check is also what catches schemeless garbage ("not a url").
-func validProductURL(s string) bool {
+// validExternalURL enforces the shared external-URL contract (product_url
+// AND fetch jobs): an http(s) URL of at most 2000 bytes. An unparseable URL
+// or any other scheme is rejected; the scheme check is also what catches
+// schemeless garbage ("not a url").
+func validExternalURL(s string) bool {
 	if len(s) > 2000 {
 		return false
 	}
@@ -201,7 +202,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, r *http.Request) {
 	// before any write
 	var productURL sql.NullString
 	if req.ProductURL != nil && *req.ProductURL != "" {
-		if !validProductURL(*req.ProductURL) {
+		if !validExternalURL(*req.ProductURL) {
 			writeErr(w, http.StatusBadRequest, "validation_error", "product_url must be an http(s) URL of at most 2000 chars")
 			return
 		}
@@ -322,7 +323,7 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.ProductURL != nil && *req.ProductURL != "" { // "" clears, so only non-empty values need validating
-		if !validProductURL(*req.ProductURL) {
+		if !validExternalURL(*req.ProductURL) {
 			writeErr(w, http.StatusBadRequest, "validation_error", "product_url must be an http(s) URL of at most 2000 chars")
 			return
 		}

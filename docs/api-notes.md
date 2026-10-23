@@ -192,6 +192,62 @@ thumbnail (thumb_key follows (sort_order, id)).
   presence/sign) run before the 404 location check, which runs before
   the write.
 
+## External fetch & jobs (2026-10-22)
+
+The server can fetch a URL and store the result as an ordinary item
+document. Two modes:
+
+- **`direct`** — plain HTTP download (datasheet PDFs, images, text).
+  Caps: **25MB body, 30s** per fetch (redirect chains included, max 5 hops).
+- **`archive`** — renders the page to a **full-page PDF** with headless
+  chromium. Caps: **25MB output, 60s** render. Filename is
+  `<host> <YYYY-MM-DD>.pdf` (UTC date). Needs chromium installed/configured
+  (`chrome_path` / `STASHER_CHROME_PATH`); without it the job fails with an
+  actionable message and direct mode is unaffected.
+
+```
+POST /api/v1/items/{id}/fetch  { "url": "...", "mode": "direct"|"archive" }
+→ 202 { "job_id": "..." }
+GET  /api/v1/jobs/{id}
+→ 200 { "status": "running"|"done"|"failed",
+        "error"?: string, "document_id"?: number }
+```
+
+- **Validation** (owner-only route; foreign/absent item → `404` like every
+  owned-item route): `url` must parse as http(s) and be ≤2000 chars
+  (`400 validation_error` — same rule as `product_url`); `mode` must be
+  exactly `direct` or `archive`. Private/loopback targets are rejected by
+  the SSRF policy at fetch time (job → `failed`), not at submit time.
+- **Job JSON omits empty fields**: a running job is just
+  `{"status":"running"}`; failed adds `error`; done adds `document_id`.
+- **Overall job deadline: 90s**, covering the queue wait AND the fetch —
+  poll for at most that long before giving up.
+- **Single-flight**: at most ONE fetch runs at a time server-wide. Extra
+  requests queue in `running` state behind it (they can sit there for a
+  while — a 90s-polling client covers a queue slot too).
+- **In-memory only**: jobs do not survive a restart. A job id that 404s
+  after a restart means "fetch interrupted" — surface it that way, the
+  document was NOT created.
+- **Owner-scoped**: another user's job id → `404 not_found` (no existence
+  leak), same for garbage ids.
+- **Content allowlist (direct)**: `application/pdf`, `image/*`,
+  `text/plain` only (verified by sniffing, not by the response header).
+  HTML pages are rejected — use `archive` for pages. The stored mime is
+  the sniffed type; documents serve like uploads (inline for pdf/image/
+  text).
+- **Security note (archive)**: the SSRF check runs before chromium
+  launches, but chromium re-resolves the host itself and follows its own
+  redirects — those are **NOT policy-rechecked** (check-then-exec
+  limitation, accepted for v1; every fetch is an explicit user action).
+
+### `product_url` on items
+
+- `POST /items` and `PATCH /items/{id}` accept `product_url`: absent =
+  keep (PATCH), `""` = clear (stored NULL), non-empty must be an http(s)
+  URL ≤2000 chars (`400 validation_error`). Returned on item detail
+  (`null` when unset); **list rows never carry it** (detail-only field).
+  Same table as the other nullable PATCH fields above.
+
 ## Frontend notes
 
 Facts discovered by the frontend round, kept here so they survive:

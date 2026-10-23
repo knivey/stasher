@@ -3,12 +3,14 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 
 	"stasher/internal/auth"
 	"stasher/internal/config"
 	dbpkg "stasher/internal/db"
+	"stasher/internal/fetcher"
 	"stasher/internal/files"
 )
 
@@ -23,15 +25,27 @@ type Server struct {
 	loginIP    *auth.Limiter // 10 attempts/min per IP
 	loginAcct  *auth.Limiter // 5 attempts/min per account
 	registerIP *auth.Limiter // 10 registrations/min per IP
+
+	fetchDirect  fetcher.Engine // plain HTTP downloads (nil = fetching disabled)
+	fetchArchive fetcher.Engine // chromium page->PDF (nil = archive disabled)
+
+	jobs     map[string]*jobState // in-memory fetch jobs (never persisted)
+	jobsMu   sync.Mutex
+	fetchSem chan struct{} // cap 1: at most one running fetch server-wide
 }
 
-// New wires the server. This signature is final for the whole plan.
-func New(cfg *config.Config, raw *sql.DB, st *files.Storage) *Server {
+// New wires the server. fetchDirect/fetchArchive may be nil in principle
+// (the fetch endpoint then answers 503) but main always wires both.
+func New(cfg *config.Config, raw *sql.DB, st *files.Storage, fetchDirect, fetchArchive fetcher.Engine) *Server {
 	return &Server{
 		cfg: cfg, q: dbpkg.New(raw), st: st, raw: raw,
-		loginIP:    auth.NewLimiter(10, 10),
-		loginAcct:  auth.NewLimiter(5, 5),
-		registerIP: auth.NewLimiter(10, 10),
+		loginIP:      auth.NewLimiter(10, 10),
+		loginAcct:    auth.NewLimiter(5, 5),
+		registerIP:   auth.NewLimiter(10, 10),
+		fetchDirect:  fetchDirect,
+		fetchArchive: fetchArchive,
+		jobs:         map[string]*jobState{},
+		fetchSem:     make(chan struct{}, 1),
 	}
 }
 
@@ -83,6 +97,8 @@ func (s *Server) Router() chi.Router {
 			r.Get("/items/{id}", s.handleGetItem)
 			r.Patch("/items/{id}", s.handleUpdateItem)
 			r.Delete("/items/{id}", s.handleDeleteItem)
+			r.Post("/items/{id}/fetch", s.handleItemFetch)
+			r.Get("/jobs/{id}", s.handleGetJob)
 			r.Post("/items/{id}/photos", s.handleUploadPhoto)
 			r.Patch("/items/{id}/photos/{photoId}", s.handlePatchPhoto)
 			r.Delete("/items/{id}/photos/{photoId}", s.handleDeletePhoto)
