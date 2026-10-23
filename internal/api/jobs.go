@@ -28,13 +28,18 @@ const jobTTL = time.Hour
 // jobState is one in-memory fetch job. Jobs are never persisted: a restart
 // abandons running jobs (client polling then 404s → "fetch interrupted").
 type jobState struct {
-	id      string
-	userID  int64
-	itemID  int64
-	status  string // running | done | failed
-	err     string
-	docID   int64
-	created time.Time
+	id     string
+	userID int64
+	kind   string // "item-doc" | "bookmark-archive"
+	itemID int64
+	// bookmark-archive target (kind == "bookmark-archive")
+	bookmarkProject int64
+	bookmarkID      int64
+	title           string
+	status          string // running | done | failed
+	err             string
+	docID           int64
+	created         time.Time
 }
 
 // newJobID: 16 crypto/rand bytes, URL-safe, unambiguous in paths.
@@ -99,7 +104,7 @@ func (s *Server) handleItemFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	j := &jobState{
-		id: id, userID: u.ID, itemID: item.ID,
+		id: id, userID: u.ID, kind: "item-doc", itemID: item.ID,
 		status: "running", created: time.Now(),
 	}
 	s.jobsMu.Lock()
@@ -116,9 +121,10 @@ func (s *Server) handleItemFetch(w http.ResponseWriter, r *http.Request) {
 }
 
 // runJob executes one fetch job: single-flight (one fetch server-wide, later
-// jobs queue in "running" state), fetch, then store the result as an
-// ordinary item document. Any failure marks the job failed and touches
-// nothing — the item row and its existing documents stay clean.
+// jobs queue in "running" state), fetch, then store the result — as an
+// ordinary item document (item-doc) or as a bookmark's archived page
+// (bookmark-archive). Any failure marks the job failed and touches nothing:
+// the item/bookmark and their existing attachments stay clean.
 func (s *Server) runJob(base context.Context, j *jobState, eng fetcher.Engine, rawURL string) {
 	ctx, cancel := context.WithTimeout(base, jobDeadline)
 	defer cancel()
@@ -136,7 +142,7 @@ func (s *Server) runJob(base context.Context, j *jobState, eng fetcher.Engine, r
 		s.failJob(j, err.Error())
 		return
 	}
-	// store like an upload: files pipeline + item_documents row. The write
+	// store like an upload: files pipeline + the kind's row. The write
 	// runs past any fetch deadline pressure, hence WithoutCancel.
 	storeCtx := context.WithoutCancel(ctx)
 	key, size, err := s.st.Save(bytes.NewReader(res.Body), extForContent(res.ContentType))
@@ -144,23 +150,38 @@ func (s *Server) runJob(base context.Context, j *jobState, eng fetcher.Engine, r
 		s.failJob(j, "could not store fetched file")
 		return
 	}
-	doc, err := s.q.AddItemDocument(storeCtx, dbpkg.AddItemDocumentParams{
-		ItemID: j.itemID, StorageKey: key, Filename: sanitizeFilename(res.Filename),
-		MimeType: res.ContentType, SizeBytes: size,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	})
-	if err != nil {
-		// row insert failed: roll back the file we already saved
-		if derr := s.st.Delete(key); derr != nil {
-			slog.Warn("file delete failed", "key", key, "err", derr)
+	switch j.kind {
+	case "item-doc":
+		doc, err := s.q.AddItemDocument(storeCtx, dbpkg.AddItemDocumentParams{
+			ItemID: j.itemID, StorageKey: key, Filename: sanitizeFilename(res.Filename),
+			MimeType: res.ContentType, SizeBytes: size,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		})
+		if err != nil {
+			// row insert failed: roll back the file we already saved
+			if derr := s.st.Delete(key); derr != nil {
+				slog.Warn("file delete failed", "key", key, "err", derr)
+			}
+			s.failJob(j, "could not attach document")
+			return
 		}
-		s.failJob(j, "could not attach document")
-		return
+		s.jobsMu.Lock()
+		j.status, j.docID = "done", doc.ID
+		s.jobsMu.Unlock()
+	case "bookmark-archive":
+		if err := s.completeBookmarkArchive(storeCtx, j, key, size); err != nil {
+			// nothing was linked (or the link itself failed and was rolled
+			// back): the just-saved bytes are an orphan — remove them
+			if derr := s.st.Delete(key); derr != nil {
+				slog.Warn("file delete failed", "key", key, "err", derr)
+			}
+			s.failJob(j, "could not attach archive")
+			return
+		}
+		s.jobsMu.Lock()
+		j.status = "done"
+		s.jobsMu.Unlock()
 	}
-	s.jobsMu.Lock()
-	j.status = "done"
-	j.docID = doc.ID
-	s.jobsMu.Unlock()
 }
 
 func (s *Server) failJob(j *jobState, msg string) {

@@ -2682,6 +2682,20 @@ func (q *Queries) ReparentChildren(ctx context.Context, arg ReparentChildrenPara
 	return err
 }
 
+const setBookmarkArchive = `-- name: SetBookmarkArchive :exec
+UPDATE project_bookmarks SET archived_file_id = ? WHERE id = ?
+`
+
+type SetBookmarkArchiveParams struct {
+	ArchivedFileID sql.NullInt64 `json:"archived_file_id"`
+	ID             int64         `json:"id"`
+}
+
+func (q *Queries) SetBookmarkArchive(ctx context.Context, arg SetBookmarkArchiveParams) error {
+	_, err := q.db.ExecContext(ctx, setBookmarkArchive, arg.ArchivedFileID, arg.ID)
+	return err
+}
+
 const setItemPhotoThumb = `-- name: SetItemPhotoThumb :execrows
 UPDATE item_photos SET thumb_key = ? WHERE id = ?
 `

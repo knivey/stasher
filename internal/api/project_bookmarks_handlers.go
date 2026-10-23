@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -119,6 +120,79 @@ func (s *Server) handlePatchProjectBookmark(w http.ResponseWriter, r *http.Reque
 	}
 	bm, _ = s.q.GetProjectBookmark(r.Context(), dbpkg.GetProjectBookmarkParams{ID: bid, ProjectID: p.ID})
 	writeJSON(w, http.StatusOK, projectBookmarkJSON(bm, dbpkg.ListProjectBookmarksRow{}))
+}
+
+// completeBookmarkArchive stores the fetched PDF as a project file and links
+// it to the bookmark, replacing (and deleting) any previous archive.
+func (s *Server) completeBookmarkArchive(ctx context.Context, j *jobState, key string, size int64) error {
+	bm, err := s.q.GetProjectBookmark(ctx, dbpkg.GetProjectBookmarkParams{ID: j.bookmarkID, ProjectID: j.bookmarkProject})
+	if err != nil {
+		return err // bookmark vanished mid-job: caller deletes the stored file
+	}
+	file, err := s.q.AddProjectFile(ctx, dbpkg.AddProjectFileParams{
+		ProjectID: j.bookmarkProject, StorageKey: key,
+		Filename: sanitizeFilename(j.title) + ".pdf", MimeType: "application/pdf",
+		SizeBytes: size, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.q.SetBookmarkArchive(ctx, dbpkg.SetBookmarkArchiveParams{ArchivedFileID: sqlNullInt64(file.ID), ID: bm.ID}); err != nil {
+		s.q.DeleteProjectFile(ctx, dbpkg.DeleteProjectFileParams{ID: file.ID, ProjectID: j.bookmarkProject})
+		s.deleteFileBytes(key)
+		return err
+	}
+	if bm.ArchivedFileID.Valid { // re-archive: retire the previous PDF
+		old, err := s.q.GetProjectFile(ctx, dbpkg.GetProjectFileParams{ID: bm.ArchivedFileID.Int64, ProjectID: j.bookmarkProject})
+		if err == nil {
+			if _, err := s.q.DeleteProjectFile(ctx, dbpkg.DeleteProjectFileParams{ID: old.ID, ProjectID: j.bookmarkProject}); err == nil {
+				s.deleteFileBytes(old.StorageKey)
+			}
+		}
+	}
+	return nil
+}
+
+// handleArchiveBookmark queues an archive job (POST
+// /projects/{id}/bookmarks/{bid}/archive). Owner-only; 404 for sharees even
+// on shared projects (spec §6).
+func (s *Server) handleArchiveBookmark(w http.ResponseWriter, r *http.Request) {
+	u, _ := currentUser(r.Context())
+	p, ok := s.requireOwnedProject(w, r, u)
+	if !ok {
+		return
+	}
+	bid, err := strconv.ParseInt(chi.URLParam(r, "bid"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid bookmark id")
+		return
+	}
+	bm, err := s.q.GetProjectBookmark(r.Context(), dbpkg.GetProjectBookmarkParams{ID: bid, ProjectID: p.ID})
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "bookmark not found")
+		return
+	}
+	if s.fetchArchive == nil {
+		writeErr(w, http.StatusServiceUnavailable, "fetching_disabled", "archiving is not available on this server")
+		return
+	}
+	id, err := newJobID()
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	j := &jobState{
+		id: id, userID: u.ID, kind: "bookmark-archive",
+		bookmarkProject: p.ID, bookmarkID: bm.ID, title: bm.Title,
+		status: "running", created: time.Now(),
+	}
+	s.jobsMu.Lock()
+	pruneJobsLocked(s.jobs, time.Now())
+	s.jobs[id] = j
+	s.jobsMu.Unlock()
+	// background lifecycle like handleItemFetch: the job outlives the 202
+	go s.runJob(context.Background(), j, s.fetchArchive, bm.Url)
+	writeJSON(w, http.StatusAccepted, map[string]any{"job_id": id})
 }
 
 func (s *Server) handleDeleteProjectBookmark(w http.ResponseWriter, r *http.Request) {

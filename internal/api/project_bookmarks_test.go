@@ -4,8 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"stasher/internal/config"
+	"stasher/internal/db"
+	"stasher/internal/files"
 )
 
 func TestProjectBookmarksCRUD(t *testing.T) {
@@ -87,5 +92,207 @@ func TestProjectBookmarksCRUD(t *testing.T) {
 	}
 	if r := doJSON(t, ts, "DELETE", "/api/v1/projects/"+pid+"/bookmarks/"+fmtInt64(bm.ID), nil, owner); r.StatusCode != http.StatusNotFound {
 		t.Fatalf("double delete = %d", r.StatusCode)
+	}
+}
+
+// --- Opt-in bookmark archiving (generalized fetch jobs) ---
+
+// serveArchiveFailure is an httptest target whose URL makes the (stubbed)
+// archive engine fail: the fetcher suite's stub-chrome.sh emits an over-cap
+// (26MB) PDF when the URL carries ?emit_big=1, which the engine rejects
+// against its 25MB output cap (same fixture mechanism archive_test.go uses).
+// The target body itself is irrelevant — the stub never reads it.
+func serveArchiveFailure(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestBookmarkArchiveJob(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	owner := registerUser(t, ts, "arch1@test.dev", "longpassword1")
+	sharee := registerUser(t, ts, "arch2@test.dev", "longpassword1")
+	target := servePDF(t) // content irrelevant: the stub chrome renders the page
+
+	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "A", "visibility": "shared"}, owner)
+	var proj struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &proj)
+	pid := fmtInt64(proj.ID)
+	resp = doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks",
+		map[string]any{"url": target.URL, "title": "Build Log"}, owner)
+	var bm struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &bm)
+
+	// sharee cannot archive (owner-only even on shared projects)
+	if r := doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks/"+fmtInt64(bm.ID)+"/archive", nil, sharee); r.StatusCode != http.StatusNotFound {
+		t.Fatalf("sharee archive = %d, want 404", r.StatusCode)
+	}
+
+	// owner archives: 202 → poll → done → archived_file populated
+	r := doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks/"+fmtInt64(bm.ID)+"/archive", nil, owner)
+	if r.StatusCode != http.StatusAccepted {
+		t.Fatalf("archive = %d", r.StatusCode)
+	}
+	var job struct {
+		JobID string `json:"job_id"`
+	}
+	decodeBody(t, r, &job)
+	if done := waitJob(t, ts, owner, job.JobID); done.Status != "done" {
+		t.Fatalf("archive job = %+v, want done", done)
+	}
+
+	var detail struct {
+		Bookmarks []struct {
+			Title        string `json:"title"`
+			ArchivedFile *struct {
+				Filename   string `json:"filename"`
+				MimeType   string `json:"mime_type"`
+				StorageKey string `json:"storage_key"`
+			} `json:"archived_file"`
+		} `json:"bookmarks"`
+		Files []any `json:"files"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/projects/"+pid, nil, owner), &detail)
+	if len(detail.Bookmarks) != 1 || detail.Bookmarks[0].ArchivedFile == nil {
+		t.Fatalf("archived_file missing: %+v", detail.Bookmarks)
+	}
+	af := detail.Bookmarks[0].ArchivedFile
+	if af.Filename != "Build Log.pdf" || af.MimeType != "application/pdf" {
+		t.Fatalf("archived file = %+v", af)
+	}
+	// the archive is an ordinary project file — it shows in materials
+	if len(detail.Files) != 1 {
+		t.Fatalf("files = %d, want 1", len(detail.Files))
+	}
+	oldKey := af.StorageKey
+
+	// re-archive: a NEW row links, the OLD bytes are gone
+	r = doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks/"+fmtInt64(bm.ID)+"/archive", nil, owner)
+	if r.StatusCode != http.StatusAccepted {
+		t.Fatalf("re-archive = %d", r.StatusCode)
+	}
+	var job2 struct {
+		JobID string `json:"job_id"`
+	}
+	decodeBody(t, r, &job2)
+	if done := waitJob(t, ts, owner, job2.JobID); done.Status != "done" {
+		t.Fatalf("re-archive job = %+v, want done", done)
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/projects/"+pid, nil, owner), &detail)
+	newKey := detail.Bookmarks[0].ArchivedFile.StorageKey
+	if newKey == oldKey {
+		t.Fatalf("re-archive reused key %q", newKey)
+	}
+	if len(detail.Files) != 1 {
+		t.Fatalf("files after re-archive = %d, want 1 (old row retired)", len(detail.Files))
+	}
+	if r := getURL(t, ts, oldKey, owner); r.StatusCode != http.StatusNotFound {
+		r.Body.Close()
+		t.Fatalf("old archive still served: %d", r.StatusCode)
+	} else {
+		r.Body.Close()
+	}
+}
+
+func TestBookmarkArchiveFailureLeavesClean(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	owner := registerUser(t, ts, "arch3@test.dev", "longpassword1")
+	// a target the (stubbed) archive engine fails on: ?emit_big=1 trips the
+	// stub's over-cap emission (see serveArchiveFailure above)
+	target := serveArchiveFailure(t)
+	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "AF"}, owner)
+	var proj struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &proj)
+	pid := fmtInt64(proj.ID)
+	resp = doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks",
+		map[string]any{"url": target.URL + "/page?emit_big=1", "title": "Broken"}, owner)
+	var bm struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &bm)
+
+	r := doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks/"+fmtInt64(bm.ID)+"/archive", nil, owner)
+	if r.StatusCode != http.StatusAccepted {
+		t.Fatalf("archive = %d", r.StatusCode)
+	}
+	var job struct {
+		JobID string `json:"job_id"`
+	}
+	decodeBody(t, r, &job)
+	jobStatus := waitJob(t, ts, owner, job.JobID)
+	if jobStatus.Status != "failed" {
+		t.Fatalf("job = %+v, want failed", jobStatus)
+	}
+
+	// bookmark untouched: archived_file stays null, files list stays empty
+	var detail struct {
+		Bookmarks []struct {
+			ArchivedFile any `json:"archived_file"`
+		} `json:"bookmarks"`
+		Files []any `json:"files"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/projects/"+pid, nil, owner), &detail)
+	if len(detail.Bookmarks) != 1 || detail.Bookmarks[0].ArchivedFile != nil {
+		t.Fatalf("bookmark after failed archive: %+v", detail.Bookmarks)
+	}
+	if len(detail.Files) != 0 {
+		t.Fatalf("orphan files after failed archive: %d", len(detail.Files))
+	}
+}
+
+// TestBookmarkArchiveDisabledWhenUnwired: without the archive engine the
+// endpoint answers 503 fetching_disabled instead of queueing a job that can
+// never run (mirrors TestFetchDisabledWhenUnwired for the item route).
+func TestBookmarkArchiveDisabledWhenUnwired(t *testing.T) {
+	dir := t.TempDir()
+	sqlDB, err := db.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB.Close() })
+	if err := db.Migrate(sqlDB); err != nil {
+		t.Fatal(err)
+	}
+	st, err := files.New(filepath.Join(dir, "uploads"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(&config.Config{DataDir: dir}, sqlDB, st, nil, nil, nil)
+	ts := httptest.NewServer(s.Router())
+	t.Cleanup(ts.Close)
+	cookie := registerUser(t, ts, "unwired-arch@test.dev", "longpassword1")
+
+	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "U"}, cookie)
+	var proj struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &proj)
+	pid := fmtInt64(proj.ID)
+	resp = doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks",
+		map[string]any{"url": "https://example.com/x"}, cookie)
+	var bm struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &bm)
+
+	r := doJSON(t, ts, "POST", "/api/v1/projects/"+pid+"/bookmarks/"+fmtInt64(bm.ID)+"/archive", nil, cookie)
+	if r.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unwired archive = %d, want 503", r.StatusCode)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeBody(t, r, &body)
+	if body.Error.Code != "fetching_disabled" {
+		t.Fatalf("code = %q, want fetching_disabled", body.Error.Code)
 	}
 }

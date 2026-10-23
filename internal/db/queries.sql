@@ -410,6 +410,9 @@ FROM project_bookmarks b
 LEFT JOIN project_files f ON f.id = b.archived_file_id
 WHERE b.project_id = ? ORDER BY b.created_at, b.id;
 
+-- name: SetBookmarkArchive :exec
+UPDATE project_bookmarks SET archived_file_id = ? WHERE id = ?;
+
 -- name: CreateItemLedger :one
 INSERT INTO item_ledger (item_id, user_id, delta, resulting_qty, kind, project_id, note, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)

@@ -568,3 +568,32 @@ DELETE /api/v1/projects/{id}/bookmarks/{bid} — 204; absent/foreign →
   archived_file}` where `archived_file` is a project-file row shape
   (`{id, storage_key, thumb_key, filename, mime_type, size_bytes,
   created_at}`) or **null** until a bookmark has been archived.
+
+## Bookmark archiving (2026-10-23)
+
+`POST /api/v1/projects/{id}/bookmarks/{bid}/archive` snapshots the bookmark's
+page as a PDF, reusing the item-fetch job machinery (same `GET /jobs/{id}`
+polling, 90s deadline, single-flight, in-memory-only, owner-scoped jobs).
+
+- **Owner-only**: sharees and strangers get `404 not_found`, even on shared
+  projects (spec §6) — same as every other bookmark mutation. Non-numeric
+  `bid` → `400 invalid_id`; absent/foreign bookmark → `404 not_found`.
+- **Chromium required**: with no archive engine wired (no chromium found or
+  configured) → `503 fetching_disabled`. The check runs AFTER the bookmark
+  lookup, so a missing bookmark 404s regardless of server config (feature
+  state is not probeable through someone else's bookmark).
+- **`202 {job_id}`** on success. Done bookmark jobs carry **no
+  `document_id`** (that key is item-fetch only) — re-fetch the project to
+  see the archive.
+- **Completion stores an ordinary `project_files` row** (`application/pdf`,
+  filename `<sanitized bookmark title>.pdf`, path-stripped) and links it via
+  the bookmark's `archived_file_id`. The archive therefore ALSO appears in
+  the project's `files` (materials) list, and `bookmarks[].archived_file`
+  populates on `GET /projects/{id}`.
+- **Re-archive replaces**: a NEW file row is linked first, THEN the previous
+  archive row and its bytes are deleted — storage keys never repeat, and at
+  most one archive per bookmark exists at any time.
+- **Failure is invisible**: a failed job (dead host, SSRF rejection, over
+  the 25MB render cap, chromium missing, bookmark deleted mid-job) leaves
+  the bookmark and any previous archive completely untouched — no
+  `archived_file` appears, no orphan `project_files` rows remain.

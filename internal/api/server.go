@@ -143,6 +143,7 @@ func (s *Server) Router() chi.Router {
 			r.Post("/projects/{id}/files", s.handleUploadProjectFile)
 			r.Delete("/projects/{id}/files/{fid}", s.handleDeleteProjectFile)
 			r.Post("/projects/{id}/bookmarks", s.handleAddProjectBookmark)
+			r.Post("/projects/{id}/bookmarks/{bid}/archive", s.handleArchiveBookmark)
 			r.Patch("/projects/{id}/bookmarks/{bid}", s.handlePatchProjectBookmark)
 			r.Delete("/projects/{id}/bookmarks/{bid}", s.handleDeleteProjectBookmark)
 
