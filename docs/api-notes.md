@@ -378,6 +378,11 @@ POST /api/v1/autofill — multipart, each image one "files" FILE part
   non-2xx/timeout/oversized response, or an unparseable response envelope
   (200 with a non-JSON body); GENERIC message, the provider's body is
   never echoed).
+- **Provider call**: requests send `max_completion_tokens` (4000) and, on
+  a 400, retry once with legacy `max_tokens` (older OpenAI-compatible
+  servers know only the old name; any other status fails immediately).
+  Provider error-body details (truncated) appear in SERVER LOGS ONLY —
+  never in client responses.
 - **Clamps, not rejections** (AI output is clamped, never a 4xx): caps are
   measured in bytes, and truncation never splits a UTF-8 character. The
   name (200) and tags (100/entry) caps match the item validator so a

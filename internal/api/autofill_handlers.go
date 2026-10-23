@@ -118,7 +118,15 @@ func (s *Server) handleAutofill(w http.ResponseWriter, r *http.Request) {
 				"AI provider returned an unparseable response")
 			return
 		}
-		slog.Warn("ai autofill failed", "err", err)
+		// *ai.HTTPError carries a truncated provider-body detail: log it
+		// server-side (operators need the real 400 reason), but it never
+		// reaches the client — the 502 message below stays generic.
+		attrs := []any{"err", err}
+		var httpErr *ai.HTTPError
+		if errors.As(err, &httpErr) {
+			attrs = append(attrs, "provider_detail", httpErr.ErrorDetail())
+		}
+		slog.Warn("ai autofill failed", attrs...)
 		writeErr(w, http.StatusBadGateway, "ai_upstream_error", "AI provider request failed")
 		return
 	}

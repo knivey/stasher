@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Fields is one AI-proposed set of item values. Every field is optional:
@@ -43,14 +44,42 @@ const DefaultBaseURL = "https://api.openai.com/v1"
 // never string-compare error text.
 var ErrUnparseable = errors.New("ai: unparseable model response")
 
+// HTTPError is a non-2xx answer from the provider. Error() stays generic
+// (status only — no body) because the string is client-safe; the
+// whitespace-collapsed, size-capped provider body excerpt in Detail is
+// FOR LOGGING ONLY (via ErrorDetail): provider bodies may leak account
+// details and must never reach a client response.
+type HTTPError struct {
+	Status int
+	Detail string
+}
+
+func (e *HTTPError) Error() string {
+	if text := http.StatusText(e.Status); text != "" {
+		return fmt.Sprintf("ai: provider returned %d %s", e.Status, text)
+	}
+	return fmt.Sprintf("ai: provider returned status %d", e.Status)
+}
+
+// ErrorDetail exposes the truncated provider body for server-side logs.
+func (e *HTTPError) ErrorDetail() string { return e.Detail }
+
 const (
 	// requestTimeout bounds one autofill call end to end.
 	requestTimeout = 45 * time.Second
-	// maxTokens bounds the completion (~1000 per spec: the JSON object
-	// is tiny; the cap keeps a runaway model cheap).
-	maxTokens = 1000
+	// maxCompletionTokens bounds the completion budget. Reasoning models
+	// spend hidden reasoning tokens against the same budget, so the old
+	// ~1000 cap risked burning the whole budget before any content came
+	// out (empty/truncated JSON); 4000 leaves headroom while staying
+	// bounded.
+	maxCompletionTokens = 4000
 	// maxResponse caps the provider response body read (64KB).
 	maxResponse = 64 << 10
+	// maxErrorBody caps how much of a non-2xx provider body is read for
+	// the log-only HTTPError detail (2KB).
+	maxErrorBody = 2 << 10
+	// maxErrorDetail caps the collapsed detail string (bytes).
+	maxErrorDetail = 512
 )
 
 // systemPrompt and userPrompt are fixed server-side instruction text.
@@ -109,7 +138,9 @@ func (c *Client) Enabled() bool {
 // re-encode; mimes are sniffed by the caller, one per image) to the
 // chat-completions endpoint and returns the model's proposed fields.
 // Every field is optional in the response; all errors are wrapped with
-// an "ai:" prefix, and provider error bodies are never included.
+// an "ai:" prefix. Non-2xx answers come back as *HTTPError whose Error()
+// is status-only; the provider body excerpt is exposed solely through
+// ErrorDetail for server-side logging.
 func (c *Client) Autofill(ctx context.Context, images [][]byte, mimes []string) (Fields, error) {
 	if len(images) != len(mimes) {
 		return Fields{}, fmt.Errorf("ai: got %d images but %d mimes", len(images), len(mimes))
@@ -125,19 +156,54 @@ func (c *Client) Autofill(ctx context.Context, images [][]byte, mimes []string) 
 		parts = append(parts, contentPart{Type: "image_url", ImageURL: &imageURL{URL: url}})
 	}
 	parts = append(parts, contentPart{Type: "text", Text: userPrompt})
+	msgs := []wireMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: parts},
+	}
 
+	// Compatibility ladder, rung 1: the modern parameter. OpenAI's newer
+	// reasoning models REJECT max_tokens outright (400 "unsupported
+	// parameter") — max_completion_tokens is the Chat Completions
+	// parameter and OpenAI maps it across all current models — so it
+	// goes first.
+	budget := maxCompletionTokens
 	body, err := json.Marshal(chatRequest{
-		Model: c.Model,
-		Messages: []wireMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: parts},
-		},
-		MaxTokens: maxTokens,
+		Model:               c.Model,
+		Messages:            msgs,
+		MaxCompletionTokens: &budget,
 	})
 	if err != nil {
 		return Fields{}, fmt.Errorf("ai: encoding request: %w", err)
 	}
+	fields, err := c.complete(ctx, body)
+	if err == nil {
+		return fields, nil
+	}
 
+	// Rung 2, only on 400: some older OpenAI-compatible servers (certain
+	// ollama/vLLM builds) know ONLY legacy max_tokens and 400 on the new
+	// name. A 400 is the one status that can mean "unrecognized
+	// parameter", so retry ONCE with max_tokens — same request otherwise.
+	// Any other status means something unrelated to the parameter name
+	// and fails immediately. If the retry also fails, its error wins.
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) && httpErr.Status == http.StatusBadRequest {
+		body, err := json.Marshal(chatRequest{
+			Model:     c.Model,
+			Messages:  msgs,
+			MaxTokens: &budget,
+		})
+		if err != nil {
+			return Fields{}, fmt.Errorf("ai: encoding request: %w", err)
+		}
+		return c.complete(ctx, body)
+	}
+	return Fields{}, err
+}
+
+// complete performs one chat-completions round trip with the given
+// serialized request body and parses the answer into Fields.
+func (c *Client) complete(ctx context.Context, body []byte) (Fields, error) {
 	url := strings.TrimSuffix(c.BaseURL, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -153,9 +219,17 @@ func (c *Client) Autofill(ctx context.Context, images [][]byte, mimes []string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		// Status only — the provider's body may leak account details;
-		// the HTTP handler maps this to a generic 502 message.
-		return Fields{}, fmt.Errorf("ai: provider returned %s", resp.Status)
+		// Bounded read of the provider body for the LOG-ONLY detail
+		// (captured even on the pre-fallback attempt, so a first-rung
+		// 400 is diagnosable when the retry succeeds); the returned
+		// error's client-facing string stays status-only because the
+		// body may leak account details — the HTTP handler maps it to a
+		// generic 502 message.
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+		return Fields{}, &HTTPError{
+			Status: resp.StatusCode,
+			Detail: collapseDetail(string(detail)),
+		}
 	}
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
@@ -184,6 +258,21 @@ func (c *Client) Autofill(ctx context.Context, images [][]byte, mimes []string) 
 		return Fields{}, fmt.Errorf("%w: %w", ErrUnparseable, err)
 	}
 	return Fields(f), nil
+}
+
+// collapseDetail squeezes whitespace runs to single spaces and caps the
+// result at maxErrorDetail bytes (never splitting a UTF-8 rune) so
+// provider error bodies stay log-friendly.
+func collapseDetail(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= maxErrorDetail {
+		return s
+	}
+	cut := maxErrorDetail
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // stripFences trims whitespace and strips one pair of markdown code
@@ -222,9 +311,13 @@ type wireMessage struct {
 }
 
 type chatRequest struct {
-	Model     string        `json:"model"`
-	Messages  []wireMessage `json:"messages"`
-	MaxTokens int           `json:"max_tokens"`
+	Model    string        `json:"model"`
+	Messages []wireMessage `json:"messages"`
+	// Exactly one token-budget field is set per request: the modern
+	// max_completion_tokens on the first attempt, legacy max_tokens on
+	// the one-shot 400 fallback for older OpenAI-compatible servers.
+	MaxCompletionTokens *int `json:"max_completion_tokens,omitempty"`
+	MaxTokens           *int `json:"max_tokens,omitempty"`
 	// No response_format field: not universal across OpenAI-compatible
 	// providers; the prompt demands strict JSON instead.
 }

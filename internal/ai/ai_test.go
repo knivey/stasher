@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -31,14 +32,45 @@ func contentReply(w http.ResponseWriter, content string) {
 }
 
 // reqEnvelope captures the parts of the outgoing request the tests pin.
+// Both token-budget fields are pointers so "absent" is distinguishable
+// from a value (the ladder sends exactly one per request).
 type reqEnvelope struct {
-	Model          string          `json:"model"`
-	MaxTokens      int             `json:"max_tokens"`
-	ResponseFormat json.RawMessage `json:"response_format"`
-	Messages       []struct {
+	Model               string          `json:"model"`
+	MaxCompletionTokens *int            `json:"max_completion_tokens"`
+	MaxTokens           *int            `json:"max_tokens"`
+	ResponseFormat      json.RawMessage `json:"response_format"`
+	Messages            []struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	} `json:"messages"`
+}
+
+// envelopeLog records every request envelope a fake provider receives
+// (the ladder tests assert on the full request sequence).
+type envelopeLog struct {
+	mu       sync.Mutex
+	requests []reqEnvelope
+}
+
+// add reads and records r's envelope, returning it for the handler to
+// branch on.
+func (l *envelopeLog) add(r *http.Request) reqEnvelope {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return reqEnvelope{}
+	}
+	var env reqEnvelope
+	_ = json.Unmarshal(body, &env)
+	l.mu.Lock()
+	l.requests = append(l.requests, env)
+	l.mu.Unlock()
+	return env
+}
+
+func (l *envelopeLog) snapshot() []reqEnvelope {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]reqEnvelope(nil), l.requests...)
 }
 
 type reqContentPart struct {
@@ -134,8 +166,11 @@ func TestAutofillHappyPath(t *testing.T) {
 	if got.Model != "test-model" {
 		t.Errorf("model = %q", got.Model)
 	}
-	if got.MaxTokens <= 0 || got.MaxTokens > 1000 {
-		t.Errorf("max_tokens = %d, want 1..1000", got.MaxTokens)
+	if got.MaxCompletionTokens == nil || *got.MaxCompletionTokens != 4000 {
+		t.Errorf("max_completion_tokens = %v, want 4000", got.MaxCompletionTokens)
+	}
+	if got.MaxTokens != nil {
+		t.Errorf("max_tokens = %d present — the modern parameter is sent on the first attempt", *got.MaxTokens)
 	}
 	if len(got.ResponseFormat) != 0 {
 		t.Errorf("response_format present (%s) — not universal across providers", got.ResponseFormat)
@@ -249,6 +284,15 @@ func TestAutofillProviderError(t *testing.T) {
 	if strings.Contains(err.Error(), "SUPER-SECRET") {
 		t.Errorf("error %q leaks provider response body", err)
 	}
+	// The body IS captured — but only for logs (ErrorDetail), never in
+	// the client-facing Error() string.
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error %v is not *HTTPError", err)
+	}
+	if !strings.Contains(httpErr.ErrorDetail(), "SUPER-SECRET") {
+		t.Errorf("ErrorDetail = %q, want the provider body excerpt", httpErr.ErrorDetail())
+	}
 }
 
 func TestAutofillMalformedContent(t *testing.T) {
@@ -299,5 +343,168 @@ func TestAutofillContextCancelled(t *testing.T) {
 	_, err := c.Autofill(ctx, [][]byte{testPNG(1)}, []string{"image/png"})
 	if err == nil {
 		t.Fatal("Autofill succeeded, want error on cancelled context")
+	}
+}
+
+// The compatibility ladder: a provider that 400s the modern
+// max_completion_tokens parameter (older OpenAI-compatible servers, e.g.
+// some ollama/vLLM builds, only know legacy max_tokens) gets ONE retry
+// with max_tokens — same request otherwise — and the answer flows through.
+func TestAutofillMaxTokensFallback(t *testing.T) {
+	var log envelopeLog
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		env := log.add(r)
+		if env.MaxCompletionTokens != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"max_completion_tokens is not supported"}}`)
+			return
+		}
+		contentReply(w, `{"name":"bolt","qty":3}`)
+	}))
+	defer srv.Close()
+
+	c := New("k", srv.URL, "test-model")
+	fields, err := c.Autofill(context.Background(), [][]byte{testPNG(1)}, []string{"image/png"})
+	if err != nil {
+		t.Fatalf("Autofill: %v", err)
+	}
+	if fields.Name != "bolt" {
+		t.Errorf("Name = %q, want bolt", fields.Name)
+	}
+
+	reqs := log.snapshot()
+	if len(reqs) != 2 {
+		t.Fatalf("provider saw %d requests, want 2 (modern attempt + legacy retry)", len(reqs))
+	}
+	if reqs[0].MaxCompletionTokens == nil || *reqs[0].MaxCompletionTokens != 4000 {
+		t.Errorf("attempt 1 max_completion_tokens = %v, want 4000", reqs[0].MaxCompletionTokens)
+	}
+	if reqs[0].MaxTokens != nil {
+		t.Errorf("attempt 1 also sent max_tokens = %d", *reqs[0].MaxTokens)
+	}
+	if reqs[1].MaxTokens == nil || *reqs[1].MaxTokens != 4000 {
+		t.Errorf("retry max_tokens = %v, want 4000", reqs[1].MaxTokens)
+	}
+	if reqs[1].MaxCompletionTokens != nil {
+		t.Errorf("retry also sent max_completion_tokens = %d", *reqs[1].MaxCompletionTokens)
+	}
+	// "Same everything else": the retry is the first request with only
+	// the parameter name swapped.
+	if reqs[1].Model != reqs[0].Model || len(reqs[1].Messages) != len(reqs[0].Messages) {
+		t.Errorf("retry changed more than the token parameter: model %q→%q, messages %d→%d",
+			reqs[0].Model, reqs[1].Model, len(reqs[0].Messages), len(reqs[1].Messages))
+	}
+}
+
+// A provider that accepts max_completion_tokens is hit exactly once — no
+// fallback request is ever sent.
+func TestAutofillNoFallbackWhenModernParamAccepted(t *testing.T) {
+	var log envelopeLog
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		env := log.add(r)
+		if env.MaxCompletionTokens == nil {
+			t.Errorf("fake provider: request without max_completion_tokens")
+		}
+		contentReply(w, `{"name":"x"}`)
+	}))
+	defer srv.Close()
+
+	c := New("k", srv.URL, "test-model")
+	if _, err := c.Autofill(context.Background(), [][]byte{testPNG(1)}, []string{"image/png"}); err != nil {
+		t.Fatalf("Autofill: %v", err)
+	}
+	if n := len(log.snapshot()); n != 1 {
+		t.Errorf("provider saw %d requests, want 1 (no fallback when the modern parameter is accepted)", n)
+	}
+}
+
+// 401 is not a parameter problem: no retry, the typed error surfaces at
+// once.
+func TestAutofillNoFallbackOn401(t *testing.T) {
+	var log envelopeLog
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.add(r)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"message":"bad key"}}`)
+	}))
+	defer srv.Close()
+
+	c := New("k", srv.URL, "test-model")
+	_, err := c.Autofill(context.Background(), [][]byte{testPNG(1)}, []string{"image/png"})
+	if err == nil {
+		t.Fatal("Autofill succeeded, want error on 401")
+	}
+	if n := len(log.snapshot()); n != 1 {
+		t.Fatalf("provider saw %d requests, want 1 (no retry on non-400)", n)
+	}
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Status != http.StatusUnauthorized {
+		t.Errorf("error %v is not an *HTTPError with status 401", err)
+	}
+}
+
+// When both rungs 400, the RETRY's error wins.
+func TestAutofillFallbackBothFail(t *testing.T) {
+	var log envelopeLog
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		env := log.add(r)
+		w.WriteHeader(http.StatusBadRequest)
+		if env.MaxCompletionTokens != nil {
+			_, _ = io.WriteString(w, `{"error":{"message":"modern param rejected"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"error":{"message":"legacy param also rejected"}}`)
+	}))
+	defer srv.Close()
+
+	c := New("k", srv.URL, "test-model")
+	_, err := c.Autofill(context.Background(), [][]byte{testPNG(1)}, []string{"image/png"})
+	if err == nil {
+		t.Fatal("Autofill succeeded, want error when both rungs 400")
+	}
+	if n := len(log.snapshot()); n != 2 {
+		t.Fatalf("provider saw %d requests, want 2", n)
+	}
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error %v is not *HTTPError", err)
+	}
+	if d := httpErr.ErrorDetail(); !strings.Contains(d, "legacy param also rejected") {
+		t.Errorf("ErrorDetail = %q, want the retry's body (the retry's error wins)", d)
+	}
+	if s := err.Error(); strings.Contains(s, "legacy param") || strings.Contains(s, "modern param") {
+		t.Errorf("Error() %q leaks provider body", s)
+	}
+}
+
+// HTTPError detail: whitespace-collapsed and capped at 512 bytes; Error()
+// stays status-only.
+func TestHTTPErrorDetailCollapsedAndTruncated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, "line1\n\tline2  "+strings.Repeat("x", 2000)+"\n")
+	}))
+	defer srv.Close()
+
+	c := New("k", srv.URL, "test-model")
+	_, err := c.Autofill(context.Background(), [][]byte{testPNG(1)}, []string{"image/png"})
+	if err == nil {
+		t.Fatal("Autofill succeeded, want error on 500")
+	}
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error %v is not *HTTPError", err)
+	}
+	d := httpErr.ErrorDetail()
+	if len(d) > 512 {
+		t.Errorf("detail len = %d, want ≤512", len(d))
+	}
+	// 2KB of body → 2KB read → collapse → 512-byte cut: "line1 line2 "
+	// (12 bytes) + exactly 500 x's.
+	if want := "line1 line2 " + strings.Repeat("x", 500); d != want {
+		t.Errorf("detail = %q…, want collapsed prefix %q…", d[:40], want[:40])
+	}
+	if s := err.Error(); strings.Contains(s, "line1") || !strings.Contains(s, "500") {
+		t.Errorf("Error() = %q, want status-only mentioning 500", s)
 	}
 }

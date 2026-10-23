@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -431,14 +432,27 @@ func TestAutofillRateLimited(t *testing.T) {
 	}
 }
 
+// captureSlog swaps the default slog logger for a buffered text handler so
+// tests can assert on warn lines, restoring the previous default after.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
 // 8. Provider 500 → 502 ai_upstream_error with a generic message; the
-// provider's body (which may carry account details) is never echoed.
+// provider's body (which may carry account details) is never echoed to the
+// client — but its truncated detail IS on the server's warn line.
 func TestAutofillUpstreamError(t *testing.T) {
 	s, ts := newTestServer(t, nil)
 	juicy := `{"error":{"message":"sk-live-SUPER-SECRET quota exhausted, billing acct 42"}}`
 	wireAI(s, fakeAIProvider(t, http.StatusInternalServerError, juicy))
 	cookie := registerUser(t, ts, "ai-500@test.dev", "longpassword1")
 
+	logs := captureSlog(t)
 	resp := doAutofill(t, ts, cookie, aiPNG(1))
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("provider 500 = %d, want 502", resp.StatusCode)
@@ -449,6 +463,17 @@ func TestAutofillUpstreamError(t *testing.T) {
 	}
 	if strings.Contains(msg, "SUPER-SECRET") || strings.Contains(msg, juicy) {
 		t.Errorf("message %q leaks the provider response body", msg)
+	}
+
+	logStr := logs.String()
+	if !strings.Contains(logStr, "ai autofill failed") {
+		t.Errorf("log %q lacks the warn line", logStr)
+	}
+	if !strings.Contains(logStr, "provider_detail") {
+		t.Errorf("log %q lacks the provider_detail attribute", logStr)
+	}
+	if !strings.Contains(logStr, "SUPER-SECRET") {
+		t.Errorf("log %q does not carry the provider body detail (server-side only)", logStr)
 	}
 }
 
