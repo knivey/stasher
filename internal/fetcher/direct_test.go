@@ -299,6 +299,33 @@ func TestDirectFetchCDBasenameFallback(t *testing.T) {
 	}
 }
 
+func TestFetchTitle(t *testing.T) {
+	// /page serves titled HTML; /noTitle serves HTML without a <title>.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/noTitle" {
+			fmt.Fprint(w, "<html><head></head><body>no title here</body></html>")
+			return
+		}
+		fmt.Fprint(w, "<html><head><title>  LM358&nbsp;Datasheet </title></head><body>x</body></html>")
+	}))
+	defer srv.Close()
+	d := NewDirectEngine(LoopbackPolicy())
+	if got := d.FetchTitle(context.Background(), srv.URL+"/page"); got != "LM358 Datasheet" {
+		t.Fatalf("title = %q", got)
+	}
+
+	// non-HTML body / network failure / bad URL → hostname fallback
+	if got := d.FetchTitle(context.Background(), srv.URL+"/noTitle"); got != "127.0.0.1" {
+		t.Fatalf("no-title fallback = %q, want hostname", got) // that path serves HTML without <title>
+	}
+	if got := d.FetchTitle(context.Background(), "http://127.0.0.1:1/nope"); got != "127.0.0.1" {
+		t.Fatalf("dead-host title = %q, want hostname", got)
+	}
+	if got := d.FetchTitle(context.Background(), "not a url"); got != "not a url" {
+		t.Fatalf("garbage url title = %q, want raw string", got)
+	}
+}
+
 func hostIP(t *testing.T, srv *httptest.Server) string {
 	t.Helper()
 	host, _, err := net.SplitHostPort(srv.URL[len("http://"):])

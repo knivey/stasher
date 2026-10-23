@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -118,6 +120,13 @@ func (d *DirectEngine) checkURL(ctx context.Context, u *url.URL) (net.IP, error)
 }
 
 func (d *DirectEngine) Fetch(ctx context.Context, rawURL string) (Result, error) {
+	return d.fetchAllow(ctx, rawURL, allowlisted)
+}
+
+// fetchAllow is the redirect-following core shared by Fetch and FetchTitle:
+// every hop is scheme/userinfo/policy re-checked before dialing, and the
+// sniffed content type must satisfy the caller's allow predicate.
+func (d *DirectEngine) fetchAllow(ctx context.Context, rawURL string, allow func(string) bool) (Result, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return Result{}, fmt.Errorf("invalid URL")
@@ -174,7 +183,7 @@ func (d *DirectEngine) Fetch(ctx context.Context, rawURL string) (Result, error)
 		if bytes.HasPrefix(head, []byte("%PDF-")) {
 			ct = "application/pdf"
 		}
-		if !allowlisted(ct) {
+		if !allow(ct) {
 			return Result{}, fmt.Errorf("unsupported content type %q (pdf, image, text only)", ct)
 		}
 		return Result{
@@ -190,6 +199,54 @@ func allowlisted(ct string) bool {
 		return true
 	}
 	return strings.HasPrefix(ct, "image/")
+}
+
+// allowHTML is the bookmark-title predicate: any HTML document qualifies
+// (Fetch still rejects HTML via allowlisted — this seam exists for titles).
+func allowHTML(ct string) bool {
+	return strings.HasPrefix(ct, "text/html")
+}
+
+// FetchTitle does a best-effort HTML <title> extraction for bookmark
+// labeling: 5s budget, 256KB read cap, policy-checked like every fetch.
+// It NEVER returns an error — any failure collapses to the URL hostname.
+func (d *DirectEngine) FetchTitle(ctx context.Context, rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return truncateTitle(rawURL)
+	}
+	fallback := truncateTitle(u.Hostname())
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	res, err := d.fetchAllow(ctx, rawURL, allowHTML)
+	if err != nil {
+		return fallback
+	}
+	b := res.Body
+	if len(b) > 256<<10 {
+		b = b[:256<<10]
+	}
+	m := titleRe.FindSubmatch(b)
+	if m == nil {
+		return fallback
+	}
+	title := strings.Join(strings.Fields(string(m[1])), " ")
+	title = strings.ReplaceAll(title, "&nbsp;", " ")
+	title = html.UnescapeString(title)
+	return truncateTitle(title)
+}
+
+var titleRe = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
+func truncateTitle(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 200 {
+		s = s[:200]
+	}
+	if s == "" {
+		return "untitled"
+	}
+	return s
 }
 
 // suggestFilename: Content-Disposition filename, else URL basename, else

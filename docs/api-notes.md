@@ -535,3 +535,36 @@ DELETE /api/v1/projects/{id}/files/{fid} — owner only. 204; non-numeric
 - **`DELETE /projects/{id}` removes every file's bytes** (originals AND
   thumbs) after the row delete succeeds. Byte-deletion failures are
   warn-logged, never surfaced (the 204 stands).
+
+## Project bookmarks (2026-10-23)
+
+Projects carry a list of URL bookmarks with best-effort auto-titling.
+
+```
+POST   /api/v1/projects/{id}/bookmarks — {url, title?}; owner only
+       (sharees/strangers → 404, even on shared projects). 201 returns
+       {id, url, title, created_at, archived_file}. `url` follows the
+       shared external-URL contract (http/https, ≤2000 chars — same
+       `validExternalURL` as product_url; violations → 400
+       validation_error). An absent/blank `title` triggers a BEST-EFFORT
+       auto-title: the direct fetch engine fetches the page (5s budget,
+       256KB read cap, full SSRF policy like every fetch) and extracts
+       `<title>` (entity-decoded, whitespace-collapsed, ≤200 chars). It
+       NEVER blocks the add: any failure (dead host, non-HTML, policy
+       rejection) falls back to the URL hostname; unparseable URLs fall
+       back to the raw string. An explicit `title` wins untouched
+       (trimmed, ≤200 chars).
+PATCH  /api/v1/projects/{id}/bookmarks/{bid} — {url?, title?} → 200 with
+       the updated row. Absent field = keep. A provided `url` is
+       re-validated (400 on violation). 200/404 semantics as usual.
+DELETE /api/v1/projects/{id}/bookmarks/{bid} — 204; absent/foreign →
+       404. When the bookmark has an archived file (Task 7+), the
+       archive row AND its bytes (original + thumb) are retired with it.
+```
+
+- **`GET /projects/{id}` carries `bookmarks` in BOTH projections** (owner
+  and sharee — bookmarks are public), oldest first
+  (`ORDER BY created_at, id`). Row: `{id, url, title, created_at,
+  archived_file}` where `archived_file` is a project-file row shape
+  (`{id, storage_key, thumb_key, filename, mime_type, size_bytes,
+  created_at}`) or **null** until a bookmark has been archived.

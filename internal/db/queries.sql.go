@@ -106,6 +106,37 @@ func (q *Queries) AddItemPhoto(ctx context.Context, arg AddItemPhotoParams) (Ite
 	return i, err
 }
 
+const addProjectBookmark = `-- name: AddProjectBookmark :one
+INSERT INTO project_bookmarks (project_id, url, title, created_at) VALUES (?, ?, ?, ?)
+RETURNING id, project_id, url, title, archived_file_id, created_at
+`
+
+type AddProjectBookmarkParams struct {
+	ProjectID int64  `json:"project_id"`
+	Url       string `json:"url"`
+	Title     string `json:"title"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (q *Queries) AddProjectBookmark(ctx context.Context, arg AddProjectBookmarkParams) (ProjectBookmark, error) {
+	row := q.db.QueryRowContext(ctx, addProjectBookmark,
+		arg.ProjectID,
+		arg.Url,
+		arg.Title,
+		arg.CreatedAt,
+	)
+	var i ProjectBookmark
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Url,
+		&i.Title,
+		&i.ArchivedFileID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const addProjectComment = `-- name: AddProjectComment :one
 INSERT INTO project_comments (project_id, user_id, body, created_at) VALUES (?, ?, ?, ?)
 RETURNING id, project_id, user_id, body, created_at
@@ -854,6 +885,23 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 	return err
 }
 
+const deleteProjectBookmark = `-- name: DeleteProjectBookmark :execrows
+DELETE FROM project_bookmarks WHERE id = ? AND project_id = ?
+`
+
+type DeleteProjectBookmarkParams struct {
+	ID        int64 `json:"id"`
+	ProjectID int64 `json:"project_id"`
+}
+
+func (q *Queries) DeleteProjectBookmark(ctx context.Context, arg DeleteProjectBookmarkParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProjectBookmark, arg.ID, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteProjectComment = `-- name: DeleteProjectComment :execrows
 DELETE FROM project_comments WHERE id = ?
 `
@@ -1286,6 +1334,29 @@ func (q *Queries) GetProjectAnyOwner(ctx context.Context, id int64) (Project, er
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Visibility,
+	)
+	return i, err
+}
+
+const getProjectBookmark = `-- name: GetProjectBookmark :one
+SELECT id, project_id, url, title, archived_file_id, created_at FROM project_bookmarks WHERE id = ? AND project_id = ?
+`
+
+type GetProjectBookmarkParams struct {
+	ID        int64 `json:"id"`
+	ProjectID int64 `json:"project_id"`
+}
+
+func (q *Queries) GetProjectBookmark(ctx context.Context, arg GetProjectBookmarkParams) (ProjectBookmark, error) {
+	row := q.db.QueryRowContext(ctx, getProjectBookmark, arg.ID, arg.ProjectID)
+	var i ProjectBookmark
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Url,
+		&i.Title,
+		&i.ArchivedFileID,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1894,6 +1965,65 @@ func (q *Queries) ListPhotosMissingThumbs(ctx context.Context) ([]ItemPhoto, err
 			&i.SortOrder,
 			&i.CreatedAt,
 			&i.ThumbKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectBookmarks = `-- name: ListProjectBookmarks :many
+SELECT b.id, b.url, b.title, b.created_at,
+       f.id AS f_id, f.storage_key AS f_key, f.thumb_key AS f_thumb,
+       f.filename AS f_name, f.mime_type AS f_mime, f.size_bytes AS f_size,
+       f.created_at AS f_created
+FROM project_bookmarks b
+LEFT JOIN project_files f ON f.id = b.archived_file_id
+WHERE b.project_id = ? ORDER BY b.created_at, b.id
+`
+
+type ListProjectBookmarksRow struct {
+	ID        int64          `json:"id"`
+	Url       string         `json:"url"`
+	Title     string         `json:"title"`
+	CreatedAt string         `json:"created_at"`
+	FID       sql.NullInt64  `json:"f_id"`
+	FKey      sql.NullString `json:"f_key"`
+	FThumb    sql.NullString `json:"f_thumb"`
+	FName     sql.NullString `json:"f_name"`
+	FMime     sql.NullString `json:"f_mime"`
+	FSize     sql.NullInt64  `json:"f_size"`
+	FCreated  sql.NullString `json:"f_created"`
+}
+
+func (q *Queries) ListProjectBookmarks(ctx context.Context, projectID int64) ([]ListProjectBookmarksRow, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectBookmarks, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectBookmarksRow
+	for rows.Next() {
+		var i ListProjectBookmarksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Url,
+			&i.Title,
+			&i.CreatedAt,
+			&i.FID,
+			&i.FKey,
+			&i.FThumb,
+			&i.FName,
+			&i.FMime,
+			&i.FSize,
+			&i.FCreated,
 		); err != nil {
 			return nil, err
 		}
@@ -2743,6 +2873,27 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) er
 		arg.UpdatedAt,
 		arg.ID,
 		arg.UserID,
+	)
+	return err
+}
+
+const updateProjectBookmark = `-- name: UpdateProjectBookmark :exec
+UPDATE project_bookmarks SET url = ?, title = ? WHERE id = ? AND project_id = ?
+`
+
+type UpdateProjectBookmarkParams struct {
+	Url       string `json:"url"`
+	Title     string `json:"title"`
+	ID        int64  `json:"id"`
+	ProjectID int64  `json:"project_id"`
+}
+
+func (q *Queries) UpdateProjectBookmark(ctx context.Context, arg UpdateProjectBookmarkParams) error {
+	_, err := q.db.ExecContext(ctx, updateProjectBookmark,
+		arg.Url,
+		arg.Title,
+		arg.ID,
+		arg.ProjectID,
 	)
 	return err
 }

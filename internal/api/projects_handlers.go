@@ -198,6 +198,20 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		fileList = append(fileList, projectFileJSON(f))
 	}
 	body["files"] = fileList
+	// bookmarks are the third public section: present in BOTH projections
+	// (archived_file is null until a bookmark has been archived).
+	bms, err := s.q.ListProjectBookmarks(r.Context(), p.ID)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	bmList := make([]map[string]any, 0, len(bms))
+	for _, b := range bms {
+		bmList = append(bmList, projectBookmarkJSON(dbpkg.ProjectBookmark{
+			ID: b.ID, ProjectID: p.ID, Url: b.Url, Title: b.Title, CreatedAt: b.CreatedAt,
+		}, b))
+	}
+	body["bookmarks"] = bmList
 	writeJSON(w, http.StatusOK, body)
 }
 

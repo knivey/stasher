@@ -388,6 +388,28 @@ WHERE f.storage_key = ? OR f.thumb_key = ?;
 -- name: ListAllProjectFileKeys :many
 SELECT storage_key, thumb_key FROM project_files WHERE project_id = ?;
 
+-- name: AddProjectBookmark :one
+INSERT INTO project_bookmarks (project_id, url, title, created_at) VALUES (?, ?, ?, ?)
+RETURNING id, project_id, url, title, archived_file_id, created_at;
+
+-- name: GetProjectBookmark :one
+SELECT * FROM project_bookmarks WHERE id = ? AND project_id = ?;
+
+-- name: UpdateProjectBookmark :exec
+UPDATE project_bookmarks SET url = ?, title = ? WHERE id = ? AND project_id = ?;
+
+-- name: DeleteProjectBookmark :execrows
+DELETE FROM project_bookmarks WHERE id = ? AND project_id = ?;
+
+-- name: ListProjectBookmarks :many
+SELECT b.id, b.url, b.title, b.created_at,
+       f.id AS f_id, f.storage_key AS f_key, f.thumb_key AS f_thumb,
+       f.filename AS f_name, f.mime_type AS f_mime, f.size_bytes AS f_size,
+       f.created_at AS f_created
+FROM project_bookmarks b
+LEFT JOIN project_files f ON f.id = b.archived_file_id
+WHERE b.project_id = ? ORDER BY b.created_at, b.id;
+
 -- name: CreateItemLedger :one
 INSERT INTO item_ledger (item_id, user_id, delta, resulting_qty, kind, project_id, note, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
