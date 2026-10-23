@@ -130,5 +130,6 @@ Rendering a web page to a PDF archive uses headless chromium:
 
 Stasher auto-detects `chromium`, `chromium-browser`, or `google-chrome` on
 PATH; set `chrome_path` (or `STASHER_CHROME_PATH`) to point at a specific
-binary. Without chromium, archive requests fail with a hint — everything
-else works.
+binary. The chrome path is resolved once at startup — installing chromium
+later requires a restart to pick it up. Without chromium, archive requests
+fail with a hint — everything else works.

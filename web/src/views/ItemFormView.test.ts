@@ -634,6 +634,66 @@ describe('ItemFormView product_url', () => {
     await (w2.vm as any).save()
     expect(bodies.at(-1)).toEqual({ name: 'No url', description: '', qty: 1, unit: '', visibility: 'private' })
   })
+
+  describe('Archive button', () => {
+    function archiveButton(w: { findAll: (s: string) => { text: () => string; trigger: (e: string) => Promise<void> }[] }) {
+      return w.findAll('button').find(b => b.text() === 'Archive')
+    }
+
+    it('renders in edit mode with a non-empty URL, hides when the field is cleared', async () => {
+      editFetch(itemWithUrl, [])
+      const w = mount(ItemFormView, { props: { id: '9' } })
+      await flushPromises()
+      expect(archiveButton(w)).toBeTruthy()
+      ;(w.vm as any).form.product_url = '   ' // whitespace-only counts as empty
+      await flushPromises()
+      expect(archiveButton(w)).toBeUndefined()
+    })
+
+    it('is absent in create mode even with a URL typed (no item id to fetch for)', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
+      const router = newRouter()
+      await router.push('/items/new')
+      const w = mount(ItemFormView, { global: { plugins: [router] } })
+      await flushPromises()
+      ;(w.vm as any).form.product_url = 'https://example.com/x'
+      await flushPromises()
+      expect(archiveButton(w)).toBeUndefined()
+    })
+
+    it('click POSTs /fetch with the exact body and toasts fire-and-forget success (no polling)', async () => {
+      const fetchBodies: any[] = []
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+        if (url === '/api/v1/items/9/fetch' && init?.method === 'POST') {
+          fetchBodies.push(JSON.parse(init.body))
+          return new Response(JSON.stringify({ job_id: 'j1' }), { status: 202 })
+        }
+        if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+        if (url.includes('/jobs/')) throw new Error('the edit form must not poll the job') // canary
+        return new Response(JSON.stringify(itemWithUrl), { status: 200 })
+      }))
+      const w = mount(ItemFormView, { props: { id: '9' } })
+      await flushPromises()
+      await archiveButton(w)!.trigger('click')
+      await flushPromises()
+      expect(fetchBodies).toEqual([{ url: 'https://example.com/pi5', mode: 'archive' }])
+      expect(toasts.some(t => t.message === 'Archive started — it will appear in Documents shortly' && t.type === 'success')).toBe(true)
+    })
+
+    it('toasts the ApiError message when the fetch POST fails', async () => {
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+        if (url === '/api/v1/items/9/fetch' && init?.method === 'POST')
+          return new Response(JSON.stringify({ error: { code: 'validation_error', message: 'url must be http(s)' } }), { status: 400 })
+        if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+        return new Response(JSON.stringify(itemWithUrl), { status: 200 })
+      }))
+      const w = mount(ItemFormView, { props: { id: '9' } })
+      await flushPromises()
+      await archiveButton(w)!.trigger('click')
+      await flushPromises()
+      expect(toasts.some(t => t.message === 'url must be http(s)' && t.type === 'error')).toBe(true)
+    })
+  })
 })
 
 describe('ItemFormView widgets', () => {

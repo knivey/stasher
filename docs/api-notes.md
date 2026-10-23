@@ -198,7 +198,9 @@ The server can fetch a URL and store the result as an ordinary item
 document. Two modes:
 
 - **`direct`** — plain HTTP download (datasheet PDFs, images, text).
-  Caps: **25MB body, 30s** per fetch (redirect chains included, max 5 hops).
+  Caps: **25MB body, 30s per hop** (each request, redirect chains included,
+  max 5 hops — the whole chain is additionally bounded by the 90s job
+  deadline below).
 - **`archive`** — renders the page to a **full-page PDF** with headless
   chromium. Caps: **25MB output, 60s** render. Filename is
   `<host> <YYYY-MM-DD>.pdf` (UTC date). Needs chromium installed/configured

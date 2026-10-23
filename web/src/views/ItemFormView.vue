@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import type { Item, ListResponse, Location } from '../api/types'
 import { useAuthStore } from '../stores/auth'
 import { toast } from '../utils/toast'
@@ -251,6 +251,24 @@ function cancel() {
   router?.push(editing.value ? `/items/${itemId.value}` : '/items')
 }
 
+// Fire-and-forget archive of the entered product URL (spec §4). Edit mode
+// ONLY — the fetch endpoint hangs off an existing item id and create mode
+// has none (that narrowing is the ruling; archive after save via the detail
+// page). No polling: the user is mid-edit, the document lands in Documents
+// (and shows on the detail page after save); a failed job is visible via the
+// missing document and can be retried.
+const archiving = ref(false)
+
+function archiveProductUrl() {
+  const url = form.product_url.trim()
+  if (!url || archiving.value || saving.value) return
+  archiving.value = true
+  api.post<{ job_id: string }>(`/api/v1/items/${itemId.value}/fetch`, { url, mode: 'archive' })
+    .then(() => toast('Archive started — it will appear in Documents shortly', 'success'))
+    .catch(e => toast(e instanceof ApiError ? e.message : (e as Error).message, 'error'))
+    .finally(() => { archiving.value = false })
+}
+
 defineExpose({ form, save, tagsEqual })
 </script>
 <template>
@@ -263,12 +281,17 @@ defineExpose({ form, save, tagsEqual })
       <label class="block text-sm font-medium dark:text-slate-100">Description
         <textarea v-model="form.description" rows="3" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal"></textarea>
       </label>
-      <label class="block text-sm font-medium dark:text-slate-100">Product page URL <span class="font-normal text-slate-400 dark:text-slate-500">(optional)</span>
-        <!-- type=url is advisory (mobile keyboard + native check); the server
-             remains the authority (http(s), ≤2000 chars). -->
-        <input v-model="form.product_url" type="url" maxlength="2000" placeholder="https://shop.example.com/product…"
-          class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
-      </label>
+      <div class="flex items-end gap-2">
+        <label class="flex-1 block text-sm font-medium dark:text-slate-100">Product page URL <span class="font-normal text-slate-400 dark:text-slate-500">(optional)</span>
+          <!-- type=url is advisory (mobile keyboard + native check); the server
+               remains the authority (http(s), ≤2000 chars). -->
+          <input v-model="form.product_url" type="url" maxlength="2000" placeholder="https://shop.example.com/product…"
+            class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
+        </label>
+        <button v-if="editing && form.product_url.trim()" type="button"
+          :disabled="archiving || saving" @click="archiveProductUrl"
+          class="mb-[3px] rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm whitespace-nowrap disabled:opacity-50">Archive</button>
+      </div>
       <div class="flex gap-4">
         <label class="flex-1 block text-sm font-medium dark:text-slate-100">Qty
           <input v-model.number="form.qty" type="number" min="0" step="any" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
