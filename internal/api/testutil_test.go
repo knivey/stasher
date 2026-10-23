@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 
+	"stasher/internal/ai"
 	"stasher/internal/auth"
 	"stasher/internal/config"
 	"stasher/internal/db"
@@ -88,7 +89,8 @@ func newTestServer(t *testing.T, mutate func(*config.Config)) (*Server, *httptes
 	s := New(cfg, sqlDB, st,
 		fetcher.NewDirectEngine(fetcher.LoopbackPolicy()),
 		fetcher.NewArchiveEngine(fetcher.LoopbackPolicy(), stubChromePath()),
-		nil) // searcher: tests install a fake on s.searcher when needed
+		nil,                // searcher: tests install a fake on s.searcher when needed
+		ai.New("", "", "")) // autofill off by default; tests swap s.aiClient
 	ts := httptest.NewServer(s.Router())
 	t.Cleanup(ts.Close)
 	return s, ts

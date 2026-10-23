@@ -280,7 +280,7 @@ func TestFetchDisabledWhenUnwired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(&config.Config{DataDir: dir}, sqlDB, st, nil, nil, nil)
+	s := New(&config.Config{DataDir: dir}, sqlDB, st, nil, nil, nil, nil)
 	ts := httptest.NewServer(s.Router())
 	t.Cleanup(ts.Close)
 	cookie := registerUser(t, ts, "unwired@test.dev", "longpassword1")

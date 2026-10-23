@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"stasher/internal/ai"
 	"stasher/internal/auth"
 	"stasher/internal/config"
 	dbpkg "stasher/internal/db"
@@ -26,10 +27,12 @@ type Server struct {
 	loginAcct  *auth.Limiter // 5 attempts/min per account
 	registerIP *auth.Limiter // 10 registrations/min per IP
 	searchRate *auth.Limiter // 1 document search / 3s per user
+	aiRate     *auth.Limiter // 1 autofill / 5s per user
 
 	fetchDirect  *fetcher.DirectEngine // plain HTTP downloads; also verifies search candidates
 	fetchArchive fetcher.Engine        // chromium page->PDF (nil = archive disabled)
 	searcher     fetcher.Searcher      // Brave web search (nil = search disabled)
+	aiClient     *ai.Client            // OpenAI-compatible vision (nil/not-Enabled = autofill off)
 
 	jobs     map[string]*jobState // in-memory fetch jobs (never persisted)
 	jobsMu   sync.Mutex
@@ -39,17 +42,20 @@ type Server struct {
 // New wires the server. fetchDirect/fetchArchive may be nil in principle
 // (the fetch endpoint then answers 503) but main always wires both;
 // searcher is nil unless brave_api_key is configured (search → 400
-// search_disabled).
-func New(cfg *config.Config, raw *sql.DB, st *files.Storage, fetchDirect *fetcher.DirectEngine, fetchArchive fetcher.Engine, searcher fetcher.Searcher) *Server {
+// search_disabled); aiClient may be nil or not Enabled (autofill → 400
+// ai_not_configured).
+func New(cfg *config.Config, raw *sql.DB, st *files.Storage, fetchDirect *fetcher.DirectEngine, fetchArchive fetcher.Engine, searcher fetcher.Searcher, aiClient *ai.Client) *Server {
 	return &Server{
 		cfg: cfg, q: dbpkg.New(raw), st: st, raw: raw,
 		loginIP:      auth.NewLimiter(10, 10),
 		loginAcct:    auth.NewLimiter(5, 5),
 		registerIP:   auth.NewLimiter(10, 10),
 		searchRate:   auth.NewLimiter(20, 1), // 1 search / 3s per user, no burst
+		aiRate:       auth.NewLimiter(12, 1), // 1 autofill / 5s per user, no burst
 		fetchDirect:  fetchDirect,
 		fetchArchive: fetchArchive,
 		searcher:     searcher,
+		aiClient:     aiClient,
 		jobs:         map[string]*jobState{},
 		fetchSem:     make(chan struct{}, 1),
 	}
@@ -83,6 +89,8 @@ func (s *Server) Router() chi.Router {
 			r.Get("/auth/sessions", s.handleListSessions)
 			r.Delete("/auth/sessions/{id}", s.handleRevokeSession)
 			r.Post("/auth/sessions/revoke-all", s.handleRevokeAllSessions)
+
+			r.Post("/autofill", s.handleAutofill)
 
 			r.Get("/locations", s.handleListLocations)
 			r.Post("/locations", s.handleCreateLocation)

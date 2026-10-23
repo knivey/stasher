@@ -345,6 +345,54 @@ POST /api/v1/items/{id}/search-documents  { "query": "lm358 datasheet" }
   rejected the key" (in the 502 message); 10 results per query are
   requested (cap 10 kept server-side), non-http(s) URLs are dropped.
 
+## AI autofill (2026-10-23)
+
+`POST /api/v1/autofill` — authenticated, not item-associated. Sends 1–4
+photos to the operator-configured OpenAI-compatible vision service and
+returns AI-PROPOSED item fields for the form to prefill. Nothing is stored.
+
+```
+POST /api/v1/autofill — multipart, each image one "files" FILE part
+→ 200 { "name"?, "description"?, "qty"?, "unit"?, "tags"? }
+```
+
+- **Every response key is optional** — present only when the model
+  effectively returned a usable value; don't assume any key exists.
+- Part types are SNIFFED server-side (client part Content-Type ignored):
+  jpeg/png/webp/gif only → `415 unsupported_type` otherwise. One bad part
+  rejects the whole request (no partial analysis).
+- **Check order is fixed** (all cheap local checks reject before any
+  provider traffic, and rejected requests never burn a rate token):
+  multipart parse + part validation (400s/415) → per-user rate limit
+  (`1 per 5s`, key `ai:<userID>`) → `429 rate_limited` → configured check
+  → `400 ai_not_configured` → the provider call. Note the consequence: on
+  an unconfigured server the SECOND call within 5s answers `429`, not
+  `ai_not_configured`.
+- Error codes: `validation_error` (zero or >4 `files` parts),
+  `missing_file` ("files" sent as plain form VALUES instead of file
+  parts), `invalid_upload` (bad multipart, a part over 20MB, or a body
+  over the 4×20MB request cap), `unsupported_type` (415), `rate_limited`
+  (429), `ai_not_configured` (400 — message names exactly which of
+  `ai_api_key`/`ai_model` is missing), `ai_bad_response` (400 — provider
+  answered but its content wasn't parseable), `ai_upstream_error` (502 —
+  non-2xx/timeout/oversized response; GENERIC message, the provider's
+  body is never echoed).
+- **Clamps, not rejections** (AI output is clamped, never a 4xx): caps are
+  measured in bytes to match the item validator, and truncation never
+  splits a UTF-8 character.
+
+  | Field | Rule |
+  |---|---|
+  | `name` | trimmed; empty after trim → omitted; truncated to 200 |
+  | `description` | truncated to 10,000; empty → omitted |
+  | `qty` | kept only when finite and within 0..1e12, else omitted |
+  | `unit` | truncated to 50; empty → omitted |
+  | `tags` | each trimmed; entries outside 1–100 chars are DROPPED (not truncated); case-insensitive dedup keeps the first-seen casing; capped at 10; empty list → omitted |
+
+- **Privacy**: off by default (`ai_api_key` empty). Enabling it means the
+  photos in an autofill request are sent to the configured AI service
+  (`ai_base_url` — point it at a local ollama/vLLM to keep them on-box).
+
 ## Frontend notes
 
 Facts discovered by the frontend round, kept here so they survive:

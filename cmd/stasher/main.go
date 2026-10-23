@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"stasher/internal/ai"
 	"stasher/internal/api"
 	"stasher/internal/config"
 	"stasher/internal/db"
@@ -96,10 +97,17 @@ func main() {
 	if cfg.BraveAPIKey != "" {
 		searcher = &fetcher.BraveSearcher{Key: cfg.BraveAPIKey}
 	}
+	// The AI client is wired unconditionally: with no key/model configured
+	// it stays disabled and the endpoint answers 400 ai_not_configured.
+	aiClient := ai.New(cfg.AIAPIKey, cfg.AIBaseURL, cfg.AIModel)
+	if cfg.AIAPIKey != "" && cfg.AIModel == "" {
+		slog.Warn("ai_api_key set without ai_model — autofill stays disabled")
+	}
 	srv := api.New(&cfg, sqlDB, storage,
 		fetcher.NewDirectEngine(fetcher.PublicPolicy()),
 		fetcher.NewArchiveEngine(fetcher.PublicPolicy(), chrome),
-		searcher)
+		searcher,
+		aiClient)
 
 	// sweep trash whose retention window closed while the server was down
 	// (entries trashed while running are swept on GET /trash)
