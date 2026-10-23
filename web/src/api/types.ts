@@ -8,10 +8,19 @@ export interface Item {
   id: number; name: string; description: string; qty: number; unit: string
   location_id: number | null; visibility: 'private' | 'shared'
   disposed?: boolean
+  // detail-only: absent on list rows; null when unset
+  product_url?: string | null
   photo_count?: number; thumb_key?: string | null
   created_at: string; updated_at: string
   tags?: Tag[]; photos?: Photo[]; documents?: Doc[]; projects?: ItemProject[]; owner_name?: string
   notes?: Note[]
+}
+// External fetch job (api-notes "External fetch & jobs"): in-memory only —
+// a 404 mid-poll means the server restarted and the document was NOT created.
+export interface FetchJob {
+  status: 'running' | 'done' | 'failed'
+  error?: string
+  document_id?: number
 }
 export interface LedgerEntry {
   id: number; delta: number; resulting_qty: number

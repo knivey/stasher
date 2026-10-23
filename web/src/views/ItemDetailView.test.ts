@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
@@ -668,5 +668,230 @@ describe('ItemDetailView', () => {
     expect(toasts.some(t => t.message === 'Note added')).toBe(false)
     expect((w.find('[data-note-body]').element as HTMLTextAreaElement).value).toBe('a note')
     expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(1) // no refetch
+  })
+})
+
+describe('ItemDetailView product url & fetch', () => {
+  const itemWithUrl = { ...item, product_url: 'https://example.com/m3-screws' }
+
+  // Mock that understands the detail-view surface plus the fetch/job endpoints;
+  // every request lands in `calls`. `jobs` is a queue of poll responses — once
+  // empty, every poll answers {"status":"running"} forever.
+  function fetchMock(opts: { item?: unknown; jobs?: unknown[]; jobStatus?: number; postStatus?: number } = {}) {
+    const calls: { method: string; url: string; body?: string }[] = []
+    const jobs = [...(opts.jobs ?? [])]
+    const shown = opts.item ?? item
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ method: init?.method ?? 'GET', url, body: init?.body as string | undefined })
+      if (url.includes('/items/9/fetch')) {
+        if (opts.postStatus) return new Response(JSON.stringify({ error: { code: 'validation_error', message: 'url must be an http(s) URL' } }), { status: opts.postStatus })
+        return new Response(JSON.stringify({ job_id: 'j1' }), { status: 202 })
+      }
+      if (url.includes('/jobs/')) {
+        if (opts.jobStatus === 404)
+          return new Response(JSON.stringify({ error: { code: 'not_found', message: 'gone' } }), { status: 404 })
+        return new Response(JSON.stringify(jobs.length ? jobs.shift() : { status: 'running' }), { status: 200 })
+      }
+      if (url.includes('/items/9/usage')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      if (url.includes('/items/9')) return new Response(JSON.stringify(shown), { status: 200 })
+      if (url.includes('/locations/3')) return new Response(JSON.stringify({ location: {}, breadcrumbs: [] }), { status: 200 })
+      return new Response(null, { status: 204 })
+    }))
+    return calls
+  }
+
+  async function openFetchDialog(w: VueWrapper) {
+    await w.findAll('button').find(b => b.text() === 'Fetch from URL…')!.trigger('click')
+    return w.find('[data-fetch-dialog]')
+  }
+
+  function jobCalls(calls: { url: string }[]) {
+    return calls.filter(c => c.url.includes('/jobs/j1'))
+  }
+
+  afterEach(() => vi.useRealTimers())
+
+  it('renders product_url as an external link with a small Archive button', async () => {
+    fetchMock({ item: itemWithUrl })
+    const { w } = await mountView()
+    const line = w.find('[data-product-url]')
+    expect(line.exists()).toBe(true)
+    const a = line.find('a')
+    expect(a.attributes('href')).toBe('https://example.com/m3-screws')
+    expect(a.attributes('target')).toBe('_blank')
+    expect(a.attributes('rel')).toBe('noopener')
+    const archive = line.findAll('button').find(b => b.text() === 'Archive')
+    expect(archive).toBeTruthy()
+  })
+
+  it('renders no product url line when the item has none', async () => {
+    fetchMock()
+    const { w } = await mountView()
+    expect(w.find('[data-product-url]').exists()).toBe(false)
+  })
+
+  it('Archive button POSTs /fetch with mode archive and the item URL, then follows the job to done', async () => {
+    vi.useFakeTimers()
+    const calls = fetchMock({ item: itemWithUrl, jobs: [{ status: 'running' }, { status: 'done', document_id: 55 }] })
+    const { w } = await mountView()
+    await w.find('[data-product-url]').findAll('button').find(b => b.text() === 'Archive')!.trigger('click')
+    await flushPromises()
+    const post = calls.find(c => c.url === '/api/v1/items/9/fetch')
+    expect(post?.method).toBe('POST')
+    expect(JSON.parse(post!.body!)).toEqual({ url: 'https://example.com/m3-screws', mode: 'archive' })
+    expect(toasts.some(t => t.message === 'Fetching…' && t.type === 'info')).toBe(true)
+    expect(jobCalls(calls)).toHaveLength(0) // polling starts only after the 2s wait
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(jobCalls(calls)).toHaveLength(1)
+    expect(toasts.some(t => t.message === 'Added document')).toBe(false) // still running
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'Added document' && t.type === 'success')).toBe(true)
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(2) // refetched
+  })
+
+  it('fetch dialog opens from the Documents header; .pdf preselects direct, other URLs archive; override wins; Escape closes', async () => {
+    fetchMock()
+    const { w } = await mountView()
+    const docs = w.findAll('section').find(s => s.text().includes('Documents'))
+    expect(docs!.findAll('button').some(b => b.text() === 'Fetch from URL…')).toBe(true)
+    const dlg = await openFetchDialog(w)
+    expect(dlg.exists()).toBe(true)
+    const url = dlg.find('[data-fetch-url]')
+    const mode = dlg.find('[data-fetch-mode]')
+    expect((mode.element as HTMLSelectElement).value).toBe('archive') // default
+    await url.setValue('https://example.com/datasheet.pdf')
+    expect((mode.element as HTMLSelectElement).value).toBe('direct') // .pdf → direct
+    await url.setValue('https://example.com/page?q=datasheet.pdf') // .pdf only in the query: ignored
+    expect((mode.element as HTMLSelectElement).value).toBe('archive')
+    await mode.setValue('direct') // user override, no further url input
+    expect((mode.element as HTMLSelectElement).value).toBe('direct')
+    await dlg.trigger('keydown.escape')
+    expect(w.find('[data-fetch-dialog]').exists()).toBe(false)
+  })
+
+  it('submit is disabled while the URL is empty and while a job is in flight', async () => {
+    vi.useFakeTimers()
+    const calls = fetchMock({ jobs: [{ status: 'running' }, { status: 'failed', error: 'chromium not configured' }] })
+    const { w } = await mountView()
+    const dlg = await openFetchDialog(w)
+    const submit = dlg.find('[data-fetch-submit]')
+    expect((submit.element as HTMLButtonElement).disabled).toBe(true) // empty URL
+    await dlg.find('[data-fetch-url]').setValue('https://example.com/page')
+    expect((submit.element as HTMLButtonElement).disabled).toBe(false)
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    expect(calls.some(c => c.method === 'POST' && c.url === '/api/v1/items/9/fetch')).toBe(true)
+    expect((w.find('[data-fetch-submit]').element as HTMLButtonElement).disabled).toBe(true) // job in flight
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises() // poll 1 → running: still busy
+    expect((w.find('[data-fetch-submit]').element as HTMLButtonElement).disabled).toBe(true)
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises() // poll 2 → failed
+    expect(toasts.some(t => t.message === 'chromium not configured' && t.type === 'error')).toBe(true)
+    expect(toasts.some(t => t.message === 'Added document')).toBe(false)
+    expect((w.find('[data-fetch-submit]').element as HTMLButtonElement).disabled).toBe(false) // retryable
+  })
+
+  it('failed job: error toast with the job error, dialog stays open, no refetch', async () => {
+    vi.useFakeTimers()
+    const calls = fetchMock({ jobs: [{ status: 'failed', error: 'private address blocked' }] })
+    const { w } = await mountView()
+    const dlg = await openFetchDialog(w)
+    await dlg.find('[data-fetch-url]').setValue('https://example.com/page')
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'private address blocked' && t.type === 'error')).toBe(true)
+    expect(toasts.some(t => t.message === 'Added document')).toBe(false)
+    expect(w.find('[data-fetch-dialog]').exists()).toBe(true) // stays open for a retry
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(1) // no refetch
+  })
+
+  it('happy path: POST body {url, mode}, Fetching… toast, polls running→done, Added document toast + refetch + close', async () => {
+    vi.useFakeTimers()
+    const calls = fetchMock({ jobs: [{ status: 'running' }, { status: 'done', document_id: 55 }] })
+    const { w } = await mountView()
+    const dlg = await openFetchDialog(w)
+    await dlg.find('[data-fetch-url]').setValue('https://example.com/page') // no .pdf → archive
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    const post = calls.find(c => c.method === 'POST' && c.url === '/api/v1/items/9/fetch')
+    expect(JSON.parse(post!.body!)).toEqual({ url: 'https://example.com/page', mode: 'archive' })
+    expect(toasts.some(t => t.message === 'Fetching…' && t.type === 'info')).toBe(true)
+    expect(w.find('[data-fetch-dialog]').exists()).toBe(true) // open while polling
+    expect(jobCalls(calls)).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(jobCalls(calls)).toHaveLength(1)
+    expect(toasts.some(t => t.message === 'Added document')).toBe(false)
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'Added document' && t.type === 'success')).toBe(true)
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(2)
+    expect(w.find('[data-fetch-dialog]').exists()).toBe(false) // closed on done
+  })
+
+  it('job GET 404 (interrupted): "fetch interrupted" error toast, no success', async () => {
+    vi.useFakeTimers()
+    const calls = fetchMock({ jobStatus: 404 })
+    const { w } = await mountView()
+    const dlg = await openFetchDialog(w)
+    await dlg.find('[data-fetch-url]').setValue('https://example.com/page')
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'fetch interrupted' && t.type === 'error')).toBe(true)
+    expect(toasts.some(t => t.message === 'Added document')).toBe(false)
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(1) // no refetch
+  })
+
+  it('fetch POST rejection (ApiError): error toast, no polling started', async () => {
+    vi.useFakeTimers()
+    const calls = fetchMock({ postStatus: 400 })
+    const { w } = await mountView()
+    const dlg = await openFetchDialog(w)
+    await dlg.find('[data-fetch-url]').setValue('not a url')
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'url must be an http(s) URL' && t.type === 'error')).toBe(true)
+    expect(toasts.some(t => t.message === 'Fetching…')).toBe(false)
+    expect(jobCalls(calls)).toHaveLength(0)
+  })
+
+  it('gives up after 45 polls (90s deadline) with a timeout toast', async () => {
+    vi.useFakeTimers()
+    const calls = fetchMock({ jobs: [{ status: 'running' }] }) // running forever
+    const { w } = await mountView()
+    const dlg = await openFetchDialog(w)
+    await dlg.find('[data-fetch-url]').setValue('https://example.com/page')
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(90_000)
+    await flushPromises()
+    expect(jobCalls(calls)).toHaveLength(45)
+    expect(toasts.some(t => t.type === 'error' && t.message.includes('timed out'))).toBe(true)
+    expect(toasts.some(t => t.message === 'Added document')).toBe(false)
+  })
+
+  it('stops polling when the view unmounts', async () => {
+    vi.useFakeTimers()
+    const calls = fetchMock({ jobs: [{ status: 'running' }] })
+    const { w } = await mountView()
+    const dlg = await openFetchDialog(w)
+    await dlg.find('[data-fetch-url]').setValue('https://example.com/page')
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(jobCalls(calls)).toHaveLength(1)
+    w.unmount()
+    await vi.advanceTimersByTimeAsync(120_000)
+    await flushPromises()
+    expect(jobCalls(calls)).toHaveLength(1) // cancelled: no further polls
+    expect(toasts.some(t => t.message.includes('timed out'))).toBe(false)
   })
 })

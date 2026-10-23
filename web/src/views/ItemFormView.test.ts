@@ -541,6 +541,101 @@ describe('ItemFormView save & add another', () => {
   })
 })
 
+describe('ItemFormView product_url', () => {
+  const itemWithUrl = { id: 9, name: 'Widget', description: 'd', qty: 2, unit: 'pcs', location_id: 3,
+    visibility: 'private', product_url: 'https://example.com/pi5', created_at: '', updated_at: '',
+    tags: [], photos: [], documents: [], projects: [] }
+
+  // Edit-mode mock: serves the item (+ the locations list), records PATCH bodies.
+  function editFetch(itemJson: unknown, patches: any[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.match(/\/items\/9$/) && init?.method === 'PATCH') patches.push(JSON.parse(init.body))
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify(itemJson), { status: 200 })
+    }))
+  }
+
+  function newRouter(): Router {
+    return createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/items', component: { template: '<div>items</div>' } },
+        { path: '/items/new', component: ItemFormView },
+        { path: '/items/:id', component: { template: '<div>detail</div>' } },
+      ],
+    })
+  }
+
+  it('renders the optional Product page URL input, prefilled from the item', async () => {
+    editFetch(itemWithUrl, [])
+    const w = mount(ItemFormView, { props: { id: '9' } })
+    await flushPromises()
+    expect(w.text()).toContain('Product page URL')
+    const input = w.find('input[type="url"]')
+    expect(input.exists()).toBe(true)
+    expect((input.element as HTMLInputElement).value).toBe('https://example.com/pi5')
+  })
+
+  it('PATCH omits product_url when untouched, sends it when changed, sends "" when cleared', async () => {
+    const patches: any[] = []
+    editFetch(itemWithUrl, patches)
+    const w = mount(ItemFormView, { props: { id: '9' } })
+    await flushPromises()
+    const vm = w.vm as any
+    await vm.save()
+    expect(patches.at(-1)).toEqual({}) // absent = keep (api-notes)
+    vm.form.product_url = 'https://example.com/pi5-kit'
+    await vm.save()
+    expect(patches.at(-1)).toEqual({ product_url: 'https://example.com/pi5-kit' })
+    vm.form.product_url = '' // present-empty = clear
+    await vm.save()
+    expect(patches.at(-1)).toEqual({ product_url: '' })
+  })
+
+  it('PATCH omits product_url for an item without one left untouched, sends it when set', async () => {
+    const patches: any[] = []
+    editFetch({ ...itemWithUrl, product_url: null }, patches)
+    const w = mount(ItemFormView, { props: { id: '9' } })
+    await flushPromises()
+    const vm = w.vm as any
+    expect(vm.form.product_url).toBe('')
+    await vm.save()
+    expect(patches.at(-1)).toEqual({}) // unchanged "": no key (does NOT clear)
+    vm.form.product_url = 'https://example.com/new'
+    await vm.save()
+    expect(patches.at(-1)).toEqual({ product_url: 'https://example.com/new' })
+  })
+
+  it('create POST includes product_url only when non-empty', async () => {
+    const bodies: any[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST') {
+        bodies.push(JSON.parse(init.body))
+        return new Response(JSON.stringify({ id: 42 }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = newRouter()
+    await router.push('/items/new')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    const vm = w.vm as any
+    vm.form.name = 'With url'
+    vm.form.product_url = 'https://example.com/x'
+    await vm.save()
+    expect(bodies.at(-1).product_url).toBe('https://example.com/x')
+
+    // fresh mount, URL left empty: the key must be absent entirely
+    const router2 = newRouter()
+    await router2.push('/items/new')
+    const w2 = mount(ItemFormView, { global: { plugins: [router2] } })
+    await flushPromises()
+    ;(w2.vm as any).form.name = 'No url'
+    await (w2.vm as any).save()
+    expect(bodies.at(-1)).toEqual({ name: 'No url', description: '', qty: 1, unit: '', visibility: 'private' })
+  })
+})
+
 describe('ItemFormView widgets', () => {
   const item = { id: 9, name: 'Widget', description: 'd', qty: 2, unit: 'pcs', location_id: 3,
     visibility: 'private', created_at: '', updated_at: '', tags: [], photos: [], documents: [], projects: [] }

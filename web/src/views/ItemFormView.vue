@@ -24,6 +24,7 @@ const editing = computed(() => itemId.value !== undefined)
 const form = reactive({
   name: '',
   description: '',
+  product_url: '',
   qty: 1,
   unit: '',
   visibility: 'private' as 'private' | 'shared',
@@ -44,6 +45,7 @@ function snapshot() {
   return {
     name: form.name,
     description: form.description,
+    product_url: form.product_url,
     qty: form.qty,
     unit: form.unit,
     visibility: form.visibility,
@@ -62,6 +64,7 @@ function buildPatch(): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   if (form.name !== initial.name) out.name = form.name
   if (form.description !== initial.description) out.description = form.description
+  if (form.product_url !== initial.product_url) out.product_url = form.product_url // "" = clear (api-notes)
   if (form.qty !== initial.qty) out.qty = form.qty
   if (form.unit !== initial.unit) out.unit = form.unit
   if (form.visibility !== initial.visibility) out.visibility = form.visibility
@@ -98,6 +101,7 @@ onMounted(async () => {
     const it = await api.get<Item>(`/api/v1/items/${itemId.value}`)
     form.name = it.name
     form.description = it.description ?? ''
+    form.product_url = it.product_url ?? ''
     form.qty = it.qty
     form.unit = it.unit ?? ''
     form.visibility = it.visibility
@@ -146,6 +150,7 @@ async function save(again: boolean = false) {
         unit: form.unit,
         visibility: form.visibility,
       }
+      if (form.product_url) body.product_url = form.product_url
       if (form.location_id) body.location_id = form.location_id
       if (form.tags.length) body.tags = form.tags
       const created = await api.post<Item>('/api/v1/items', body)
@@ -162,6 +167,7 @@ async function save(again: boolean = false) {
       // The queues clear only now — uploadQueued above has flushed them.
       form.name = ''
       form.description = ''
+      form.product_url = ''
       form.qty = 1
       form.unit = ''
       form.visibility = useAuthStore().user?.default_item_visibility ?? 'private'
@@ -256,6 +262,12 @@ defineExpose({ form, save, tagsEqual })
       </label>
       <label class="block text-sm font-medium dark:text-slate-100">Description
         <textarea v-model="form.description" rows="3" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal"></textarea>
+      </label>
+      <label class="block text-sm font-medium dark:text-slate-100">Product page URL <span class="font-normal text-slate-400 dark:text-slate-500">(optional)</span>
+        <!-- type=url is advisory (mobile keyboard + native check); the server
+             remains the authority (http(s), ≤2000 chars). -->
+        <input v-model="form.product_url" type="url" maxlength="2000" placeholder="https://shop.example.com/product…"
+          class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
       </label>
       <div class="flex gap-4">
         <label class="flex-1 block text-sm font-medium dark:text-slate-100">Qty

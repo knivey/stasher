@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, ApiError } from '../api/client'
-import type { Breadcrumb, Doc, Item, LedgerEntry, ListResponse, Location, Note, Photo, Project } from '../api/types'
+import type { Breadcrumb, Doc, FetchJob, Item, LedgerEntry, ListResponse, Location, Note, Photo, Project } from '../api/types'
 import { useItemsStore } from '../stores/items'
 import { toast } from '../utils/toast'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -251,6 +251,93 @@ onMounted(async () => {
   await fetchItem()
   if (item.value) await fetchUsage()
 })
+
+// ---- External fetch (product page URL + fetch-from-URL dialog) ----
+
+// Cadence and cap follow api-notes: poll every 2s for at most 45 tries =
+// the server's 90s overall job deadline (queue wait + fetch, single-flight).
+const FETCH_POLL_MS = 2000
+const FETCH_POLL_TRIES = 45
+
+const productUrl = computed(() => item.value?.product_url ?? '')
+
+const showFetch = ref(false)
+const fetchUrl = ref('')
+const fetchMode = ref<'direct' | 'archive'>('archive')
+const fetchBusy = ref(false)
+let fetchTimer: ReturnType<typeof setTimeout> | null = null
+let fetchCancelled = false
+
+onUnmounted(() => {
+  fetchCancelled = true
+  if (fetchTimer !== null) clearTimeout(fetchTimer)
+})
+
+// '.pdf' before any query/hash → direct download; anything else → archive.
+function guessMode(url: string): 'direct' | 'archive' {
+  const bare = url.split('#')[0].split('?')[0]
+  return bare.toLowerCase().includes('.pdf') ? 'direct' : 'archive'
+}
+
+// Re-guess on URL input; the select stays user-overridable until the next
+// keystroke (standard preselect behavior).
+watch(fetchUrl, u => { fetchMode.value = guessMode(u) })
+
+function openFetch() {
+  fetchUrl.value = ''
+  fetchMode.value = 'archive'
+  showFetch.value = true
+}
+
+function submitFetch() {
+  const url = fetchUrl.value.trim()
+  if (!url || fetchBusy.value) return
+  void runFetchJob(url, fetchMode.value)
+}
+
+function archiveProductUrl() {
+  if (item.value?.product_url) void runFetchJob(item.value.product_url, 'archive')
+}
+
+async function runFetchJob(url: string, mode: 'direct' | 'archive') {
+  if (fetchBusy.value) return
+  fetchBusy.value = true
+  try {
+    const { job_id } = await api.post<{ job_id: string }>(`/api/v1/items/${route.params.id}/fetch`, { url, mode })
+    toast('Fetching…', 'info')
+    for (let i = 0; i < FETCH_POLL_TRIES; i++) {
+      await new Promise<void>(r => { fetchTimer = setTimeout(r, FETCH_POLL_MS) })
+      if (fetchCancelled) return // unmounted: timer cleared, just abandon the loop
+      try {
+        const job = await api.get<FetchJob>(`/api/v1/jobs/${job_id}`)
+        if (job.status === 'done') {
+          toast('Added document', 'success')
+          showFetch.value = false
+          await fetchItem() // documents[] rides the item detail
+          return
+        }
+        if (job.status === 'failed') {
+          toast(job.error ?? 'fetch failed', 'error')
+          return
+        }
+      } catch (e) {
+        // Jobs are in-memory only: a 404 mid-poll means the server restarted
+        // and the document was NOT created (api-notes). Other errors
+        // (network blips) fall through to the outer handler.
+        if (e instanceof ApiError && e.status === 404) {
+          toast('fetch interrupted', 'error')
+          return
+        }
+        throw e
+      }
+    }
+    toast('fetch timed out — check Documents in a moment', 'error')
+  } catch (e) {
+    toast((e as Error).message, 'error')
+  } finally {
+    fetchBusy.value = false
+  }
+}
 </script>
 <template>
   <div v-if="item" class="space-y-6">
@@ -280,6 +367,14 @@ onMounted(async () => {
         class="cursor-pointer rounded-full px-2 py-0.5 text-xs font-medium hover:ring-2 hover:ring-slate-300 dark:hover:ring-slate-500 disabled:opacity-50"
         @click="toggleVisibility">{{ item.visibility === 'shared' ? 'Shared' : 'Private' }}</button>
       <span v-if="item.disposed" data-disposed class="rounded-full bg-gray-200 dark:bg-slate-700 text-gray-500 dark:text-slate-300 px-2 py-0.5 text-xs font-medium">disposed</span>
+    </div>
+
+    <!-- Product page URL: external link + one-click archive (api-notes "External fetch") -->
+    <div v-if="productUrl" data-product-url class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+      <a :href="productUrl" target="_blank" rel="noopener"
+        class="text-blue-600 dark:text-blue-400 hover:underline break-all max-w-full">{{ productUrl }}</a>
+      <button type="button" :disabled="fetchBusy" @click="archiveProductUrl"
+        class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-2 py-0.5 text-xs disabled:opacity-50">Archive</button>
     </div>
 
     <!-- Inline usage log form (not a route) -->
@@ -360,7 +455,11 @@ onMounted(async () => {
     <section>
       <div class="flex items-center justify-between mb-2">
         <h2 class="font-semibold dark:text-slate-100">Documents</h2>
-        <FileUpload kind="doc" :item-id="item.id" @uploaded="fetchItem" />
+        <div class="flex gap-2">
+          <button type="button" @click="openFetch"
+            class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm">Fetch from URL…</button>
+          <FileUpload kind="doc" :item-id="item.id" @uploaded="fetchItem" />
+        </div>
       </div>
       <ul v-if="item.documents?.length" class="bg-white dark:bg-slate-800 rounded-xl shadow divide-y dark:divide-slate-700 text-sm">
         <li v-for="d in item.documents" :key="d.id" class="flex items-center justify-between gap-2 px-4 py-2">
@@ -401,6 +500,35 @@ onMounted(async () => {
         </li>
       </ul>
     </section>
+
+    <!-- Fetch-from-URL dialog (overlay click / Escape close, dup-dialog
+         pattern). Closing mid-poll is allowed — the poll keeps running in
+         the background and its outcome still toasts. -->
+    <div v-if="showFetch" data-fetch-dialog class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      @click="showFetch = false" @keydown.escape="showFetch = false">
+      <form class="bg-white dark:bg-slate-800 rounded-xl shadow-lg w-full max-w-sm p-5" role="dialog" aria-modal="true"
+        @click.stop @submit.prevent="submitFetch">
+        <h2 class="text-lg font-bold mb-2 dark:text-slate-100">Fetch from URL</h2>
+        <label class="block text-sm font-medium dark:text-slate-100">URL
+          <input v-model="fetchUrl" data-fetch-url type="url" maxlength="2000" placeholder="https://…"
+            class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
+        </label>
+        <label class="block text-sm font-medium dark:text-slate-100 mt-2">Mode
+          <select v-model="fetchMode" data-fetch-mode
+            class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal bg-white">
+            <option value="direct">Direct download</option>
+            <option value="archive">Archive (full-page PDF)</option>
+          </select>
+        </label>
+        <div class="flex justify-end gap-2 mt-3">
+          <button type="button" class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm"
+            @click="showFetch = false">Cancel</button>
+          <button type="submit" data-fetch-submit :disabled="!fetchUrl.trim() || fetchBusy"
+            class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50">
+            {{ fetchBusy ? 'Fetching…' : 'Fetch' }}</button>
+        </div>
+      </form>
+    </div>
 
     <ConfirmDialog :open="confirmDelete" :title="`Delete '${item.name}'`"
       message="The item will be moved to trash. You can restore it from Trash before it is permanently purged."
