@@ -696,6 +696,168 @@ describe('ItemFormView product_url', () => {
   })
 })
 
+describe('ItemFormView AI autofill (add form)', () => {
+  function newRouter(): Router {
+    return createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/items', component: { template: '<div>items</div>' } },
+        { path: '/items/new', component: ItemFormView },
+        { path: '/items/:id', component: { template: '<div>detail</div>' } },
+      ],
+    })
+  }
+
+  async function mountCreate() {
+    const router = newRouter()
+    await router.push('/items/new')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    return w
+  }
+
+  // Queue n photos through the real pick flow (canvas stubbed AFTER mount,
+  // like the upload tests above); returns the downscaled blobs in pick
+  // order, each with DISTINCT content ("j0", "j1", …) so tests can pin
+  // which blobs a FormData POST carries and in what order.
+  async function queuePhotos(w: ReturnType<typeof mount>, n: number): Promise<Blob[]> {
+    const blobs: Blob[] = []
+    const ctx = { drawImage: vi.fn() }
+    const canvas = { width: 0, height: 0, getContext: () => ctx,
+      toBlob: (cb: (b: Blob) => void) => { const b = new Blob([`j${blobs.length}`], { type: 'image/jpeg' }); blobs.push(b); cb(b) } }
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 4000, height: 2000, close() {} }))
+    const realCreate = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) =>
+      tag === 'canvas' ? canvas as unknown as HTMLCanvasElement : realCreate(tag as keyof HTMLElementTagNameMap))
+    const files = Array.from({ length: n }, (_, i) => {
+      const f = new File(['x'], `big${i}.jpg`, { type: 'image/jpeg' })
+      Object.defineProperty(f, 'size', { value: 9_000_000 }) // past the 2MB downscale gate
+      return f
+    })
+    const input = w.find('input[accept="image/*"]')
+    Object.defineProperty(input.element, 'files', { value: files })
+    await input.trigger('change')
+    await flushPromises()
+    return blobs
+  }
+
+  function autofillButton(w: ReturnType<typeof mount>) {
+    return w.findAll('button').find(b => b.text().includes('Autofill from photos'))
+  }
+
+  it('renders no autofill button until photos are queued', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })))
+    const w = await mountCreate()
+    expect(autofillButton(w)).toBeUndefined()
+    expect(w.text()).not.toContain('Autofill from photos')
+  })
+
+  it('shows a count hint; click POSTs every queued blob as a "files" part', async () => {
+    const calls: any[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url === '/api/v1/autofill') { calls.push([url, init]); return new Response(JSON.stringify({}), { status: 200 }) }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const w = await mountCreate()
+    const blobs = await queuePhotos(w, 2)
+    expect(blobs).toHaveLength(2)
+    expect(w.text()).toContain('uses 2 photos')
+    await autofillButton(w)!.trigger('click')
+    await flushPromises()
+    expect(calls).toHaveLength(1)
+    const [url, init] = calls[0]
+    expect(url).toBe('/api/v1/autofill')
+    expect(init.method).toBe('POST')
+    const parts = (init.body as FormData).getAll('files')
+    expect(parts).toHaveLength(2)
+    // FormData.append(name, blob, filename) wraps blobs as Files — pin
+    // identity by content: BOTH queued blobs, in pick order.
+    expect(parts[0]).toBeInstanceOf(Blob)
+    expect((parts[0] as Blob).type).toBe('image/jpeg')
+    expect(await (parts[0] as Blob).text()).toBe('j0')
+    expect(await (parts[1] as Blob).text()).toBe('j1')
+    // every key absent: nothing applied, no ✨ markers, no error toast
+    expect(w.findAll('[data-ai-hint]')).toHaveLength(0)
+    expect(toasts.some(t => t.type === 'error')).toBe(false)
+  })
+
+  it('fills returned fields with ✨ markers, appends tags deduped; 6 photos post only the first 4', async () => {
+    const bodies: FormData[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url === '/api/v1/autofill') {
+        bodies.push(init.body)
+        return new Response(JSON.stringify({ name: 'Resistor pack', description: 'blue ones', qty: 12, unit: 'pcs', tags: ['electronics', 'existing'] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const w = await mountCreate()
+    const blobs = await queuePhotos(w, 6)
+    expect(blobs).toHaveLength(6)
+    ;(w.vm as any).form.tags = ['existing'] // the user's own chip: must survive
+    expect(w.text()).toContain('first 4')
+    await autofillButton(w)!.trigger('click')
+    await flushPromises()
+    expect(bodies[0].getAll('files')).toHaveLength(4)
+    expect(await (bodies[0].getAll('files')[3] as Blob).text()).toBe('j3') // …and they are the FIRST four
+    const vm = w.vm as any
+    expect(vm.form.name).toBe('Resistor pack')
+    expect(vm.form.description).toBe('blue ones')
+    expect(vm.form.qty).toBe(12)
+    expect(vm.form.unit).toBe('pcs')
+    expect(vm.form.tags).toEqual(['existing', 'electronics']) // appended after the user's chip, deduped
+    expect(w.findAll('[data-ai-hint]')).toHaveLength(5) // name description qty unit tags
+    expect(toasts.some(t => t.message === 'Filled: name, description, qty, unit, tags' && t.type === 'success')).toBe(true)
+    // a manual edit clears just that field's marker
+    await w.find('input').setValue('My own name') // first input in the form = Name
+    expect(w.findAll('[data-ai-hint]')).toHaveLength(4)
+  })
+
+  it('ai_not_configured toasts the server config hint and leaves every field untouched', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/v1/autofill')
+        return new Response(JSON.stringify({ error: { code: 'ai_not_configured', message: 'set ai_api_key and ai_model in config to enable autofill' } }), { status: 400 })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const w = await mountCreate()
+    await queuePhotos(w, 1)
+    await autofillButton(w)!.trigger('click')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'set ai_api_key and ai_model in config to enable autofill' && t.type === 'error')).toBe(true)
+    expect(toasts.some(t => t.message.startsWith('Filled'))).toBe(false)
+    const vm = w.vm as any
+    expect(vm.form.name).toBe('')
+    expect(vm.form.qty).toBe(1)
+    expect(vm.form.unit).toBe('')
+    expect(vm.form.tags).toEqual([])
+    expect(w.findAll('[data-ai-hint]')).toHaveLength(0)
+  })
+
+  it('while analyzing: button disabled + "Analyzing…", form untouched, never POSTs /items', async () => {
+    let release!: (r: Response) => void
+    const itemPosts: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url === '/api/v1/autofill') return new Promise<Response>(res => { release = res })
+      if (url.endsWith('/api/v1/items') && init?.method === 'POST') { itemPosts.push(url); return new Response(JSON.stringify({ id: 42 }), { status: 200 }) }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const w = await mountCreate()
+    await queuePhotos(w, 1)
+    const btn = autofillButton(w)!
+    await btn.trigger('click')
+    await flushPromises()
+    expect(btn.attributes('disabled')).toBeDefined()
+    expect(btn.text()).toContain('Analyzing…')
+    expect((w.vm as any).form.name).toBe('') // no form state changes while analyzing
+    expect(itemPosts).toEqual([]) // autofill alone never saves
+    release(new Response(JSON.stringify({ name: 'Gadget', qty: 3 }), { status: 200 }))
+    await flushPromises()
+    expect(btn.attributes('disabled')).toBeUndefined()
+    expect(btn.text()).toContain('Autofill from photos')
+    expect((w.vm as any).form.name).toBe('Gadget')
+    expect(itemPosts).toEqual([]) // applying fields never saves either
+  })
+})
+
 describe('ItemFormView widgets', () => {
   const item = { id: 9, name: 'Widget', description: 'd', qty: 2, unit: 'pcs', location_id: 3,
     visibility: 'private', created_at: '', updated_at: '', tags: [], photos: [], documents: [], projects: [] }

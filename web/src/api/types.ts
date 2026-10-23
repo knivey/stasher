@@ -76,6 +76,16 @@ export interface SessionRow { id: number; user_agent: string; last_ip: string; c
 export interface Invite { id: number; code: string; created_at: string; used_by_email: string; used_at: string | null }
 export interface AdminUser extends User { disabled: boolean; created_at: string }
 export interface ListResponse<T> { data: T[]; total: number }
+// AI autofill: POST /autofill proposes item fields from photos. Every key
+// is OPTIONAL — present only when the model returned a usable value
+// (api-notes "AI autofill"); nothing is stored server-side.
+export interface AutofillFields {
+  name?: string
+  description?: string
+  qty?: number
+  unit?: string
+  tags?: string[]
+}
 // thumb_key is returned by /trash but /files/{key} 404s while the item is
 // trashed (photo rows cascade on delete) — never render an <img> from it.
 export interface TrashEntry {

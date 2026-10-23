@@ -1,4 +1,4 @@
-import type { ProjectBookmark, ProjectComment, ProjectFile, ProjectNote } from './types'
+import type { AutofillFields, ProjectBookmark, ProjectComment, ProjectFile, ProjectNote } from './types'
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -49,6 +49,15 @@ export const addLocationPhoto = (id: number, file: File) =>
 
 export const removeLocationPhoto = (id: number) =>
   api.del(`/api/v1/locations/${id}/photo`)
+
+// AI autofill (api-notes "AI autofill"): 1–4 photo blobs, each one "files"
+// FILE part, → AI-proposed item fields; every response key is optional.
+// Same fetch/handle path as upload — unlike upload, MULTIPLE parts.
+export const autofillItems = async (files: Blob[]): Promise<AutofillFields> => {
+  const fd = new FormData()
+  for (const blob of files) fd.append('files', blob, 'photo.jpg')
+  return handle<AutofillFields>(await fetch('/api/v1/autofill', { method: 'POST', body: fd }))
+}
 
 // Projects flesh-out: notes, comments, materials, bookmarks (api-notes "Projects").
 export const addProjectNote = (id: number, body: string) =>

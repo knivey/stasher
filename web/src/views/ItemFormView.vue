@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, ApiError } from '../api/client'
-import type { Item, ListResponse, Location } from '../api/types'
+import { api, ApiError, autofillItems } from '../api/client'
+import type { AutofillFields, Item, ListResponse, Location } from '../api/types'
 import { useAuthStore } from '../stores/auth'
 import { toast } from '../utils/toast'
 import { downscaleImage } from '../utils/image'
@@ -176,6 +176,7 @@ async function save(again: boolean = false) {
       initialTags = []
       queuedPhotos.value = []
       queuedDocs.value = []
+      aiTouched.clear() // fresh item: no stale ✨ markers
       // replace, not push: no history entry per item, and a reload keeps the
       // location prefill via applyLocationPrefill.
       router?.replace(`/items/new${form.location_id ? `?location=${form.location_id}` : ''}`)
@@ -251,6 +252,62 @@ function cancel() {
   router?.push(editing.value ? `/items/${itemId.value}` : '/items')
 }
 
+// AI autofill: fields proposed from photos (the add form's queued-blob
+// flow; Task 5's edit-form photo picker reuses the same apply helper) land
+// in the form ONLY via applyAIFields — it writes just the returned keys
+// and marks each in aiTouched so the field's label shows a ✨ hint until
+// the user edits that field by hand. Tags APPEND to the existing chips
+// (deduped case-sensitively, matching TagInput) — the user's chips win.
+const analyzing = ref(false)
+const aiTouched = reactive(new Set<string>())
+
+function applyAIFields(fields: AutofillFields): string[] {
+  const filled: string[] = []
+  if (fields.name !== undefined) { form.name = fields.name; aiTouched.add('name'); filled.push('name') }
+  if (fields.description !== undefined) { form.description = fields.description; aiTouched.add('description'); filled.push('description') }
+  if (fields.qty !== undefined) { form.qty = fields.qty; aiTouched.add('qty'); filled.push('qty') }
+  if (fields.unit !== undefined) { form.unit = fields.unit; aiTouched.add('unit'); filled.push('unit') }
+  if (fields.tags?.length) {
+    const merged = [...form.tags]
+    for (const t of fields.tags) {
+      if (merged.length >= 50) break // backend tag cap (TagInput enforces the same)
+      if (!merged.includes(t)) merged.push(t)
+    }
+    form.tags = merged
+    aiTouched.add('tags')
+    filled.push('tags')
+  }
+  return filled
+}
+
+// "Autofill from photos" (create form): analyze the queued photos, prefill
+// for review — autofill NEVER saves. Only the first 4 queued blobs are
+// sent (endpoint cap); while in flight the button is disabled and says
+// "Analyzing…". The button lives inside the create-only photos block.
+const autofillHint = computed(() => {
+  const n = queuedPhotos.value.length
+  return `uses ${n} photo${n === 1 ? '' : 's'}${n > 4 ? ' (first 4)' : ''}`
+})
+
+async function autofillFromPhotos() {
+  if (analyzing.value || saving.value || !queuedPhotos.value.length) return
+  analyzing.value = true
+  try {
+    // a pick still encoding belongs in the analysis too (same drain save does)
+    await drainPendingEncodes()
+    const fields = await autofillItems(queuedPhotos.value.slice(0, 4))
+    const filled = applyAIFields(fields)
+    if (filled.length) toast(`Filled: ${filled.join(', ')}`, 'success')
+    else toast('AI returned no suggestions', 'info')
+  } catch (e) {
+    // The server's message is the whole story: ai_not_configured names the
+    // missing config keys, rate_limited says so — no "try again" gloss.
+    toast((e as Error).message, 'error')
+  } finally {
+    analyzing.value = false
+  }
+}
+
 // Fire-and-forget archive of the entered product URL (spec §4). Edit mode
 // ONLY — the fetch endpoint hangs off an existing item id and create mode
 // has none (that narrowing is the ruling; archive after save via the detail
@@ -275,11 +332,11 @@ defineExpose({ form, save, tagsEqual })
   <div class="max-w-xl space-y-4">
     <h1 class="text-2xl font-bold dark:text-slate-100">{{ editing ? 'Edit item' : 'New item' }}</h1>
     <form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-4" @submit.prevent="save(false)">
-      <label class="block text-sm font-medium dark:text-slate-100">Name
-        <input ref="nameInput" v-model="form.name" required class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
+      <label class="block text-sm font-medium dark:text-slate-100" :data-ai-hint="aiTouched.has('name') || undefined">Name<span v-if="aiTouched.has('name')" class="ml-1" aria-hidden="true">✨</span>
+        <input ref="nameInput" v-model="form.name" required @input="aiTouched.delete('name')" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
       </label>
-      <label class="block text-sm font-medium dark:text-slate-100">Description
-        <textarea v-model="form.description" rows="3" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal"></textarea>
+      <label class="block text-sm font-medium dark:text-slate-100" :data-ai-hint="aiTouched.has('description') || undefined">Description<span v-if="aiTouched.has('description')" class="ml-1" aria-hidden="true">✨</span>
+        <textarea v-model="form.description" rows="3" @input="aiTouched.delete('description')" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal"></textarea>
       </label>
       <div class="flex items-end gap-2">
         <label class="flex-1 block text-sm font-medium dark:text-slate-100">Product page URL <span class="font-normal text-slate-400 dark:text-slate-500">(optional)</span>
@@ -293,11 +350,11 @@ defineExpose({ form, save, tagsEqual })
           class="mb-[3px] rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm whitespace-nowrap disabled:opacity-50">Archive</button>
       </div>
       <div class="flex gap-4">
-        <label class="flex-1 block text-sm font-medium dark:text-slate-100">Qty
-          <input v-model.number="form.qty" type="number" min="0" step="any" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
+        <label class="flex-1 block text-sm font-medium dark:text-slate-100" :data-ai-hint="aiTouched.has('qty') || undefined">Qty<span v-if="aiTouched.has('qty')" class="ml-1" aria-hidden="true">✨</span>
+          <input v-model.number="form.qty" type="number" min="0" step="any" @input="aiTouched.delete('qty')" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
         </label>
-        <label class="flex-1 block text-sm font-medium dark:text-slate-100">Unit
-          <input v-model="form.unit" placeholder="pcs, kg…" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
+        <label class="flex-1 block text-sm font-medium dark:text-slate-100" :data-ai-hint="aiTouched.has('unit') || undefined">Unit<span v-if="aiTouched.has('unit')" class="ml-1" aria-hidden="true">✨</span>
+          <input v-model="form.unit" placeholder="pcs, kg…" @input="aiTouched.delete('unit')" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
         </label>
       </div>
       <label class="block text-sm font-medium dark:text-slate-100">Visibility
@@ -309,8 +366,8 @@ defineExpose({ form, save, tagsEqual })
       <div class="block text-sm font-medium dark:text-slate-100">Location
         <LocationSelect v-model="form.location_id" :locations="locations" class="mt-1" />
       </div>
-      <div class="block text-sm font-medium dark:text-slate-100">Tags
-        <TagInput v-model:tags="form.tags" class="mt-1" />
+      <div class="block text-sm font-medium dark:text-slate-100" :data-ai-hint="aiTouched.has('tags') || undefined">Tags<span v-if="aiTouched.has('tags')" class="ml-1" aria-hidden="true">✨</span>
+        <TagInput v-model:tags="form.tags" @update:tags="aiTouched.delete('tags')" class="mt-1" />
       </div>
       <div v-if="!editing" class="block text-sm font-medium dark:text-slate-100">Photos & documents
         <div class="mt-1 flex gap-2">
@@ -326,6 +383,17 @@ defineExpose({ form, save, tagsEqual })
             :class="saving && 'opacity-50 pointer-events-none'">Add document
             <input type="file" multiple class="hidden" :disabled="saving" @change="onPickDocs" />
           </label>
+        </div>
+        <!-- AI autofill (spec §5): analyze queued photos → prefill the form
+             for review. Autofill never saves; only the first 4 queued blobs
+             are sent (endpoint cap). Create form only — the edit form gets
+             its own photo picker (Task 5). -->
+        <div v-if="queuedPhotos.length" class="mt-2 flex flex-wrap items-center gap-2">
+          <button type="button" :disabled="analyzing || saving" @click="autofillFromPhotos"
+            class="rounded-lg border border-slate-900 dark:border-slate-100 text-slate-900 dark:text-slate-100 px-3 py-1.5 text-sm font-medium disabled:opacity-50">
+            {{ analyzing ? 'Analyzing…' : '✨ Autofill from photos' }}</button>
+          <span class="text-xs text-slate-500 dark:text-slate-400 font-normal">
+            {{ analyzing ? 'reading your photos…' : autofillHint }}</span>
         </div>
         <p v-if="queuedPhotos.length || queuedDocs.length" class="mt-1 text-xs text-slate-500 dark:text-slate-400 font-normal">
           {{ queuedPhotos.length }} photo{{ queuedPhotos.length === 1 ? '' : 's' }},

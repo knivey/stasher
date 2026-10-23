@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { api, ApiError, setUnauthorizedHandler } from './client'
+import { api, ApiError, autofillItems, setUnauthorizedHandler } from './client'
 
 function mockFetch(status: number, body: unknown) {
   return vi.fn().mockResolvedValue(
@@ -50,5 +50,18 @@ describe('api client', () => {
     expect(url).toBe('/api/v1/items/1/photos')
     expect(init.body).toBeInstanceOf(FormData)
     expect(init.body.get('file')).toBeTruthy()
+  })
+
+  it('autofillItems posts every blob as a "files" part and returns the fields', async () => {
+    const f = vi.fn().mockResolvedValue(new Response(JSON.stringify({ name: 'X', qty: 2 }), { status: 200 }))
+    vi.stubGlobal('fetch', f)
+    const blobs = [new Blob(['a'], { type: 'image/jpeg' }), new Blob(['b'], { type: 'image/jpeg' })]
+    const res = await autofillItems(blobs)
+    const [url, init] = f.mock.calls[0]
+    expect(url).toBe('/api/v1/autofill')
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeInstanceOf(FormData)
+    expect(init.body.getAll('files')).toHaveLength(2)
+    expect(res).toEqual({ name: 'X', qty: 2 })
   })
 })
