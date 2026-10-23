@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +33,15 @@ type Fields struct {
 // DefaultBaseURL is the stock OpenAI endpoint, used when no ai_base_url
 // is configured.
 const DefaultBaseURL = "https://api.openai.com/v1"
+
+// ErrUnparseable is wrapped (via %w) by every error raised because the
+// provider's ANSWER could not be turned into Fields — both a model reply
+// that isn't JSON and a response with no content at all. The HTTP handler
+// discriminates on it with errors.Is to answer 400 ai_bad_response;
+// every other client error (transport, non-2xx, oversized response) is a
+// 502 ai_upstream_error. Typed sentinel, not a text match: callers must
+// never string-compare error text.
+var ErrUnparseable = errors.New("ai: unparseable model response")
 
 const (
 	// requestTimeout bounds one autofill call end to end.
@@ -161,7 +171,7 @@ func (c *Client) Autofill(ctx context.Context, images [][]byte, mimes []string) 
 		return Fields{}, fmt.Errorf("ai: decoding response: %w", err)
 	}
 	if len(env.Choices) == 0 || strings.TrimSpace(env.Choices[0].Message.Content) == "" {
-		return Fields{}, fmt.Errorf("ai: unparseable model response: no content")
+		return Fields{}, fmt.Errorf("%w: no content", ErrUnparseable)
 	}
 
 	// Content is a JSON object possibly wrapped in ``` fences by
@@ -169,7 +179,9 @@ func (c *Client) Autofill(ctx context.Context, images [][]byte, mimes []string) 
 	// ignored, explicit null qty → nil.
 	var f fieldsJSON
 	if err := json.Unmarshal([]byte(stripFences(env.Choices[0].Message.Content)), &f); err != nil {
-		return Fields{}, fmt.Errorf("ai: unparseable model response: %w", err)
+		// double %w: the sentinel drives the handler's 400 mapping while
+		// the json error stays unwrappable for diagnostics
+		return Fields{}, fmt.Errorf("%w: %w", ErrUnparseable, err)
 	}
 	return Fields(f), nil
 }

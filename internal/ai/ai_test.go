@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -263,6 +264,10 @@ func TestAutofillMalformedContent(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unparseable") {
 		t.Errorf("error %q does not say unparseable", err)
+	}
+	// the typed sentinel drives the handler's 400 ai_bad_response mapping
+	if !errors.Is(err, ErrUnparseable) {
+		t.Errorf("error %q does not satisfy errors.Is(err, ErrUnparseable)", err)
 	}
 }
 

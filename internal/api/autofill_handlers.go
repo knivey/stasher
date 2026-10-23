@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"math"
@@ -106,14 +107,12 @@ func (s *Server) handleAutofill(w http.ResponseWriter, r *http.Request) {
 
 	fields, err := s.aiClient.Autofill(r.Context(), images, mimes)
 	if err != nil {
-		// The client wraps model output it cannot parse as
-		// "ai: unparseable model response: …" (internal/ai/ai.go, both the
-		// no-content and bad-JSON cases). That is a provider ANSWER we
-		// can't use rather than a transport failure, and it is
-		// distinguishable only by that text — the client returns plain
-		// wrapped errors, no typed sentinel. Client errors never carry
-		// provider bodies, so both messages stay generic regardless.
-		if strings.Contains(err.Error(), "unparseable model response") {
+		// ai.ErrUnparseable marks provider ANSWERS we can't use (model
+		// reply not JSON, or no content) — a 400-class problem. Everything
+		// else (non-2xx, timeout, oversized or non-JSON response envelope)
+		// maps to a generic 502. Client errors never carry provider bodies,
+		// so both messages stay generic regardless.
+		if errors.Is(err, ai.ErrUnparseable) {
 			slog.Warn("ai autofill: unparseable model response", "err", err)
 			writeErr(w, http.StatusBadRequest, "ai_bad_response",
 				"AI provider returned an unparseable response")
@@ -142,8 +141,10 @@ func aiNotConfiguredMessage(c *ai.Client) string {
 // clampAIFields applies the spec §4 clamps — AI output is clamped, never
 // rejected — and omits every key without a usable value: the response only
 // carries fields the model effectively returned. Caps are measured in
-// bytes to match the item validator (so a clamped value always survives
-// the subsequent item create), and truncation never splits a UTF-8 rune.
+// bytes; the name/tags caps match the item validator (so a clamped prefill
+// always survives item create), while description (10,000) and unit (50)
+// follow the spec's numbers — item create enforces no length on those.
+// Truncation never splits a UTF-8 rune.
 func clampAIFields(f ai.Fields) map[string]any {
 	out := map[string]any{}
 	if name := strings.TrimSpace(f.Name); name != "" {

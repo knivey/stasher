@@ -375,11 +375,15 @@ POST /api/v1/autofill — multipart, each image one "files" FILE part
   (429), `ai_not_configured` (400 — message names exactly which of
   `ai_api_key`/`ai_model` is missing), `ai_bad_response` (400 — provider
   answered but its content wasn't parseable), `ai_upstream_error` (502 —
-  non-2xx/timeout/oversized response; GENERIC message, the provider's
-  body is never echoed).
+  non-2xx/timeout/oversized response, or an unparseable response envelope
+  (200 with a non-JSON body); GENERIC message, the provider's body is
+  never echoed).
 - **Clamps, not rejections** (AI output is clamped, never a 4xx): caps are
-  measured in bytes to match the item validator, and truncation never
-  splits a UTF-8 character.
+  measured in bytes, and truncation never splits a UTF-8 character. The
+  name (200) and tags (100/entry) caps match the item validator so a
+  clamped prefill always survives item create; description (10,000) and
+  unit (50) are the spec's own numbers — item create enforces no length
+  on those fields.
 
   | Field | Rule |
   |---|---|
