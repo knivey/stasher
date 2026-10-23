@@ -2,7 +2,7 @@
 * for items like ICs / electronic components we should have a automated datasheet fetcher
 * the projects reference urls should include something that can try to archive the page, even if its just a headless chrome making a pdf or full page screenshot, we don't want to be archiving something like youtube videos though. should be opt in per url.
 * AI integration for faster adding, we can configure an AI service to use in a config, the AI can look at the image and autofill the fields for adding new items
-* items should have a product page field, also archivable
+~~* items should have a product page field, also archivable~~ done 2026-10-22: `product_url` + archive (chromium PDF) in the external-content round
 
 the headless chrome can be used for the datasheet fetcher as well if we need to go that route, many sites dont like bots.. also this could be a good candidate to use camofox instead of headless chrome its designed to bypass bot detections.
 
