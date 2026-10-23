@@ -292,8 +292,8 @@ SELECT * FROM item_notes WHERE item_id = ? ORDER BY created_at DESC, id DESC;
 DELETE FROM item_notes WHERE id = ? AND item_id = ?;
 
 -- name: CreateProject :one
-INSERT INTO projects (user_id, name, status, notes, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?) RETURNING *;
+INSERT INTO projects (user_id, name, status, notes, visibility, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *;
 
 -- name: GetProject :one
 SELECT * FROM projects WHERE id = ? AND user_id = ?;
@@ -302,7 +302,7 @@ SELECT * FROM projects WHERE id = ? AND user_id = ?;
 SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC;
 
 -- name: UpdateProject :exec
-UPDATE projects SET name = ?, status = ?, notes = ?, updated_at = ? WHERE id = ? AND user_id = ?;
+UPDATE projects SET name = ?, status = ?, notes = ?, visibility = ?, updated_at = ? WHERE id = ? AND user_id = ?;
 
 -- name: DeleteProject :exec
 DELETE FROM projects WHERE id = ? AND user_id = ?;

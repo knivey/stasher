@@ -5,6 +5,69 @@ import (
 	"testing"
 )
 
+func TestProjectVisibility(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	cookie := registerUser(t, ts, "projvis@test.dev", "longpassword1")
+
+	// create: defaults to private
+	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "P1"}, cookie)
+	var created struct {
+		Visibility string `json:"visibility"`
+	}
+	decodeBody(t, resp, &created)
+	if created.Visibility != "private" {
+		t.Fatalf("default visibility = %q, want private", created.Visibility)
+	}
+
+	// create: explicit shared
+	resp = doJSON(t, ts, "POST", "/api/v1/projects",
+		map[string]any{"name": "P2", "visibility": "shared"}, cookie)
+	var created2 struct {
+		ID         int64  `json:"id"`
+		Visibility string `json:"visibility"`
+	}
+	decodeBody(t, resp, &created2)
+	if created2.Visibility != "shared" {
+		t.Fatalf("visibility = %q, want shared", created2.Visibility)
+	}
+
+	// PATCH: flip + invalid value + absent-keeps
+	resp = doJSON(t, ts, "PATCH", "/api/v1/projects/"+fmtInt64(created2.ID),
+		map[string]any{"visibility": "private"}, cookie)
+	var patched struct {
+		Visibility string `json:"visibility"`
+	}
+	decodeBody(t, resp, &patched)
+	if patched.Visibility != "private" {
+		t.Fatalf("patched visibility = %q, want private", patched.Visibility)
+	}
+	resp = doJSON(t, ts, "PATCH", "/api/v1/projects/"+fmtInt64(created2.ID),
+		map[string]any{"visibility": "public"}, cookie)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid visibility status = %d, want 400", resp.StatusCode)
+	}
+	resp = doJSON(t, ts, "PATCH", "/api/v1/projects/"+fmtInt64(created2.ID),
+		map[string]any{"status": "active"}, cookie) // visibility absent → stays
+	var after struct {
+		Visibility string `json:"visibility"`
+	}
+	decodeBody(t, resp, &after)
+	if after.Visibility != "private" {
+		t.Fatalf("absent visibility changed: %q", after.Visibility)
+	}
+
+	// list carries visibility
+	var list struct {
+		Data []struct {
+			Visibility string `json:"visibility"`
+		} `json:"data"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/projects", nil, cookie), &list)
+	if len(list.Data) != 2 {
+		t.Fatalf("list len = %d, want 2", len(list.Data))
+	}
+}
+
 func TestProjectLifecycle(t *testing.T) {
 	_, ts := newTestServer(t, nil)
 	cookie := registerUser(t, ts, "proj@test.dev", "longpassword1")

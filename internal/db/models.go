@@ -94,13 +94,42 @@ type Location struct {
 }
 
 type Project struct {
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"user_id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Notes      string `json:"notes"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+	Visibility string `json:"visibility"`
+}
+
+type ProjectBookmark struct {
+	ID             int64         `json:"id"`
+	ProjectID      int64         `json:"project_id"`
+	Url            string        `json:"url"`
+	Title          string        `json:"title"`
+	ArchivedFileID sql.NullInt64 `json:"archived_file_id"`
+	CreatedAt      string        `json:"created_at"`
+}
+
+type ProjectComment struct {
 	ID        int64  `json:"id"`
+	ProjectID int64  `json:"project_id"`
 	UserID    int64  `json:"user_id"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Notes     string `json:"notes"`
+	Body      string `json:"body"`
 	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+}
+
+type ProjectFile struct {
+	ID         int64          `json:"id"`
+	ProjectID  int64          `json:"project_id"`
+	StorageKey string         `json:"storage_key"`
+	ThumbKey   sql.NullString `json:"thumb_key"`
+	Filename   string         `json:"filename"`
+	MimeType   string         `json:"mime_type"`
+	SizeBytes  int64          `json:"size_bytes"`
+	CreatedAt  string         `json:"created_at"`
 }
 
 type ProjectItem struct {
@@ -109,6 +138,13 @@ type ProjectItem struct {
 	QtyUsed   sql.NullFloat64 `json:"qty_used"`
 	Notes     string          `json:"notes"`
 	AddedAt   string          `json:"added_at"`
+}
+
+type ProjectNote struct {
+	ID        int64  `json:"id"`
+	ProjectID int64  `json:"project_id"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
 }
 
 type Session struct {

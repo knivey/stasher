@@ -18,14 +18,16 @@ func validProjectStatus(s string) bool {
 func projectJSON(p dbpkg.Project) map[string]any {
 	return map[string]any{
 		"id": p.ID, "name": p.Name, "status": p.Status, "notes": p.Notes,
+		"visibility": p.Visibility,
 		"created_at": p.CreatedAt, "updated_at": p.UpdatedAt,
 	}
 }
 
 type projectReq struct {
-	Name   string  `json:"name"`
-	Status *string `json:"status"`
-	Notes  *string `json:"notes"`
+	Name       string  `json:"name"`
+	Status     *string `json:"status"`
+	Notes      *string `json:"notes"`
+	Visibility *string `json:"visibility"`
 }
 
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +49,14 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		}
 		status = *req.Status
 	}
+	visibility := "private"
+	if req.Visibility != nil {
+		if *req.Visibility != "private" && *req.Visibility != "shared" {
+			writeErr(w, http.StatusBadRequest, "validation_error", "visibility must be private or shared")
+			return
+		}
+		visibility = *req.Visibility
+	}
 	notes := ""
 	if req.Notes != nil {
 		notes = *req.Notes
@@ -54,7 +64,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	p, err := s.q.CreateProject(r.Context(), dbpkg.CreateProjectParams{
 		UserID: u.ID, Name: req.Name, Status: status, Notes: notes,
-		CreatedAt: now, UpdatedAt: now,
+		Visibility: visibility, CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		s.internalErr(w, err)
@@ -148,9 +158,17 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	if req.Notes != nil {
 		p.Notes = *req.Notes
 	}
+	if req.Visibility != nil {
+		if *req.Visibility != "private" && *req.Visibility != "shared" {
+			writeErr(w, http.StatusBadRequest, "validation_error", "visibility must be private or shared")
+			return
+		}
+		p.Visibility = *req.Visibility
+	}
 	if err := s.q.UpdateProject(r.Context(), dbpkg.UpdateProjectParams{
 		Name: p.Name, Status: p.Status, Notes: p.Notes,
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339), ID: p.ID, UserID: u.ID,
+		Visibility: p.Visibility,
+		UpdatedAt:  time.Now().UTC().Format(time.RFC3339), ID: p.ID, UserID: u.ID,
 	}); err != nil {
 		s.internalErr(w, err)
 		return

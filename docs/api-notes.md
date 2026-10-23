@@ -416,3 +416,15 @@ Facts discovered by the frontend round, kept here so they survive:
   entries); new ids are assigned. Trash LISTING rows carry no notes payload.
 - **Copy**: notes are NOT copied — the copy starts with an empty notes
   list (same ruling as the usage ledger's fresh baseline).
+
+## Project visibility (2026-10-23)
+
+- `visibility` ∈ `private` | `shared` on projects. **Create** accepts it
+  (default `private`); anything else → `400 validation_error`.
+- **PATCH** (`PATCH /projects/{id}`) follows the standard absent-keeps
+  rule: `visibility` absent = keep; a provided value must be `private`
+  or `shared` (else `400`).
+- All project JSON (create/detail/list) carries `"visibility"`.
+- `shared` currently has **no viewer semantics** — sharing/viewing by
+  other users lands with the upcoming shared-projects endpoints; the
+  flag is stored and echoed only until then.

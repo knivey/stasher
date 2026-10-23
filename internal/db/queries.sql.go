@@ -421,17 +421,18 @@ func (q *Queries) CreateLocation(ctx context.Context, arg CreateLocationParams) 
 }
 
 const createProject = `-- name: CreateProject :one
-INSERT INTO projects (user_id, name, status, notes, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, status, notes, created_at, updated_at
+INSERT INTO projects (user_id, name, status, notes, visibility, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, status, notes, created_at, updated_at, visibility
 `
 
 type CreateProjectParams struct {
-	UserID    int64  `json:"user_id"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Notes     string `json:"notes"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	UserID     int64  `json:"user_id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Notes      string `json:"notes"`
+	Visibility string `json:"visibility"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -440,6 +441,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.Name,
 		arg.Status,
 		arg.Notes,
+		arg.Visibility,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -452,6 +454,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -1101,7 +1104,7 @@ func (q *Queries) GetPhotoByKey(ctx context.Context, key string) (GetPhotoByKeyR
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, user_id, name, status, notes, created_at, updated_at FROM projects WHERE id = ? AND user_id = ?
+SELECT id, user_id, name, status, notes, created_at, updated_at, visibility FROM projects WHERE id = ? AND user_id = ?
 `
 
 type GetProjectParams struct {
@@ -1120,6 +1123,7 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -1696,7 +1700,7 @@ func (q *Queries) ListProjectItems(ctx context.Context, projectID int64) ([]List
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, user_id, name, status, notes, created_at, updated_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC
+SELECT id, user_id, name, status, notes, created_at, updated_at, visibility FROM projects WHERE user_id = ? ORDER BY updated_at DESC
 `
 
 func (q *Queries) ListProjects(ctx context.Context, userID int64) ([]Project, error) {
@@ -1716,6 +1720,7 @@ func (q *Queries) ListProjects(ctx context.Context, userID int64) ([]Project, er
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
@@ -2298,16 +2303,17 @@ func (q *Queries) UpdateLocation(ctx context.Context, arg UpdateLocationParams) 
 }
 
 const updateProject = `-- name: UpdateProject :exec
-UPDATE projects SET name = ?, status = ?, notes = ?, updated_at = ? WHERE id = ? AND user_id = ?
+UPDATE projects SET name = ?, status = ?, notes = ?, visibility = ?, updated_at = ? WHERE id = ? AND user_id = ?
 `
 
 type UpdateProjectParams struct {
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Notes     string `json:"notes"`
-	UpdatedAt string `json:"updated_at"`
-	ID        int64  `json:"id"`
-	UserID    int64  `json:"user_id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Notes      string `json:"notes"`
+	Visibility string `json:"visibility"`
+	UpdatedAt  string `json:"updated_at"`
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"user_id"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) error {
@@ -2315,6 +2321,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) er
 		arg.Name,
 		arg.Status,
 		arg.Notes,
+		arg.Visibility,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.UserID,
