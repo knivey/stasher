@@ -8,6 +8,8 @@ import { PROJECT_STATUSES, statusBadgeClass, visibilityBadgeClass } from '../uti
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import ProjectNotesSection from '../components/ProjectNotesSection.vue'
 import ProjectCommentsSection from '../components/ProjectCommentsSection.vue'
+import ProjectFilesSection from '../components/ProjectFilesSection.vue'
+import ProjectBookmarksSection from '../components/ProjectBookmarksSection.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -362,6 +364,13 @@ async function addProjectItem() {
     <ProjectNotesSection v-if="detail?.owner_view" :project-id="project.id" :notes="notes" @refresh="fetchDetail" />
     <ProjectCommentsSection :project-id="project.id" :comments="detail?.comments ?? []"
       :can-post="!!detail?.owner_view || project.visibility === 'shared'" @refresh="fetchDetail" />
+
+    <!-- Materials + bookmarks (presentational sections, same refresh
+         contract; owner controls gated on owner_view via the owner prop). -->
+    <ProjectFilesSection :project-id="project.id" :files="detail?.files ?? []"
+      :owner="!!detail?.owner_view" @refresh="fetchDetail" />
+    <ProjectBookmarksSection :project-id="project.id" :bookmarks="detail?.bookmarks ?? []"
+      :owner="!!detail?.owner_view" @refresh="fetchDetail" />
 
     <ConfirmDialog :open="confirmDelete" :title="`Delete '${project.name}'`"
       message="Permanently delete this project? Linked items are NOT deleted — only their links to this project are removed."
