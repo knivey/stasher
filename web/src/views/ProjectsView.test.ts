@@ -5,8 +5,8 @@ import ProjectsView from './ProjectsView.vue'
 import { toasts } from '../utils/toast'
 
 const PROJECTS = { data: [
-  { id: 1, name: 'NAS', status: 'active', notes: 'big rebuild', created_at: '', updated_at: '' },
-  { id: 2, name: 'Desk', status: 'planned', notes: '', created_at: '', updated_at: '' },
+  { id: 1, name: 'NAS', status: 'active', notes: 'big rebuild', visibility: 'private', created_at: '', updated_at: '' },
+  { id: 2, name: 'Desk', status: 'planned', notes: '', visibility: 'shared', created_at: '', updated_at: '' },
 ], total: 2 }
 
 interface Call { method: string; url: string; body?: string }
@@ -24,7 +24,7 @@ function mockFetch(opts: { postStatus?: number; postBody?: unknown } = {}) {
   return calls
 }
 
-async function mountView(calls: Call[]) {
+async function mountView(calls?: Call[]) {
   const router: Router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -35,7 +35,7 @@ async function mountView(calls: Call[]) {
   await router.push('/projects')
   const w = mount(ProjectsView, { global: { plugins: [router] } })
   await flushPromises()
-  expect(calls.length).toBeGreaterThan(0) // initial list fetch happened
+  if (calls) expect(calls.length).toBeGreaterThan(0) // initial list fetch happened
   return { w, router }
 }
 
@@ -51,8 +51,19 @@ describe('ProjectsView', () => {
     expect(cards[0].text()).toContain('big rebuild')
     expect(cards[0].find('[data-status-badge]').text()).toBe('active')
     expect(cards[1].find('[data-status-badge]').text()).toBe('planned')
+    expect(cards[0].find('[data-visibility-badge]').text()).toBe('private')
     // cards link to the project detail page (the card itself is the anchor)
     expect(cards[0].attributes('href')).toBe('/projects/1')
+  })
+
+  it('shows a shared badge for shared projects', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 1, name: 'Bench PSU', status: 'active', notes: '', visibility: 'shared', created_at: '', updated_at: '' }],
+      total: 1,
+    }), { status: 200 })))
+    const { w } = await mountView()
+    const badge = w.find('[data-visibility-badge]')
+    expect(badge.text()).toBe('shared')
   })
 
   it('shows an empty state when there are no projects', async () => {

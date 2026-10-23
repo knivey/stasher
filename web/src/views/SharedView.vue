@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, ApiError } from '../api/client'
-import type { Item, ListResponse } from '../api/types'
+import type { Item, ListResponse, SharedProject } from '../api/types'
 import { toast } from '../utils/toast'
 import Pagination from '../components/Pagination.vue'
 
@@ -59,7 +59,20 @@ async function fetch() {
   }
 }
 
-onMounted(fetch)
+// Projects shared with you — an independent dataset loaded alongside the
+// item list; item search/pagination never refetches it.
+const projects = ref<SharedProject[]>([])
+
+async function fetchProjects() {
+  try {
+    const res = await api.get<ListResponse<SharedProject>>('/api/v1/shared/projects')
+    projects.value = res.data
+  } catch (e) {
+    toast((e as Error).message, 'error')
+  }
+}
+
+onMounted(() => { fetch(); fetchProjects() })
 
 // Copy: busy tracked per item id — several cards can be in flight at once and
 // each stays disabled until its own request settles (a single-slot ref would
@@ -108,7 +121,18 @@ async function copy(item: SharedItem) {
       </div>
     </div>
 
-    <p v-else class="bg-white dark:bg-slate-800 rounded-xl shadow p-6 text-center text-slate-400 dark:text-slate-500 text-sm">No shared items found.</p>
+    <p v-else-if="!projects.length" class="bg-white dark:bg-slate-800 rounded-xl shadow p-6 text-center text-slate-400 dark:text-slate-500 text-sm">No shared items found.</p>
+
+    <h2 v-if="projects.length" class="text-lg font-semibold dark:text-slate-100">Projects</h2>
+    <div v-if="projects.length" data-shared-projects class="space-y-2">
+      <router-link v-for="p in projects" :key="p.id" :to="`/projects/${p.id}`"
+        class="block bg-white dark:bg-slate-800 rounded-xl shadow px-4 py-3 hover:shadow-md">
+        <div class="font-medium dark:text-slate-100">{{ p.name }}
+          <span class="ml-1.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 text-xs font-normal align-middle">{{ p.status }}</span>
+        </div>
+        <div class="text-xs text-slate-500 dark:text-slate-400">from {{ p.owner_name }}</div>
+      </router-link>
+    </div>
 
     <Pagination v-model:page="page" :total="total" :page-size="pageSize" />
   </div>

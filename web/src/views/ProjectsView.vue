@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import type { ListResponse, Project } from '../api/types'
 import { toast } from '../utils/toast'
-import { statusBadgeClass } from '../utils/projects'
+import { statusBadgeClass, visibilityBadgeClass } from '../utils/projects'
 
 const router = useRouter()
 const projects = ref<Project[]>([])
@@ -68,8 +68,12 @@ async function createProject() {
         class="block bg-white dark:bg-slate-800 rounded-xl shadow p-4 hover:shadow-md">
         <div class="flex items-center justify-between gap-2">
           <span class="font-medium truncate dark:text-slate-100">{{ p.name }}</span>
-          <span data-status-badge class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
-            :class="statusBadgeClass(p.status)">{{ p.status }}</span>
+          <span class="flex shrink-0 items-center gap-1">
+            <span data-status-badge class="rounded-full px-2 py-0.5 text-xs font-medium"
+              :class="statusBadgeClass(p.status)">{{ p.status }}</span>
+            <span data-visibility-badge class="rounded-full px-2 py-0.5 text-xs font-medium"
+              :class="visibilityBadgeClass(p.visibility)">{{ p.visibility }}</span>
+          </span>
         </div>
         <p v-if="p.notes" class="mt-1 text-sm text-slate-500 dark:text-slate-400 whitespace-pre-wrap">{{ p.notes }}</p>
       </router-link>

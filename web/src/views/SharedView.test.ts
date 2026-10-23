@@ -12,6 +12,7 @@ async function mountView(): Promise<{ w: ReturnType<typeof mount>; router: Route
     routes: [
       { path: '/shared', component: SharedView },
       { path: '/items/:id', component: { template: '<div>item</div>' } },
+      { path: '/projects/:id', component: { template: '<div>project</div>' } },
     ],
   })
   await router.push('/shared')
@@ -94,6 +95,22 @@ describe('SharedView', () => {
     expect(calls.filter(c => c === 'POST /api/v1/items/9/copy')).toHaveLength(1)
     expect(toasts.some(t => t.message === 'Copied to your inventory' && t.type === 'success')).toBe(true)
     expect(router.currentRoute.value.path).toBe('/items/12')
+  })
+
+  it('lists shared projects from other users', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(`GET ${url}`)
+      if (url.includes('/shared/projects'))
+        return new Response(JSON.stringify({ data: [{ id: 5, name: 'Bench PSU', status: 'active', owner_name: 'Alice', updated_at: '2026-10-23T00:00:00Z' }], total: 1 }), { status: 200 })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const { w } = await mountView()
+    expect(calls).toContain('GET /api/v1/shared/projects')
+    const block = w.find('[data-shared-projects]')
+    expect(block.text()).toContain('Bench PSU')
+    expect(block.text()).toContain('Alice')
+    expect(block.find('a[href="/projects/5"]').exists()).toBe(true)
   })
 
   it('shows the empty state when nothing is shared with you', async () => {

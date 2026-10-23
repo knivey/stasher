@@ -1,3 +1,5 @@
+import type { ProjectBookmark, ProjectComment, ProjectFile, ProjectNote } from './types'
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message)
@@ -47,3 +49,25 @@ export const addLocationPhoto = (id: number, file: File) =>
 
 export const removeLocationPhoto = (id: number) =>
   api.del(`/api/v1/locations/${id}/photo`)
+
+// Projects flesh-out: notes, comments, materials, bookmarks (api-notes "Projects").
+export const addProjectNote = (id: number, body: string) =>
+  api.post<ProjectNote>(`/api/v1/projects/${id}/notes`, { body })
+export const deleteProjectNote = (id: number, nid: number) =>
+  api.del(`/api/v1/projects/${id}/notes/${nid}`)
+export const addProjectComment = (id: number, body: string) =>
+  api.post<ProjectComment>(`/api/v1/projects/${id}/comments`, { body })
+export const deleteProjectComment = (id: number, cid: number) =>
+  api.del(`/api/v1/projects/${id}/comments/${cid}`)
+export const uploadProjectFile = (id: number, file: File) =>
+  api.upload<ProjectFile>(`/api/v1/projects/${id}/files`, 'file', file, file.name)
+export const deleteProjectFile = (id: number, fid: number) =>
+  api.del(`/api/v1/projects/${id}/files/${fid}`)
+export const addProjectBookmark = (id: number, url: string) =>
+  api.post<ProjectBookmark>(`/api/v1/projects/${id}/bookmarks`, { url })
+export const patchProjectBookmark = (id: number, bid: number, body: { url?: string; title?: string }) =>
+  api.patch<ProjectBookmark>(`/api/v1/projects/${id}/bookmarks/${bid}`, body)
+export const deleteProjectBookmark = (id: number, bid: number) =>
+  api.del(`/api/v1/projects/${id}/bookmarks/${bid}`)
+export const archiveProjectBookmark = (id: number, bid: number) =>
+  api.post<{ job_id: string }>(`/api/v1/projects/${id}/bookmarks/${bid}/archive`)

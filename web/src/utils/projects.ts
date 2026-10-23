@@ -11,3 +11,8 @@ export function statusBadgeClass(status: string): string {
     default: return 'bg-slate-100 text-slate-700'
   }
 }
+
+// Visibility badge: shared = green accent, private = gray.
+export function visibilityBadgeClass(visibility: string): string {
+  return visibility === 'shared' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+}

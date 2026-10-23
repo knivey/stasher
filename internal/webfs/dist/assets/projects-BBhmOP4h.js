@@ -1,0 +1,1 @@
+var e=[`planned`,`active`,`done`,`archived`];function t(e){switch(e){case`active`:return`bg-emerald-100 text-emerald-700`;case`done`:return`bg-blue-100 text-blue-700`;case`archived`:return`bg-gray-100 text-gray-500`;default:return`bg-slate-100 text-slate-700`}}function n(e){return e===`shared`?`bg-green-100 text-green-700`:`bg-gray-100 text-gray-500`}export{t as n,n as r,e as t};

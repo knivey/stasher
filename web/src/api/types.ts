@@ -45,8 +45,33 @@ export interface Location {
   created_at: string; updated_at: string
 }
 export interface Breadcrumb { id: number; name: string }
-export interface Project { id: number; name: string; status: 'planned' | 'active' | 'done' | 'archived'; notes: string; created_at: string; updated_at: string }
-export interface ProjectItem { item_id: number; item_name: string; item_qty: number; item_unit: string; qty_used: number | null; notes: string; added_at: string }
+export interface Project { id: number; name: string; status: 'planned' | 'active' | 'done' | 'archived'; notes: string; visibility: 'private' | 'shared'; created_at: string; updated_at: string }
+// Owner BOM row (has item ids/qty). `shared` mirrors the item's visibility.
+export interface ProjectItem { item_id: number; item_name: string; item_qty: number; item_unit: string; qty_used: number | null; notes: string; added_at: string; shared: boolean }
+// Same rows under the detail-projection name (tasks 9–11 consume this name).
+export type ProjectOwnerItem = ProjectItem
+// What a sharee sees: masked rows — no item ids/qty/notes, name + usage only.
+export type ProjectViewerItem = { item_name: string; qty_used: number | null; shared: boolean }
+export interface ProjectNote { id: number; body: string; created_at: string }
+export interface ProjectComment { id: number; author: string; mine: boolean; body: string; created_at: string }
+export interface ProjectFile {
+  id: number; storage_key: string; thumb_key: string | null
+  filename: string; mime_type: string; size_bytes: number; created_at: string
+}
+export interface ProjectBookmark {
+  id: number; url: string; title: string; created_at: string
+  archived_file: ProjectFile | null
+}
+// GET /projects/{id}: `notes_log` is owner-only — the key is ABSENT on the
+// sharee projection, and sharees get masked (viewer) item rows.
+export interface ProjectDetail {
+  project: Project; owner_view: boolean
+  items: (ProjectOwnerItem | ProjectViewerItem)[]
+  notes_log?: ProjectNote[]
+  comments: ProjectComment[]; files: ProjectFile[]; bookmarks: ProjectBookmark[]
+}
+// Row of GET /shared/projects (projects other users shared with you).
+export interface SharedProject { id: number; name: string; status: string; owner_name: string; updated_at: string }
 export interface SessionRow { id: number; user_agent: string; last_ip: string; created_at: string; last_seen_at: string; current: boolean }
 export interface Invite { id: number; code: string; created_at: string; used_by_email: string; used_at: string | null }
 export interface AdminUser extends User { disabled: boolean; created_at: string }
