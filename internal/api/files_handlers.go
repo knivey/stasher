@@ -372,7 +372,9 @@ func (s *Server) handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		s.st.Delete(key)
+		// row insert failed: roll back the stored bytes (warn-only — an
+		// orphaned file is not the client's 500)
+		s.deleteFileBytes(key)
 		s.internalErr(w, err)
 		return
 	}
@@ -409,7 +411,8 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
-	s.st.Delete(key)
+	// the row is gone; a failed byte delete is an orphan, not a 204 blocker
+	s.deleteFileBytes(key)
 	w.WriteHeader(http.StatusNoContent)
 }
 
