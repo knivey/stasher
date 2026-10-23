@@ -11,6 +11,10 @@ const LOCATIONS = [
   { id: 1, name: 'House', parent_id: null, notes: '', created_at: '', updated_at: '' },
   { id: 2, name: 'Cabinet', parent_id: 1, notes: '', created_at: '', updated_at: '' },
   { id: 3, name: 'Bin', parent_id: 2, notes: '', created_at: '', updated_at: '' },
+  // 3 levels deep on purpose: House has ONE direct child (Cabinet) but THREE
+  // total descendants (Cabinet, Bin, Tray) — so the delete dialog's pinned
+  // sublocation count can only be the total the BFS walk computes.
+  { id: 4, name: 'Tray', parent_id: 3, notes: '', created_at: '', updated_at: '' },
 ] as Location[]
 
 interface Call { method: string; url: string; body?: string }
@@ -81,11 +85,12 @@ describe('LocationsView', () => {
     const w = await mountView(calls)
     await expandAll(w)
     const names = w.findAll('[data-loc-name]')
-    expect(names.map(n => n.text())).toEqual(['House', 'Cabinet', 'Bin'])
+    expect(names.map(n => n.text())).toEqual(['House', 'Cabinet', 'Bin', 'Tray'])
     const pad = (i: number) => parseFloat((names[i].element as HTMLElement).style.paddingLeft)
     expect(pad(0)).toBe(0)
     expect(pad(1)).toBeGreaterThan(pad(0))
     expect(pad(2)).toBeGreaterThan(pad(1))
+    expect(pad(3)).toBeGreaterThan(pad(2))
   })
 
   it('offers one "Add item" link per row pointing at /items/new?location=<id>', async () => {
@@ -93,24 +98,25 @@ describe('LocationsView', () => {
     const w = await mountView(calls)
     await expandAll(w)
     const links = w.findAll('[data-add-item]')
-    expect(links).toHaveLength(3) // one per location row
+    expect(links).toHaveLength(4) // one per location row
     expect(links.map(l => l.attributes('href'))).toEqual([
-      '/items/new?location=1', '/items/new?location=2', '/items/new?location=3',
+      '/items/new?location=1', '/items/new?location=2', '/items/new?location=3', '/items/new?location=4',
     ])
   })
 
-  it('hides "Duplicate layout…" on childless locations (House and Cabinet keep it, Bin loses it)', async () => {
+  it('hides "Duplicate layout…" on childless locations (House, Cabinet and Bin keep it, Tray loses it)', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
     await expandAll(w)
     const dupes = w.findAll('[data-duplicate]')
-    expect(dupes).toHaveLength(2) // House (has Cabinet), Cabinet (has Bin); Bin is childless
-    // the duplicate controls belong to the two parents, not to Bin's row
+    expect(dupes).toHaveLength(3) // House (Cabinet), Cabinet (Bin), Bin (Tray); Tray is childless
+    // the duplicate controls belong to the three parents, not to Tray's row
     const rowOf = (name: string) =>
       w.findAll('li').find(li => li.find('[data-loc-name]').text() === name)!
     expect(rowOf('House').find('[data-duplicate]').exists()).toBe(true)
     expect(rowOf('Cabinet').find('[data-duplicate]').exists()).toBe(true)
-    expect(rowOf('Bin').find('[data-duplicate]').exists()).toBe(false)
+    expect(rowOf('Bin').find('[data-duplicate]').exists()).toBe(true)
+    expect(rowOf('Tray').find('[data-duplicate]').exists()).toBe(false)
   })
 
   it('clicking a location name seeds the items location filter and navigates to /items', async () => {
@@ -134,7 +140,7 @@ describe('LocationsView', () => {
     await w.findAll('[data-edit]')[2].trigger('click') // Bin enters edit mode
     const input = w.find('[data-edit-name]')
     expect(input.exists()).toBe(true)
-    expect(w.findAll('[data-loc-name]')).toHaveLength(2) // Bin's name button is replaced
+    expect(w.findAll('[data-loc-name]')).toHaveLength(3) // Bin's name button is replaced
     await input.trigger('click')
     await flushPromises()
     expect(store.filters.location_id).toBe(0)
@@ -197,7 +203,7 @@ describe('LocationsView', () => {
     const calls = mockFetch()
     const w = await mountView(calls)
     await expandAll(w)
-    await w.findAll('[data-delete]')[2].trigger('click') // Bin: no children
+    await w.findAll('[data-delete]')[3].trigger('click') // Tray: no children
     const dialog = w.find('[role="dialog"]')
     expect(dialog.exists()).toBe(true)
     expect(dialog.text()).toContain('Children move up')
@@ -205,7 +211,7 @@ describe('LocationsView', () => {
     expect(buttons).not.toContain('Delete everything below') // no subtree choice for a leaf
     await dialog.findAll('button').at(-1)!.trigger('click') // confirm Delete
     await flushPromises()
-    expect(calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/locations/3')).toBe(true)
+    expect(calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/locations/4')).toBe(true)
     expect(toasts.some(t => t.message === 'Location deleted' && t.type === 'success')).toBe(true)
     expect(calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
   })
@@ -213,14 +219,18 @@ describe('LocationsView', () => {
   it('a location with children gets a two-choice dialog naming it and its sublocation count', async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
-    await w.findAll('[data-delete]')[0].trigger('click') // House: Cabinet + Bin below it
+    await w.findAll('[data-delete]')[0].trigger('click') // House: Cabinet + Bin + Tray below it
     const dialog = w.find('[role="dialog"]')
     expect(dialog.exists()).toBe(true)
     const buttons = dialog.findAll('button').map(b => b.text())
     expect(buttons).toContain('Delete only this')
     expect(buttons).toContain('Delete everything below')
+    // plain confirm first (left), destructive alt rightmost
+    expect(buttons.slice(-2)).toEqual(['Delete only this', 'Delete everything below'])
     expect(dialog.text()).toContain("'House'")
-    expect(dialog.text()).toContain('2 sublocations')
+    // 3 = the TOTAL descendant count (Cabinet, Bin, Tray); House has only ONE
+    // direct child, so this pin fails if the walk ever stops at depth 1
+    expect(dialog.text()).toContain('3 sublocations')
   })
 
   it("'Delete only this' fires the bare DELETE (children reparent server-side)", async () => {
@@ -274,8 +284,8 @@ describe('LocationsView', () => {
     await expandAll(w)
     const rowOf = (name: string) =>
       w.findAll('li').find(li => li.find('[data-loc-name]').text() === name)!
-    expect(rowOf('Bin').find('[data-expand]').exists()).toBe(false)
-    const spacer = rowOf('Bin').find('[data-expand-spacer]')
+    expect(rowOf('Tray').find('[data-expand]').exists()).toBe(false)
+    const spacer = rowOf('Tray').find('[data-expand-spacer]')
     expect(spacer.exists()).toBe(true)
     expect(spacer.attributes('aria-hidden')).toBe('true')
     // the spacer and the chevron share the same fixed 2rem column so names
@@ -319,7 +329,7 @@ describe('LocationsView', () => {
       onPost: (url, body) => {
         if (url !== '/api/v1/locations') return
         const b = JSON.parse(body!) as { name: string; parent_id?: number }
-        locs.push({ id: 4, name: b.name, parent_id: b.parent_id ?? null, notes: '', created_at: '', updated_at: '' } as Location)
+        locs.push({ id: 5, name: b.name, parent_id: b.parent_id ?? null, notes: '', created_at: '', updated_at: '' } as Location)
       },
     })
     const w = await mountView(calls)
@@ -328,8 +338,8 @@ describe('LocationsView', () => {
     await w.find('form select[aria-label="Location"]').setValue('1') // parent House
     await w.find('form').trigger('submit')
     await flushPromises()
-    // House was expanded by the add flow — Shelf is visible, Bin (under
-    // still-collapsed Cabinet) stays hidden
+    // House was expanded by the add flow — Shelf is visible, Bin (and its
+    // child Tray, under the still-collapsed Cabinet) stay hidden
     expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet', 'Shelf'])
   })
 
@@ -340,19 +350,20 @@ describe('LocationsView', () => {
       onPost: (url, body) => {
         if (url !== '/api/v1/locations') return
         const b = JSON.parse(body!) as { name: string; parent_id?: number }
-        locs.push({ id: 4, name: b.name, parent_id: b.parent_id ?? null, notes: '', created_at: '', updated_at: '' } as Location)
+        locs.push({ id: 5, name: b.name, parent_id: b.parent_id ?? null, notes: '', created_at: '', updated_at: '' } as Location)
       },
     })
     const w = await mountView(calls)
     // fully collapsed: only House renders, Bin (depth 2) is selectable but hidden
     expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House'])
-    await w.find('[data-add-name]').setValue('Tray')
+    await w.find('[data-add-name]').setValue('Drawer')
     await w.find('form select[aria-label="Location"]').setValue('3') // Bin, two levels deep
     await w.find('form').trigger('submit')
     await flushPromises()
     // expanding only Bin (the direct parent) would leave it invisible behind
-    // collapsed House and Cabinet — the whole chain must reveal
-    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet', 'Bin', 'Tray'])
+    // collapsed House and Cabinet — the whole chain must reveal (siblings
+    // render in name order: Drawer before Tray)
+    expect(w.findAll('[data-loc-name]').map(n => n.text())).toEqual(['House', 'Cabinet', 'Bin', 'Drawer', 'Tray'])
   })
 
   // ---- Sublocations section (bulk generation + layout copy) ----
@@ -580,7 +591,7 @@ describe('LocationsView', () => {
     await w.find('[data-sub-mode]').setValue('copy')
     const opts = w.find('[data-copy-source]').findAll('option')
     expect(opts.map(o => o.text())).toEqual([
-      '— choose a layout —', 'House', '— Cabinet', '— — Bin',
+      '— choose a layout —', 'House', '— Cabinet', '— — Bin', '— — — Tray',
     ])
   })
 
@@ -641,7 +652,7 @@ describe('LocationsView', () => {
       onPost: (url, body) => {
         if (!url.endsWith('/copy-layout')) return
         const b = JSON.parse(body!) as { name: string; parent_id: number }
-        locs.push({ id: 4, name: b.name, parent_id: b.parent_id || null, notes: '', created_at: '', updated_at: '' } as Location)
+        locs.push({ id: 5, name: b.name, parent_id: b.parent_id || null, notes: '', created_at: '', updated_at: '' } as Location)
       },
     })
     const w = await mountView(calls)
