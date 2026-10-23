@@ -205,12 +205,12 @@ func TestSearchDocsRateLimit(t *testing.T) {
 }
 
 func TestSearchDocsForeignItem404(t *testing.T) {
-	s, ts := newTestServer(t, nil)
-	s.searcher = &fakeSearcher{}
+	_, ts := newTestServer(t, nil)
+	// searcher deliberately stays NIL (search disabled): a foreign item must
+	// answer 404 BEFORE the search-disabled check — config state is not
+	// probeable through someone else's item.
 	_, itemID := createSearchItem(t, ts, "search-owner@test.dev")
 	other := registerUser(t, ts, "search-foreign@test.dev", "longpassword1")
-	// 404 takes precedence over the searcher-nil/disabled check: an attacker
-	// must not be able to probe config state through someone else's item.
 	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(itemID)+"/search-documents",
 		map[string]any{"query": "q"}, other)
 	if resp.StatusCode != http.StatusNotFound {
