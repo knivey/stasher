@@ -498,6 +498,12 @@ func (s *Server) handleFileGet(w http.ResponseWriter, r *http.Request) {
 		ownerID, visibility = row.UserID, row.Visibility // ct sniffed at serve time below
 	} else if row, err := s.q.GetDocumentByKey(r.Context(), key); err == nil {
 		ownerID, visibility, ct, filename = row.UserID, row.Visibility, row.MimeType, row.Filename
+	} else if userID, err := s.q.GetLocationPhotoByKey(r.Context(), dbpkg.GetLocationPhotoByKeyParams{
+		PhotoKey: sqlNullString(key), PhotoThumbKey: sqlNullString(key),
+	}); err == nil {
+		// location pictures are OWNER-ONLY: shared items expose their own
+		// files, never the location's picture, so visibility stays ""
+		ownerID = userID // ct sniffed at serve time below
 	} else {
 		writeErr(w, http.StatusNotFound, "not_found", "file not found")
 		return

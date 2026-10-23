@@ -20,6 +20,9 @@ func locationJSON(l dbpkg.Location) map[string]any {
 	}
 	return map[string]any{
 		"id": l.ID, "name": l.Name, "parent_id": parent, "notes": l.Notes,
+		// single optional picture (null when absent), same rendering as the
+		// item photos' thumb_key
+		"photo_key": nullString(l.PhotoKey), "photo_thumb_key": thumbJSON(l.PhotoThumbKey),
 		"created_at": l.CreatedAt, "updated_at": l.UpdatedAt,
 	}
 }
@@ -239,6 +242,9 @@ func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
+	// Only this ONE row died (children reparented up, items detached). Its
+	// picture files are unreferenced now — best-effort delete, warn-logged.
+	deleteLocationPhotoFiles(s, &loc)
 	w.WriteHeader(http.StatusNoContent)
 }
 

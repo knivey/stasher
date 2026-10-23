@@ -145,6 +145,33 @@ thumbnail (thumb_key follows (sort_order, id)).
   labels are the empty/default case, not an error. Compact output never
   contains the words. Absent `labels` behaves exactly as before.
 
+## Location pictures (2026-10-23)
+
+A location carries **at most one optional picture** (columns, not a table):
+`photo_key` + derived `photo_thumb_key`, both nullable. Same upload rules
+as item photos (20 MB cap, sniffed `image/*` only, thumb generation that
+degrades to null).
+
+```
+POST   /api/v1/locations/{id}/photo — multipart field `file`; owner-only,
+       foreign/absent location → 404. Responds 200 {photo_key, thumb_key}
+       (thumb_key null when generation failed). REPLACES any existing
+       picture: new files are saved and committed first, then the old
+       photo+thumb files are deleted (best-effort, warn-logged).
+DELETE /api/v1/locations/{id}/photo — owner-only (foreign → 404). Clears
+       both columns and deletes the files; idempotent (no picture → 204).
+```
+
+- `GET /locations` (and `GET /locations/{id}`, copy/bulk responses) expose
+  `photo_key` and `photo_thumb_key` as JSON strings or explicit `null`.
+- `/files/{key}` serves location pictures to the **owner only** (matched
+  against `photo_key OR photo_thumb_key`): sharing an item never exposes
+  the location's picture. Content type is sniffed at serve time, like item
+  photos.
+- `DELETE /locations/{id}` deletes the deleted row's picture files
+  best-effort. Layout copy (`copy-layout`) copies **names/shape only —
+  pictures are not copied**.
+
 ## Layout copying (2026-10-22)
 
 `POST /api/v1/locations/{id}/copy-layout` — body

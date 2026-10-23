@@ -174,6 +174,21 @@ func (q *Queries) ClearItemsLocation(ctx context.Context, arg ClearItemsLocation
 	return err
 }
 
+const clearLocationPhoto = `-- name: ClearLocationPhoto :exec
+UPDATE locations SET photo_key = NULL, photo_thumb_key = NULL, updated_at = ? WHERE id = ? AND user_id = ?
+`
+
+type ClearLocationPhotoParams struct {
+	UpdatedAt string `json:"updated_at"`
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+}
+
+func (q *Queries) ClearLocationPhoto(ctx context.Context, arg ClearLocationPhotoParams) error {
+	_, err := q.db.ExecContext(ctx, clearLocationPhoto, arg.UpdatedAt, arg.ID, arg.UserID)
+	return err
+}
+
 const countAdmins = `-- name: CountAdmins :one
 SELECT COUNT(*) FROM users WHERE is_admin = 1 AND disabled = 0
 `
@@ -369,7 +384,7 @@ func (q *Queries) CreateItemWithID(ctx context.Context, arg CreateItemWithIDPara
 
 const createLocation = `-- name: CreateLocation :one
 INSERT INTO locations (user_id, name, parent_id, notes, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, parent_id, notes, created_at, updated_at
+VALUES (?, ?, ?, ?, ?, ?) RETURNING id, user_id, name, parent_id, notes, created_at, updated_at, photo_key, photo_thumb_key
 `
 
 type CreateLocationParams struct {
@@ -399,6 +414,8 @@ func (q *Queries) CreateLocation(ctx context.Context, arg CreateLocationParams) 
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PhotoKey,
+		&i.PhotoThumbKey,
 	)
 	return i, err
 }
@@ -979,7 +996,7 @@ func (q *Queries) GetItemTags(ctx context.Context, itemID int64) ([]GetItemTagsR
 }
 
 const getLocation = `-- name: GetLocation :one
-SELECT id, user_id, name, parent_id, notes, created_at, updated_at FROM locations WHERE id = ? AND user_id = ?
+SELECT id, user_id, name, parent_id, notes, created_at, updated_at, photo_key, photo_thumb_key FROM locations WHERE id = ? AND user_id = ?
 `
 
 type GetLocationParams struct {
@@ -998,12 +1015,14 @@ func (q *Queries) GetLocation(ctx context.Context, arg GetLocationParams) (Locat
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PhotoKey,
+		&i.PhotoThumbKey,
 	)
 	return i, err
 }
 
 const getLocationByName = `-- name: GetLocationByName :one
-SELECT id, user_id, name, parent_id, notes, created_at, updated_at FROM locations WHERE user_id = ? AND name = ? AND parent_id IS ?
+SELECT id, user_id, name, parent_id, notes, created_at, updated_at, photo_key, photo_thumb_key FROM locations WHERE user_id = ? AND name = ? AND parent_id IS ?
 `
 
 type GetLocationByNameParams struct {
@@ -1027,8 +1046,28 @@ func (q *Queries) GetLocationByName(ctx context.Context, arg GetLocationByNamePa
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PhotoKey,
+		&i.PhotoThumbKey,
 	)
 	return i, err
+}
+
+const getLocationPhotoByKey = `-- name: GetLocationPhotoByKey :one
+SELECT user_id FROM locations WHERE photo_key = ? OR photo_thumb_key = ?
+`
+
+type GetLocationPhotoByKeyParams struct {
+	PhotoKey      sql.NullString `json:"photo_key"`
+	PhotoThumbKey sql.NullString `json:"photo_thumb_key"`
+}
+
+// /files gate lookup: a location picture (or its thumb) resolves to the
+// owning user. No rows = not found.
+func (q *Queries) GetLocationPhotoByKey(ctx context.Context, arg GetLocationPhotoByKeyParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getLocationPhotoByKey, arg.PhotoKey, arg.PhotoThumbKey)
+	var user_id int64
+	err := row.Scan(&user_id)
+	return user_id, err
 }
 
 const getPhotoByKey = `-- name: GetPhotoByKey :one
@@ -1535,7 +1574,7 @@ func (q *Queries) ListItemProjectLinks(ctx context.Context, itemID int64) ([]Lis
 }
 
 const listLocations = `-- name: ListLocations :many
-SELECT id, user_id, name, parent_id, notes, created_at, updated_at FROM locations WHERE user_id = ? ORDER BY name
+SELECT id, user_id, name, parent_id, notes, created_at, updated_at, photo_key, photo_thumb_key FROM locations WHERE user_id = ? ORDER BY name
 `
 
 func (q *Queries) ListLocations(ctx context.Context, userID int64) ([]Location, error) {
@@ -1555,6 +1594,8 @@ func (q *Queries) ListLocations(ctx context.Context, userID int64) ([]Location, 
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PhotoKey,
+			&i.PhotoThumbKey,
 		); err != nil {
 			return nil, err
 		}
@@ -2105,6 +2146,29 @@ func (q *Queries) SetItemPhotoThumb(ctx context.Context, arg SetItemPhotoThumbPa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const setLocationPhoto = `-- name: SetLocationPhoto :exec
+UPDATE locations SET photo_key = ?, photo_thumb_key = ?, updated_at = ? WHERE id = ? AND user_id = ?
+`
+
+type SetLocationPhotoParams struct {
+	PhotoKey      sql.NullString `json:"photo_key"`
+	PhotoThumbKey sql.NullString `json:"photo_thumb_key"`
+	UpdatedAt     string         `json:"updated_at"`
+	ID            int64          `json:"id"`
+	UserID        int64          `json:"user_id"`
+}
+
+func (q *Queries) SetLocationPhoto(ctx context.Context, arg SetLocationPhotoParams) error {
+	_, err := q.db.ExecContext(ctx, setLocationPhoto,
+		arg.PhotoKey,
+		arg.PhotoThumbKey,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.UserID,
+	)
+	return err
 }
 
 const setUserAdmin = `-- name: SetUserAdmin :exec

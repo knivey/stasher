@@ -82,13 +82,15 @@ type ItemsFt struct {
 }
 
 type Location struct {
-	ID        int64         `json:"id"`
-	UserID    int64         `json:"user_id"`
-	Name      string        `json:"name"`
-	ParentID  sql.NullInt64 `json:"parent_id"`
-	Notes     string        `json:"notes"`
-	CreatedAt string        `json:"created_at"`
-	UpdatedAt string        `json:"updated_at"`
+	ID            int64          `json:"id"`
+	UserID        int64          `json:"user_id"`
+	Name          string         `json:"name"`
+	ParentID      sql.NullInt64  `json:"parent_id"`
+	Notes         string         `json:"notes"`
+	CreatedAt     string         `json:"created_at"`
+	UpdatedAt     string         `json:"updated_at"`
+	PhotoKey      sql.NullString `json:"photo_key"`
+	PhotoThumbKey sql.NullString `json:"photo_thumb_key"`
 }
 
 type Project struct {

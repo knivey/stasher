@@ -94,6 +94,17 @@ UPDATE locations SET name = ?, notes = ?, parent_id = ?, updated_at = ? WHERE id
 -- name: DeleteLocation :exec
 DELETE FROM locations WHERE id = ? AND user_id = ?;
 
+-- name: SetLocationPhoto :exec
+UPDATE locations SET photo_key = ?, photo_thumb_key = ?, updated_at = ? WHERE id = ? AND user_id = ?;
+
+-- name: ClearLocationPhoto :exec
+UPDATE locations SET photo_key = NULL, photo_thumb_key = NULL, updated_at = ? WHERE id = ? AND user_id = ?;
+
+-- name: GetLocationPhotoByKey :one
+-- /files gate lookup: a location picture (or its thumb) resolves to the
+-- owning user. No rows = not found.
+SELECT user_id FROM locations WHERE photo_key = ? OR photo_thumb_key = ?;
+
 -- name: ReparentChildren :exec
 UPDATE locations SET parent_id = ? WHERE parent_id = ? AND user_id = ?;
 
