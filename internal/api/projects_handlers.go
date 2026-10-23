@@ -186,6 +186,18 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	body["comments"] = comList
+	// reference materials are the other public section: present in BOTH
+	// projections (sharees see what the project is built from).
+	files, err := s.q.ListProjectFiles(r.Context(), p.ID)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	fileList := make([]map[string]any, 0, len(files))
+	for _, f := range files {
+		fileList = append(fileList, projectFileJSON(f))
+	}
+	body["files"] = fileList
 	writeJSON(w, http.StatusOK, body)
 }
 
@@ -242,9 +254,22 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// gather file keys BEFORE the rows cascade away; bytes go AFTER the
+	// delete succeeds (failed byte deletes only orphan, never 500)
+	keys, err := s.q.ListAllProjectFileKeys(r.Context(), p.ID)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
 	if err := s.q.DeleteProject(r.Context(), dbpkg.DeleteProjectParams{ID: p.ID, UserID: u.ID}); err != nil {
 		s.internalErr(w, err)
 		return
+	}
+	for _, k := range keys {
+		s.deleteFileBytes(k.StorageKey)
+		if k.ThumbKey.Valid {
+			s.deleteFileBytes(k.ThumbKey.String)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

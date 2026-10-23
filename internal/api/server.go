@@ -140,6 +140,8 @@ func (s *Server) Router() chi.Router {
 			r.Delete("/projects/{id}/notes/{noteId}", s.handleDeleteProjectNote)
 			r.Post("/projects/{id}/comments", s.handleAddProjectComment)
 			r.Delete("/projects/{id}/comments/{cid}", s.handleDeleteProjectComment)
+			r.Post("/projects/{id}/files", s.handleUploadProjectFile)
+			r.Delete("/projects/{id}/files/{fid}", s.handleDeleteProjectFile)
 
 			r.Route("/admin", func(r chi.Router) {
 				r.Use(s.requireAdmin)

@@ -498,6 +498,12 @@ func (s *Server) handleFileGet(w http.ResponseWriter, r *http.Request) {
 		ownerID, visibility = row.UserID, row.Visibility // ct sniffed at serve time below
 	} else if row, err := s.q.GetDocumentByKey(r.Context(), key); err == nil {
 		ownerID, visibility, ct, filename = row.UserID, row.Visibility, row.MimeType, row.Filename
+	} else if row, err := s.q.GetProjectFileByKey(r.Context(), dbpkg.GetProjectFileByKeyParams{
+		StorageKey: key, ThumbKey: sqlNullString(key),
+	}); err == nil {
+		// project reference materials are owner-or-shared-project (the
+		// project's visibility governs); ct sniffed at serve time below
+		ownerID, visibility = row.UserID, row.Visibility
 	} else if userID, err := s.q.GetLocationPhotoByKey(r.Context(), dbpkg.GetLocationPhotoByKeyParams{
 		PhotoKey: sqlNullString(key), PhotoThumbKey: sqlNullString(key),
 	}); err == nil {

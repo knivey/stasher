@@ -503,3 +503,35 @@ Facts discovered by the frontend round, kept here so they survive:
   same-second comments tie-break by id ascending, oldest first). Rows:
   `{id, author, mine, body, created_at}` where `author` is the author's
   display name and `mine` is relative to the **viewer** of the response.
+
+## Project reference materials (2026-10-23)
+
+Projects carry an attachment list of reference materials — **any file
+type** (datasheets, manuals, images, whatever).
+
+```
+POST   /api/v1/projects/{id}/files — multipart field `file`; owner only
+       (sharees/strangers → 404, even on shared projects). 201 returns the
+       row {id, storage_key, thumb_key, filename, mime_type, size_bytes,
+       created_at}. Cap 50MB (`MaxBytesReader`, over → 400 invalid_upload),
+       empty file → 400. `mime_type` is always the SERVER-SNIFFED type
+       (client Content-Type never trusted; `%PDF-` magic stored as
+       application/pdf). `filename` is sanitized (path stripped). Images
+       (sniffed `image/*`) also get a derived ≤480px `thumb_key` — null
+       when generation failed (corrupt-but-sniffable images still store).
+DELETE /api/v1/projects/{id}/files/{fid} — owner only. 204; non-numeric
+       `fid` → 400 invalid_id; absent/foreign file → 404 not_found.
+```
+
+- **`GET /projects/{id}` gains `"files"` in BOTH projections** (owner and
+  sharee — materials are public), oldest first. Same row shape as the 201.
+- **`/files/{key}` serves project files to the owner OR any user when the
+  project's `visibility` is `shared`** (matched against
+  `storage_key OR thumb_key`; otherwise 404, no existence leak). Unlike
+  documents, NO stored-mime pass-through: content type is **sniffed at
+  serve time**, exactly like item photos — so the inline/attachment policy
+  (`image/*`, `application/pdf`, `text/plain` inline; everything else
+  forced to `attachment`) is re-evaluated on every fetch.
+- **`DELETE /projects/{id}` removes every file's bytes** (originals AND
+  thumbs) after the row delete succeeds. Byte-deletion failures are
+  warn-logged, never surfaced (the 204 stands).

@@ -366,6 +366,28 @@ SELECT id, project_id, user_id FROM project_comments WHERE id = ?;
 -- name: DeleteProjectComment :execrows
 DELETE FROM project_comments WHERE id = ?;
 
+-- name: AddProjectFile :one
+INSERT INTO project_files (project_id, storage_key, thumb_key, filename, mime_type, size_bytes, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, project_id, storage_key, thumb_key, filename, mime_type, size_bytes, created_at;
+
+-- name: ListProjectFiles :many
+SELECT * FROM project_files WHERE project_id = ? ORDER BY created_at, id;
+
+-- name: DeleteProjectFile :execrows
+DELETE FROM project_files WHERE id = ? AND project_id = ?;
+
+-- name: GetProjectFile :one
+SELECT * FROM project_files WHERE id = ? AND project_id = ?;
+
+-- name: GetProjectFileByKey :one
+SELECT p.user_id, p.visibility
+FROM project_files f JOIN projects p ON p.id = f.project_id
+WHERE f.storage_key = ? OR f.thumb_key = ?;
+
+-- name: ListAllProjectFileKeys :many
+SELECT storage_key, thumb_key FROM project_files WHERE project_id = ?;
+
 -- name: CreateItemLedger :one
 INSERT INTO item_ledger (item_id, user_id, delta, resulting_qty, kind, project_id, note, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)

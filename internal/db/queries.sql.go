@@ -136,6 +136,46 @@ func (q *Queries) AddProjectComment(ctx context.Context, arg AddProjectCommentPa
 	return i, err
 }
 
+const addProjectFile = `-- name: AddProjectFile :one
+INSERT INTO project_files (project_id, storage_key, thumb_key, filename, mime_type, size_bytes, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, project_id, storage_key, thumb_key, filename, mime_type, size_bytes, created_at
+`
+
+type AddProjectFileParams struct {
+	ProjectID  int64          `json:"project_id"`
+	StorageKey string         `json:"storage_key"`
+	ThumbKey   sql.NullString `json:"thumb_key"`
+	Filename   string         `json:"filename"`
+	MimeType   string         `json:"mime_type"`
+	SizeBytes  int64          `json:"size_bytes"`
+	CreatedAt  string         `json:"created_at"`
+}
+
+func (q *Queries) AddProjectFile(ctx context.Context, arg AddProjectFileParams) (ProjectFile, error) {
+	row := q.db.QueryRowContext(ctx, addProjectFile,
+		arg.ProjectID,
+		arg.StorageKey,
+		arg.ThumbKey,
+		arg.Filename,
+		arg.MimeType,
+		arg.SizeBytes,
+		arg.CreatedAt,
+	)
+	var i ProjectFile
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.StorageKey,
+		&i.ThumbKey,
+		&i.Filename,
+		&i.MimeType,
+		&i.SizeBytes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const addProjectNote = `-- name: AddProjectNote :one
 INSERT INTO project_notes (project_id, body, created_at) VALUES (?, ?, ?)
 RETURNING id, project_id, body, created_at
@@ -826,6 +866,23 @@ func (q *Queries) DeleteProjectComment(ctx context.Context, id int64) (int64, er
 	return result.RowsAffected()
 }
 
+const deleteProjectFile = `-- name: DeleteProjectFile :execrows
+DELETE FROM project_files WHERE id = ? AND project_id = ?
+`
+
+type DeleteProjectFileParams struct {
+	ID        int64 `json:"id"`
+	ProjectID int64 `json:"project_id"`
+}
+
+func (q *Queries) DeleteProjectFile(ctx context.Context, arg DeleteProjectFileParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProjectFile, arg.ID, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteProjectItem = `-- name: DeleteProjectItem :execrows
 DELETE FROM project_items WHERE project_id = ? AND item_id = ?
 `
@@ -1250,6 +1307,54 @@ func (q *Queries) GetProjectComment(ctx context.Context, id int64) (GetProjectCo
 	return i, err
 }
 
+const getProjectFile = `-- name: GetProjectFile :one
+SELECT id, project_id, storage_key, thumb_key, filename, mime_type, size_bytes, created_at FROM project_files WHERE id = ? AND project_id = ?
+`
+
+type GetProjectFileParams struct {
+	ID        int64 `json:"id"`
+	ProjectID int64 `json:"project_id"`
+}
+
+func (q *Queries) GetProjectFile(ctx context.Context, arg GetProjectFileParams) (ProjectFile, error) {
+	row := q.db.QueryRowContext(ctx, getProjectFile, arg.ID, arg.ProjectID)
+	var i ProjectFile
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.StorageKey,
+		&i.ThumbKey,
+		&i.Filename,
+		&i.MimeType,
+		&i.SizeBytes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getProjectFileByKey = `-- name: GetProjectFileByKey :one
+SELECT p.user_id, p.visibility
+FROM project_files f JOIN projects p ON p.id = f.project_id
+WHERE f.storage_key = ? OR f.thumb_key = ?
+`
+
+type GetProjectFileByKeyParams struct {
+	StorageKey string         `json:"storage_key"`
+	ThumbKey   sql.NullString `json:"thumb_key"`
+}
+
+type GetProjectFileByKeyRow struct {
+	UserID     int64  `json:"user_id"`
+	Visibility string `json:"visibility"`
+}
+
+func (q *Queries) GetProjectFileByKey(ctx context.Context, arg GetProjectFileByKeyParams) (GetProjectFileByKeyRow, error) {
+	row := q.db.QueryRowContext(ctx, getProjectFileByKey, arg.StorageKey, arg.ThumbKey)
+	var i GetProjectFileByKeyRow
+	err := row.Scan(&i.UserID, &i.Visibility)
+	return i, err
+}
+
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, token_hash, user_id, user_agent, last_ip, created_at, last_seen_at FROM sessions WHERE id = ? AND user_id = ?
 `
@@ -1391,6 +1496,38 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listAllProjectFileKeys = `-- name: ListAllProjectFileKeys :many
+SELECT storage_key, thumb_key FROM project_files WHERE project_id = ?
+`
+
+type ListAllProjectFileKeysRow struct {
+	StorageKey string         `json:"storage_key"`
+	ThumbKey   sql.NullString `json:"thumb_key"`
+}
+
+func (q *Queries) ListAllProjectFileKeys(ctx context.Context, projectID int64) ([]ListAllProjectFileKeysRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllProjectFileKeys, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllProjectFileKeysRow
+	for rows.Next() {
+		var i ListAllProjectFileKeysRow
+		if err := rows.Scan(&i.StorageKey, &i.ThumbKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listInvites = `-- name: ListInvites :many
@@ -1800,6 +1937,42 @@ func (q *Queries) ListProjectComments(ctx context.Context, projectID int64) ([]L
 			&i.Body,
 			&i.CreatedAt,
 			&i.AuthorName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectFiles = `-- name: ListProjectFiles :many
+SELECT id, project_id, storage_key, thumb_key, filename, mime_type, size_bytes, created_at FROM project_files WHERE project_id = ? ORDER BY created_at, id
+`
+
+func (q *Queries) ListProjectFiles(ctx context.Context, projectID int64) ([]ProjectFile, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectFiles, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ProjectFile
+	for rows.Next() {
+		var i ProjectFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.StorageKey,
+			&i.ThumbKey,
+			&i.Filename,
+			&i.MimeType,
+			&i.SizeBytes,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
