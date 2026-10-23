@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, ApiError, autofillItems } from '../api/client'
-import type { AutofillFields, Item, ListResponse, Location } from '../api/types'
+import type { AutofillFields, Item, ListResponse, Location, Photo } from '../api/types'
 import { useAuthStore } from '../stores/auth'
 import { toast } from '../utils/toast'
 import { downscaleImage } from '../utils/image'
@@ -89,6 +89,10 @@ function applyLocationPrefill() {
   if (locations.value.some(l => l.id === id)) form.location_id = id
 }
 
+// The edit form's autofill source: the loaded item's own photos (detail
+// projection includes `photos`; empty for photoless items → no button).
+const itemPhotos = ref<Photo[]>([])
+
 onMounted(async () => {
   api.get<ListResponse<Location>>('/api/v1/locations?page_size=200')
     .then(r => {
@@ -107,6 +111,7 @@ onMounted(async () => {
     form.visibility = it.visibility
     form.location_id = it.location_id ?? 0
     form.tags = (it.tags ?? []).map(t => t.name)
+    itemPhotos.value = it.photos ?? []
     initial = snapshot()
     initialTags = [...form.tags]
   } catch (e) {
@@ -253,11 +258,12 @@ function cancel() {
 }
 
 // AI autofill: fields proposed from photos (the add form's queued-blob
-// flow; Task 5's edit-form photo picker reuses the same apply helper) land
-// in the form ONLY via applyAIFields — it writes just the returned keys
-// and marks each in aiTouched so the field's label shows a ✨ hint until
-// the user edits that field by hand. Tags APPEND to the existing chips
-// (deduped case-sensitively, matching TagInput) — the user's chips win.
+// flow; the edit form's photo picker below reuses the same apply helper)
+// land in the form ONLY via applyAIFields — it writes just the returned
+// keys and marks each in aiTouched so the field's label shows a ✨ hint
+// until the user edits that field by hand. Tags APPEND to the existing
+// chips (deduped case-sensitively, matching TagInput) — the user's chips
+// win.
 const analyzing = ref(false)
 const aiTouched = reactive(new Set<string>())
 
@@ -295,13 +301,57 @@ async function autofillFromPhotos() {
   try {
     // a pick still encoding belongs in the analysis too (same drain save does)
     await drainPendingEncodes()
-    const fields = await autofillItems(queuedPhotos.value.slice(0, 4))
-    const filled = applyAIFields(fields)
-    if (filled.length) toast(`Filled: ${filled.join(', ')}`, 'success')
-    else toast('AI returned no suggestions', 'info')
+    applyResult(await autofillItems(queuedPhotos.value.slice(0, 4)))
   } catch (e) {
     // The server's message is the whole story: ai_not_configured names the
     // missing config keys, rate_limited says so — no "try again" gloss.
+    toast((e as Error).message, 'error')
+  } finally {
+    analyzing.value = false
+  }
+}
+
+// Shared success path of both autofill flows: apply + say what was filled.
+function applyResult(fields: AutofillFields) {
+  const filled = applyAIFields(fields)
+  if (filled.length) toast(`Filled: ${filled.join(', ')}`, 'success')
+  else toast('AI returned no suggestions', 'info')
+}
+
+// Edit-form picker (spec §5): the item's OWN photos feed the analysis —
+// the create form analyzes its queued picks instead; the two blocks are
+// mode-exclusive so the button label can be shared. Inline panel, not a
+// modal: thumbs from thumb_key ?? storage_key, click toggles, max 4
+// (endpoint cap — further clicks no-op), Analyze needs ≥1.
+const aiPickOpen = ref(false)
+const aiSelected = reactive(new Set<number>()) // photo ids
+
+function toggleAiPick(id: number) {
+  if (aiSelected.has(id)) { aiSelected.delete(id); return }
+  if (aiSelected.size >= 4) return // endpoint cap: a 5th pick is a no-op
+  aiSelected.add(id)
+}
+
+// Fetch each selected ORIGINAL (same-origin /files/{storage_key}, session
+// cookie; thumbs are too downscaled to analyze) and post the blobs. One
+// failure aborts with a toast naming the photo — nothing is posted.
+async function autofillFromSelected() {
+  if (analyzing.value || saving.value || !aiSelected.size) return
+  analyzing.value = true
+  try {
+    const picks = itemPhotos.value.filter(p => aiSelected.has(p.id))
+    const blobs = await Promise.all(picks.map(async p => {
+      let resp: Response
+      try {
+        resp = await fetch(`/files/${p.storage_key}`)
+      } catch {
+        throw new Error(`photo #${p.id} could not be loaded`)
+      }
+      if (!resp.ok) throw new Error(`photo #${p.id} could not be loaded (${resp.status})`)
+      return resp.blob()
+    }))
+    applyResult(await autofillItems(blobs))
+  } catch (e) {
     toast((e as Error).message, 'error')
   } finally {
     analyzing.value = false
@@ -369,6 +419,40 @@ defineExpose({ form, save, tagsEqual })
       <div class="block text-sm font-medium dark:text-slate-100" :data-ai-hint="aiTouched.has('tags') || undefined">Tags<span v-if="aiTouched.has('tags')" class="ml-1" aria-hidden="true">✨</span>
         <TagInput v-model:tags="form.tags" @update:tags="aiTouched.delete('tags')" class="mt-1" />
       </div>
+      <!-- AI autofill — edit form (spec §5): the item's own photos, picked
+           here; Analyze fetches the ORIGINALS from /files/{storage_key} and
+           prefill flows through the same applyAIFields/toast path as the
+           create form. Hidden for photoless items (nothing to pick). -->
+      <div v-if="editing && itemPhotos.length" class="block text-sm font-medium dark:text-slate-100">AI autofill
+        <div class="mt-1 flex flex-wrap items-center gap-2">
+          <button type="button" :disabled="analyzing || saving" @click="aiPickOpen = !aiPickOpen"
+            class="rounded-lg border border-slate-900 dark:border-slate-100 text-slate-900 dark:text-slate-100 px-3 py-1.5 text-sm font-medium disabled:opacity-50">✨ Autofill from photos</button>
+          <span class="text-xs text-slate-500 dark:text-slate-400 font-normal">
+            {{ itemPhotos.length }} photo{{ itemPhotos.length === 1 ? '' : 's' }} on this item — pick up to 4</span>
+        </div>
+        <!-- inline multi-select panel (not a modal): click toggles, ring
+             highlights the selection, ✓ badge + aria-pressed carry state -->
+        <div v-if="aiPickOpen" data-ai-picker class="mt-2 rounded-lg border dark:border-slate-700 p-2">
+          <div class="flex flex-wrap gap-2">
+            <button v-for="p in itemPhotos" :key="p.id" type="button" data-ai-thumb
+              :aria-pressed="aiSelected.has(p.id)" :disabled="analyzing || saving" @click="toggleAiPick(p.id)"
+              class="relative rounded-lg overflow-hidden ring-1 ring-slate-200 dark:ring-slate-700"
+              :class="aiSelected.has(p.id) && 'ring-2 ring-slate-900 dark:ring-slate-100'">
+              <img :src="`/files/${p.thumb_key ?? p.storage_key}`" :alt="p.caption || 'photo'" loading="lazy"
+                class="w-20 h-20 object-cover" />
+              <span v-if="aiSelected.has(p.id)" aria-hidden="true"
+                class="absolute top-1 right-1 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-full w-5 h-5 text-xs leading-5 text-center">✓</span>
+            </button>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <button type="button" data-ai-analyze :disabled="analyzing || saving || !aiSelected.size"
+              @click="autofillFromSelected"
+              class="rounded-lg border border-slate-900 dark:border-slate-100 text-slate-900 dark:text-slate-100 px-3 py-1.5 text-sm font-medium disabled:opacity-50">
+              <span v-if="analyzing" class="animate-spin inline-block" aria-hidden="true">⟳</span>{{ analyzing ? 'Analyzing…' : 'Analyze' }}</button>
+            <span data-ai-count class="text-xs text-slate-500 dark:text-slate-400 font-normal">{{ aiSelected.size }}/4 selected</span>
+          </div>
+        </div>
+      </div>
       <div v-if="!editing" class="block text-sm font-medium dark:text-slate-100">Photos & documents
         <div class="mt-1 flex gap-2">
           <!-- :disabled blocks label-click activation too; the labels dim and
@@ -387,11 +471,11 @@ defineExpose({ form, save, tagsEqual })
         <!-- AI autofill (spec §5): analyze queued photos → prefill the form
              for review. Autofill never saves; only the first 4 queued blobs
              are sent (endpoint cap). Create form only — the edit form gets
-             its own photo picker (Task 5). -->
+             its own photo picker (the block below). -->
         <div v-if="queuedPhotos.length" class="mt-2 flex flex-wrap items-center gap-2">
           <button type="button" :disabled="analyzing || saving" @click="autofillFromPhotos"
             class="rounded-lg border border-slate-900 dark:border-slate-100 text-slate-900 dark:text-slate-100 px-3 py-1.5 text-sm font-medium disabled:opacity-50">
-            {{ analyzing ? 'Analyzing…' : '✨ Autofill from photos' }}</button>
+            <span v-if="analyzing" class="animate-spin inline-block" aria-hidden="true">⟳</span>{{ analyzing ? 'Analyzing…' : '✨ Autofill from photos' }}</button>
           <span class="text-xs text-slate-500 dark:text-slate-400 font-normal">
             {{ analyzing ? 'reading your photos…' : autofillHint }}</span>
         </div>

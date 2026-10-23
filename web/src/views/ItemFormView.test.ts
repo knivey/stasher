@@ -847,14 +847,214 @@ describe('ItemFormView AI autofill (add form)', () => {
     await flushPromises()
     expect(btn.attributes('disabled')).toBeDefined()
     expect(btn.text()).toContain('Analyzing…')
+    expect(btn.find('.animate-spin').exists()).toBe(true) // spinner + text (spec §5)
     expect((w.vm as any).form.name).toBe('') // no form state changes while analyzing
     expect(itemPosts).toEqual([]) // autofill alone never saves
     release(new Response(JSON.stringify({ name: 'Gadget', qty: 3 }), { status: 200 }))
     await flushPromises()
     expect(btn.attributes('disabled')).toBeUndefined()
     expect(btn.text()).toContain('Autofill from photos')
+    expect(btn.find('.animate-spin').exists()).toBe(false) // spinner leaves with the state
     expect((w.vm as any).form.name).toBe('Gadget')
     expect(itemPosts).toEqual([]) // applying fields never saves either
+  })
+
+  // Carried from Task 4's review: the TagInput ✨-marker clear wiring
+  // (@update:tags → aiTouched.delete('tags')) was verified live but unpinned.
+  it('clears the tags ✨ marker on a manual chip edit — both add and remove', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/v1/autofill') return new Response(JSON.stringify({ tags: ['ai-tag'] }), { status: 200 })
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const w = await mountCreate()
+    await queuePhotos(w, 1)
+    await autofillButton(w)!.trigger('click')
+    await flushPromises()
+    const vm = w.vm as any
+    expect(vm.form.tags).toEqual(['ai-tag'])
+    expect(w.findAll('[data-ai-hint]')).toHaveLength(1) // Tags only — nothing else came back
+
+    // manual ADD (Enter commit inside TagInput) clears the marker
+    const input = w.find('input[aria-label="Add tag"]')
+    await input.setValue('mine')
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(vm.form.tags).toEqual(['ai-tag', 'mine'])
+    expect(w.findAll('[data-ai-hint]')).toHaveLength(0)
+
+    // a second autofill re-marks Tags (dedup keeps both chips)…
+    await autofillButton(w)!.trigger('click')
+    await flushPromises()
+    expect(vm.form.tags).toEqual(['ai-tag', 'mine'])
+    expect(w.findAll('[data-ai-hint]')).toHaveLength(1)
+
+    // …and a manual REMOVE (chip ✕) clears it again
+    await w.find('button[aria-label="Remove tag ai-tag"]').trigger('click')
+    expect(vm.form.tags).toEqual(['mine'])
+    expect(w.findAll('[data-ai-hint]')).toHaveLength(0)
+  })
+})
+
+describe('ItemFormView AI autofill (edit form)', () => {
+  const photo = (id: number, key: string, thumb: string | null) =>
+    ({ id, storage_key: key, thumb_key: thumb, caption: '', sort_order: id, created_at: '' })
+  const itemWithPhotos = (photos: unknown[]) => ({ id: 9, name: 'Widget', description: 'd', qty: 2, unit: 'pcs',
+    location_id: 3, visibility: 'private', created_at: '', updated_at: '', tags: [],
+    photos, documents: [], projects: [] })
+
+  function mountEdit(photos: unknown[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url.includes('/locations')
+        ? new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+        : new Response(JSON.stringify(itemWithPhotos(photos)), { status: 200 })))
+    return mount(ItemFormView, { props: { id: '9' } })
+  }
+
+  const pickerToggle = (w: ReturnType<typeof mount>) =>
+    w.findAll('button').find(b => b.text().includes('Autofill from photos'))
+
+  it('opens the picker on click: thumbs are thumb_key ?? storage_key, clicks toggle, badge counts, Analyze disabled at 0', async () => {
+    const w = mountEdit([
+      photo(71, '2026/10/a.jpg', '2026/10/a_t.webp'),
+      photo(72, '2026/10/b.jpg', null), // no thumb: falls back to the original
+      photo(73, '2026/10/c.jpg', '2026/10/c_t.webp'),
+    ])
+    await flushPromises()
+    expect(w.find('[data-ai-picker]').exists()).toBe(false) // closed until opened
+    await pickerToggle(w)!.trigger('click')
+    const picker = w.find('[data-ai-picker]')
+    expect(picker.exists()).toBe(true)
+    const thumbs = picker.findAll('[data-ai-thumb]')
+    expect(thumbs).toHaveLength(3)
+    expect(picker.findAll('img').map(i => i.attributes('src'))).toEqual([
+      '/files/2026/10/a_t.webp', '/files/2026/10/b.jpg', '/files/2026/10/c_t.webp',
+    ])
+    // nothing selected: Analyze disabled, badge at 0
+    expect(w.find('[data-ai-analyze]').attributes('disabled')).toBeDefined()
+    expect(w.find('[data-ai-count]').text()).toBe('0/4 selected')
+    // clicking a thumb selects it (aria-pressed) and the badge follows
+    await thumbs[0].trigger('click')
+    expect(thumbs[0].attributes('aria-pressed')).toBe('true')
+    expect(w.find('[data-ai-count]').text()).toBe('1/4 selected')
+    expect(w.find('[data-ai-analyze]').attributes('disabled')).toBeUndefined()
+    await thumbs[1].trigger('click')
+    expect(w.find('[data-ai-count]').text()).toBe('2/4 selected')
+    // clicking again DEselects
+    await thumbs[0].trigger('click')
+    expect(thumbs[0].attributes('aria-pressed')).toBe('false')
+    expect(w.find('[data-ai-count]').text()).toBe('1/4 selected')
+  })
+
+  it('caps selection at 4: further clicks are a no-op (endpoint limit)', async () => {
+    const w = mountEdit([1, 2, 3, 4, 5].map(i => photo(70 + i, `2026/10/p${i}.jpg`, null)))
+    await flushPromises()
+    await pickerToggle(w)!.trigger('click')
+    const thumbs = w.findAll('[data-ai-thumb]')
+    for (const t of thumbs) await t.trigger('click')
+    expect(w.find('[data-ai-count]').text()).toBe('4/4 selected')
+    expect(thumbs[4].attributes('aria-pressed')).toBe('false') // 5th never joined
+  })
+
+  it('Analyze fetches each selected ORIGINAL from /files and posts the blobs; spinner + Analyzing… while in flight', async () => {
+    const gets: string[] = []
+    const autofillCalls: any[] = []
+    let release!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
+      if (url === '/files/2026/10/k1.jpg') { gets.push(url); return new Response(new Blob(['orig1'], { type: 'image/jpeg' }), { status: 200 }) }
+      if (url === '/files/2026/10/k2.jpg') { gets.push(url); return new Response(new Blob(['orig2'], { type: 'image/jpeg' }), { status: 200 }) }
+      if (url === '/api/v1/autofill') { autofillCalls.push(init); return new Promise<Response>(res => { release = res }) }
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify(itemWithPhotos([photo(71, '2026/10/k1.jpg', null), photo(72, '2026/10/k2.jpg', '2026/10/k2_t.webp')])), { status: 200 })
+    }))
+    const w = mount(ItemFormView, { props: { id: '9' } })
+    await flushPromises()
+    await pickerToggle(w)!.trigger('click')
+    const thumbs = w.findAll('[data-ai-thumb]')
+    await thumbs[0].trigger('click') // k1
+    await thumbs[1].trigger('click') // k2
+    await w.find('[data-ai-analyze]').trigger('click')
+    await flushPromises()
+    // both ORIGINALS fetched same-origin (thumb_key ignored for analysis)
+    expect(gets.sort()).toEqual(['/files/2026/10/k1.jpg', '/files/2026/10/k2.jpg'])
+    // spinner + Analyzing… on the panel's button while held (spec §5)
+    const btn = w.find('[data-ai-analyze]')
+    expect(btn.attributes('disabled')).toBeDefined()
+    expect(btn.text()).toContain('Analyzing…')
+    expect(btn.find('.animate-spin').exists()).toBe(true)
+    release(new Response(JSON.stringify({ name: 'Resistor pack', tags: ['electronics'] }), { status: 200 }))
+    await flushPromises()
+    expect(autofillCalls).toHaveLength(1)
+    const parts = autofillCalls[0].body.getAll('files') as Blob[]
+    expect(parts).toHaveLength(2)
+    expect(await parts[0].text()).toBe('orig1') // photo order
+    expect(await parts[1].text()).toBe('orig2')
+    const vm = w.vm as any
+    expect(vm.form.name).toBe('Resistor pack')
+    expect(vm.form.tags).toEqual(['electronics'])
+    expect(toasts.some(t => t.message === 'Filled: name, tags' && t.type === 'success')).toBe(true)
+  })
+
+  it('a failed original fetch toasts which photo failed and posts NOTHING to autofill', async () => {
+    let autofillPosts = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/files/2026/10/ok.jpg') return new Response(new Blob(['orig1'], { type: 'image/jpeg' }), { status: 200 })
+      if (url === '/files/2026/10/gone.jpg') return new Response(JSON.stringify({ error: { code: 'not_found', message: 'nope' } }), { status: 404 })
+      if (url === '/api/v1/autofill') { autofillPosts++; return new Response(JSON.stringify({}), { status: 200 }) }
+      if (url.includes('/locations')) return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+      return new Response(JSON.stringify(itemWithPhotos([photo(71, '2026/10/ok.jpg', null), photo(72, '2026/10/gone.jpg', null)])), { status: 200 })
+    }))
+    const w = mount(ItemFormView, { props: { id: '9' } })
+    await flushPromises()
+    await pickerToggle(w)!.trigger('click')
+    const thumbs = w.findAll('[data-ai-thumb]')
+    await thumbs[0].trigger('click')
+    await thumbs[1].trigger('click') // this one's original 404s
+    await w.find('[data-ai-analyze]').trigger('click')
+    await flushPromises()
+    expect(autofillPosts).toBe(0) // failure aborts before the autofill POST
+    const t = toasts.find(x => x.type === 'error')
+    expect(t?.message).toContain('#72') // names the failing photo…
+    expect(t?.message).toContain('404') // …and why
+    expect((w.vm as any).form.name).toBe('Widget') // form untouched
+  })
+
+  it('add mode: no picker anywhere — the button still analyzes the queued photos directly', async () => {
+    const posts: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/v1/autofill') { posts.push(url); return new Response(JSON.stringify({}), { status: 200 }) }
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 })
+    }))
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/items', component: { template: '<div>items</div>' } },
+        { path: '/items/new', component: ItemFormView },
+        { path: '/items/:id', component: { template: '<div>detail</div>' } },
+      ],
+    })
+    await router.push('/items/new')
+    const w = mount(ItemFormView, { global: { plugins: [router] } })
+    await flushPromises()
+    // queue one photo through the real pick flow (canvas stubbed after mount)
+    const ctx = { drawImage: vi.fn() }
+    const canvas = { width: 0, height: 0, getContext: () => ctx,
+      toBlob: (cb: (b: Blob) => void) => cb(new Blob(['j0'], { type: 'image/jpeg' })) }
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 4000, height: 2000, close() {} }))
+    const realCreate = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) =>
+      tag === 'canvas' ? canvas as unknown as HTMLCanvasElement : realCreate(tag as keyof HTMLElementTagNameMap))
+    const f = new File(['x'], 'big.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(f, 'size', { value: 9_000_000 })
+    const input = w.find('input[accept="image/*"]')
+    Object.defineProperty(input.element, 'files', { value: [f] })
+    await input.trigger('change')
+    await flushPromises()
+    // the button acts directly on the queue…
+    await w.findAll('button').find(b => b.text().includes('Autofill from photos'))!.trigger('click')
+    await flushPromises()
+    expect(posts).toEqual(['/api/v1/autofill'])
+    // …and never opens a picker panel
+    expect(w.find('[data-ai-picker]').exists()).toBe(false)
+    expect(w.find('[data-ai-analyze]').exists()).toBe(false)
   })
 })
 
