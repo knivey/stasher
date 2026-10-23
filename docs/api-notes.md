@@ -174,6 +174,31 @@ DELETE /api/v1/locations/{id}/photo — owner-only (foreign → 404). Clears
   best-effort. Layout copy (`copy-layout`) copies **names/shape only —
   pictures are not copied**.
 
+## Location delete-subtree (2026-10-23)
+
+`DELETE /api/v1/locations/{id}?subtree=true` deletes the location **and its
+entire subtree** (all descendants, any depth). Absent or `?subtree=false` is
+EXACTLY the legacy delete: only that one row dies and its children reparent
+up to its parent.
+
+- `subtree` accepts only `true`, `false`, or absent — anything else → `400
+  validation_error` (`subtree must be "true" or "false"`). The ownership
+  check runs FIRST: a foreign/absent location → `404 not_found` and nothing
+  is deleted, even with an invalid `subtree` value (no existence leaks).
+- **Items always survive**: every item parked anywhere in the deleted
+  subtree becomes unlocated (`location_id` NULL, `updated_at` bumped to one
+  server-set timestamp), same as the single delete.
+- All of it is ONE transaction (collect subtree rows → detach items →
+  delete rows); a failure leaves nothing half-deleted. AFTER the commit,
+  the picture files (original + thumb) of EVERY deleted location are
+  deleted best-effort — failures are warn-logged, the 204 stands.
+- Recursion is depth-capped at 50 levels (defense-in-depth against parent
+  cycles, same cap as the descendants/breadcrumbs queries): a pathological
+  tree deeper than that deletes the top 51 levels and leaves the rest
+  dangling rather than hanging.
+- A leaf with `?subtree=true` = the single delete minus the (empty)
+  reparenting: 204, just that row gone.
+
 ## Layout copying (2026-10-22)
 
 `POST /api/v1/locations/{id}/copy-layout` — body

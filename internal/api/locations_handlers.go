@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -202,6 +203,11 @@ func (s *Server) handleUpdateLocation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, locationJSON(loc))
 }
 
+// handleDeleteLocation deletes a location. ?subtree: absent/false = the
+// legacy single-node delete (children reparent up, items detach); "true" =
+// the location AND all its descendants die in one transaction. Anything
+// else for the param is a client bug -> 400 validation_error. The
+// ownership 404 runs FIRST either way (no existence leaks).
 func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -214,6 +220,21 @@ func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "location not found")
 		return
 	}
+	switch r.URL.Query().Get("subtree") {
+	case "true":
+		s.deleteLocationSubtree(w, r, u, id)
+	case "", "false":
+		s.deleteLocationSingle(w, r, u, loc, id)
+	default:
+		writeErr(w, http.StatusBadRequest, "validation_error", `subtree must be "true" or "false"`)
+	}
+}
+
+// deleteLocationSingle is the legacy path: only this ONE row dies, its
+// children reparent to its parent and its items detach, in one
+// transaction. Its picture files are unreferenced after the commit -
+// best-effort delete, warn-logged.
+func (s *Server) deleteLocationSingle(w http.ResponseWriter, r *http.Request, u dbpkg.User, loc dbpkg.Location, id int64) {
 	tx, err := s.raw.BeginTx(r.Context(), nil)
 	if err != nil {
 		s.internalErr(w, err)
@@ -242,9 +263,61 @@ func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 		s.internalErr(w, err)
 		return
 	}
-	// Only this ONE row died (children reparented up, items detached). Its
-	// picture files are unreferenced now — best-effort delete, warn-logged.
 	deleteLocationPhotoFiles(s, &loc)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteLocationSubtree deletes the location AND every descendant in ONE
+// transaction: collect the subtree rows (user-scoped, depth-capped CTE),
+// detach every item parked anywhere in the subtree, delete the rows,
+// commit. Items ALWAYS survive (they become unlocated). Only AFTER the
+// commit are all the deleted locations' picture files (originals + thumbs)
+// deleted best-effort: a failed file delete leaks bytes, it is never a
+// request error, and the 204 stands.
+func (s *Server) deleteLocationSubtree(w http.ResponseWriter, r *http.Request, u dbpkg.User, id int64) {
+	tx, err := s.raw.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	defer tx.Rollback()
+	qtx := dbpkg.New(tx)
+	rows, err := qtx.CollectLocationSubtree(r.Context(), dbpkg.CollectLocationSubtreeParams{
+		ID: id, UserID: u.ID, UserID_2: u.ID,
+	})
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	ids := make([]int64, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	idsJSON, err := json.Marshal(ids)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	if err := qtx.ClearItemsLocationMany(r.Context(), dbpkg.ClearItemsLocationManyParams{
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339), UserID: u.ID,
+		LocationIds: string(idsJSON),
+	}); err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	if err := qtx.DeleteLocationsMany(r.Context(), dbpkg.DeleteLocationsManyParams{
+		UserID: u.ID, Ids: string(idsJSON),
+	}); err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	for _, row := range rows {
+		deleteStoredFiles(s, row.PhotoKey, row.PhotoThumbKey)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

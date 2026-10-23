@@ -156,14 +156,22 @@ func (s *Server) handleDeleteLocationPhoto(w http.ResponseWriter, r *http.Reques
 // storage, warn-logging failures. Missing files are a no-op (Storage.Delete
 // tolerates absence), which keeps photo deletion idempotent.
 func deleteLocationPhotoFiles(s *Server, loc *dbpkg.Location) {
-	if loc.PhotoKey.Valid {
-		if err := s.st.Delete(loc.PhotoKey.String); err != nil {
-			slog.Warn("file delete failed", "key", loc.PhotoKey.String, "err", err)
+	deleteStoredFiles(s, loc.PhotoKey, loc.PhotoThumbKey)
+}
+
+// deleteStoredFiles removes a (photo, thumb) key pair from storage,
+// warn-logging failures; missing files are a no-op (Storage.Delete
+// tolerates absence). Shared by the single delete (one dbpkg.Location)
+// and the subtree delete (generated row structs with the same fields).
+func deleteStoredFiles(s *Server, photoKey, thumbKey sql.NullString) {
+	if photoKey.Valid {
+		if err := s.st.Delete(photoKey.String); err != nil {
+			slog.Warn("file delete failed", "key", photoKey.String, "err", err)
 		}
 	}
-	if loc.PhotoThumbKey.Valid {
-		if err := s.st.Delete(loc.PhotoThumbKey.String); err != nil {
-			slog.Warn("file delete failed", "key", loc.PhotoThumbKey.String, "err", err)
+	if thumbKey.Valid {
+		if err := s.st.Delete(thumbKey.String); err != nil {
+			slog.Warn("file delete failed", "key", thumbKey.String, "err", err)
 		}
 	}
 }

@@ -123,6 +123,36 @@ WITH RECURSIVE d(id, depth) AS (
     SELECT l.id, d.depth + 1 FROM locations l JOIN d ON l.parent_id = d.id WHERE l.user_id = ? AND d.depth < 50
 ) SELECT id FROM d;
 
+-- name: CollectLocationSubtree :many
+-- The location plus ALL descendants (the root's own row included), carrying
+-- photo keys so the caller can clean up every deleted location's picture
+-- files after commit. Same CTE conventions as LocationDescendants: "d" not
+-- "desc" (DESC is a reserved SQLite keyword that breaks sqlc's analyzer),
+-- table-qualified anchor columns, and "d.depth < 50" in the recursive arm
+-- capping recursion if a parent cycle ever forms (defense-in-depth).
+WITH RECURSIVE d(id, photo_key, photo_thumb_key, depth) AS (
+    SELECT locations.id, locations.photo_key, locations.photo_thumb_key, 0 AS depth FROM locations WHERE locations.id = ? AND locations.user_id = ?
+    UNION ALL
+    SELECT l.id, l.photo_key, l.photo_thumb_key, d.depth + 1 FROM locations l JOIN d ON l.parent_id = d.id WHERE l.user_id = ? AND d.depth < 50
+) SELECT id, photo_key, photo_thumb_key FROM d;
+
+-- name: ClearItemsLocationMany :exec
+-- Detach every item parked in ANY of the given locations (JSON array of
+-- ids bound to one placeholder, expanded via json_each - same IN-list
+-- precedent as BulkMoveItems; never string-interpolated). Items ALWAYS
+-- survive a location delete; they just become unlocated.
+UPDATE items SET location_id = NULL, updated_at = sqlc.arg('updated_at')
+WHERE user_id = sqlc.arg('user_id')
+  AND location_id IN (SELECT value FROM json_each(CAST(sqlc.arg('location_ids') AS TEXT)));
+
+-- name: DeleteLocationsMany :exec
+-- Delete every location row of a collected subtree (JSON array of ids
+-- expanded via json_each, same as ClearItemsLocationMany), user-scoped so
+-- a foreign id can never ride along.
+DELETE FROM locations
+WHERE user_id = sqlc.arg('user_id')
+  AND id IN (SELECT value FROM json_each(CAST(sqlc.arg('ids') AS TEXT)));
+
 -- name: LocationBreadcrumbs :many
 -- "up.depth < 50" caps recursion the same way LocationDescendants does
 -- (parent-cycle defense-in-depth).

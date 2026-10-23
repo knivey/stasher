@@ -298,6 +298,27 @@ func (q *Queries) ClearItemsLocation(ctx context.Context, arg ClearItemsLocation
 	return err
 }
 
+const clearItemsLocationMany = `-- name: ClearItemsLocationMany :exec
+UPDATE items SET location_id = NULL, updated_at = ?1
+WHERE user_id = ?2
+  AND location_id IN (SELECT value FROM json_each(CAST(?3 AS TEXT)))
+`
+
+type ClearItemsLocationManyParams struct {
+	UpdatedAt   string `json:"updated_at"`
+	UserID      int64  `json:"user_id"`
+	LocationIds string `json:"location_ids"`
+}
+
+// Detach every item parked in ANY of the given locations (JSON array of
+// ids bound to one placeholder, expanded via json_each - same IN-list
+// precedent as BulkMoveItems; never string-interpolated). Items ALWAYS
+// survive a location delete; they just become unlocated.
+func (q *Queries) ClearItemsLocationMany(ctx context.Context, arg ClearItemsLocationManyParams) error {
+	_, err := q.db.ExecContext(ctx, clearItemsLocationMany, arg.UpdatedAt, arg.UserID, arg.LocationIds)
+	return err
+}
+
 const clearLocationPhoto = `-- name: ClearLocationPhoto :exec
 UPDATE locations SET photo_key = NULL, photo_thumb_key = NULL, updated_at = ? WHERE id = ? AND user_id = ?
 `
@@ -311,6 +332,55 @@ type ClearLocationPhotoParams struct {
 func (q *Queries) ClearLocationPhoto(ctx context.Context, arg ClearLocationPhotoParams) error {
 	_, err := q.db.ExecContext(ctx, clearLocationPhoto, arg.UpdatedAt, arg.ID, arg.UserID)
 	return err
+}
+
+const collectLocationSubtree = `-- name: CollectLocationSubtree :many
+WITH RECURSIVE d(id, photo_key, photo_thumb_key, depth) AS (
+    SELECT locations.id, locations.photo_key, locations.photo_thumb_key, 0 AS depth FROM locations WHERE locations.id = ? AND locations.user_id = ?
+    UNION ALL
+    SELECT l.id, l.photo_key, l.photo_thumb_key, d.depth + 1 FROM locations l JOIN d ON l.parent_id = d.id WHERE l.user_id = ? AND d.depth < 50
+) SELECT id, photo_key, photo_thumb_key FROM d
+`
+
+type CollectLocationSubtreeParams struct {
+	ID       int64 `json:"id"`
+	UserID   int64 `json:"user_id"`
+	UserID_2 int64 `json:"user_id_2"`
+}
+
+type CollectLocationSubtreeRow struct {
+	ID            int64          `json:"id"`
+	PhotoKey      sql.NullString `json:"photo_key"`
+	PhotoThumbKey sql.NullString `json:"photo_thumb_key"`
+}
+
+// The location plus ALL descendants (the root's own row included), carrying
+// photo keys so the caller can clean up every deleted location's picture
+// files after commit. Same CTE conventions as LocationDescendants: "d" not
+// "desc" (DESC is a reserved SQLite keyword that breaks sqlc's analyzer),
+// table-qualified anchor columns, and "d.depth < 50" in the recursive arm
+// capping recursion if a parent cycle ever forms (defense-in-depth).
+func (q *Queries) CollectLocationSubtree(ctx context.Context, arg CollectLocationSubtreeParams) ([]CollectLocationSubtreeRow, error) {
+	rows, err := q.db.QueryContext(ctx, collectLocationSubtree, arg.ID, arg.UserID, arg.UserID_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CollectLocationSubtreeRow
+	for rows.Next() {
+		var i CollectLocationSubtreeRow
+		if err := rows.Scan(&i.ID, &i.PhotoKey, &i.PhotoThumbKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countAdmins = `-- name: CountAdmins :one
@@ -854,6 +924,25 @@ type DeleteLocationParams struct {
 
 func (q *Queries) DeleteLocation(ctx context.Context, arg DeleteLocationParams) error {
 	_, err := q.db.ExecContext(ctx, deleteLocation, arg.ID, arg.UserID)
+	return err
+}
+
+const deleteLocationsMany = `-- name: DeleteLocationsMany :exec
+DELETE FROM locations
+WHERE user_id = ?1
+  AND id IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+`
+
+type DeleteLocationsManyParams struct {
+	UserID int64  `json:"user_id"`
+	Ids    string `json:"ids"`
+}
+
+// Delete every location row of a collected subtree (JSON array of ids
+// expanded via json_each, same as ClearItemsLocationMany), user-scoped so
+// a foreign id can never ride along.
+func (q *Queries) DeleteLocationsMany(ctx context.Context, arg DeleteLocationsManyParams) error {
+	_, err := q.db.ExecContext(ctx, deleteLocationsMany, arg.UserID, arg.Ids)
 	return err
 }
 
