@@ -121,6 +121,7 @@ func (s *Server) Router() chi.Router {
 			r.Delete("/items/{id}/notes/{noteId}", s.handleDeleteItemNote)
 
 			r.Get("/shared", s.handleListShared)
+			r.Get("/shared/projects", s.handleListSharedProjects)
 
 			r.Get("/trash", s.handleListTrash)
 			r.Delete("/trash", s.handleEmptyTrash)

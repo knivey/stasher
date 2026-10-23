@@ -1128,6 +1128,28 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project
 	return i, err
 }
 
+const getProjectAnyOwner = `-- name: GetProjectAnyOwner :one
+SELECT id, user_id, name, status, notes, created_at, updated_at, visibility FROM projects WHERE id = ?
+`
+
+// Ownership is checked in Go (requireViewableProject): the row is needed
+// even when it belongs to another user, as long as it is shared.
+func (q *Queries) GetProjectAnyOwner(ctx context.Context, id int64) (Project, error) {
+	row := q.db.QueryRowContext(ctx, getProjectAnyOwner, id)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Status,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Visibility,
+	)
+	return i, err
+}
+
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, token_hash, user_id, user_agent, last_ip, created_at, last_seen_at FROM sessions WHERE id = ? AND user_id = ?
 `
@@ -1651,20 +1673,22 @@ func (q *Queries) ListPhotosMissingThumbs(ctx context.Context) ([]ItemPhoto, err
 
 const listProjectItems = `-- name: ListProjectItems :many
 SELECT pi.project_id, pi.item_id, pi.qty_used, pi.notes, pi.added_at,
-       i.name AS item_name, i.qty AS item_qty, i.unit AS item_unit
+       i.name AS item_name, i.qty AS item_qty, i.unit AS item_unit,
+       i.visibility AS item_visibility
 FROM project_items pi JOIN items i ON i.id = pi.item_id
 WHERE pi.project_id = ?
 `
 
 type ListProjectItemsRow struct {
-	ProjectID int64           `json:"project_id"`
-	ItemID    int64           `json:"item_id"`
-	QtyUsed   sql.NullFloat64 `json:"qty_used"`
-	Notes     string          `json:"notes"`
-	AddedAt   string          `json:"added_at"`
-	ItemName  string          `json:"item_name"`
-	ItemQty   float64         `json:"item_qty"`
-	ItemUnit  string          `json:"item_unit"`
+	ProjectID      int64           `json:"project_id"`
+	ItemID         int64           `json:"item_id"`
+	QtyUsed        sql.NullFloat64 `json:"qty_used"`
+	Notes          string          `json:"notes"`
+	AddedAt        string          `json:"added_at"`
+	ItemName       string          `json:"item_name"`
+	ItemQty        float64         `json:"item_qty"`
+	ItemUnit       string          `json:"item_unit"`
+	ItemVisibility string          `json:"item_visibility"`
 }
 
 func (q *Queries) ListProjectItems(ctx context.Context, projectID int64) ([]ListProjectItemsRow, error) {
@@ -1685,6 +1709,7 @@ func (q *Queries) ListProjectItems(ctx context.Context, projectID int64) ([]List
 			&i.ItemName,
 			&i.ItemQty,
 			&i.ItemUnit,
+			&i.ItemVisibility,
 		); err != nil {
 			return nil, err
 		}
@@ -1821,6 +1846,50 @@ func (q *Queries) ListSharedItemsFromOthers(ctx context.Context, arg ListSharedI
 			&i.PhotoCount,
 			&i.ThumbKey,
 			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSharedProjectsFromOthers = `-- name: ListSharedProjectsFromOthers :many
+SELECT p.id, p.name, p.status, p.updated_at, u.display_name AS owner_name
+FROM projects p JOIN users u ON u.id = p.user_id
+WHERE p.user_id != ? AND p.visibility = 'shared'
+ORDER BY p.updated_at DESC
+`
+
+type ListSharedProjectsFromOthersRow struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	UpdatedAt string `json:"updated_at"`
+	OwnerName string `json:"owner_name"`
+}
+
+func (q *Queries) ListSharedProjectsFromOthers(ctx context.Context, userID int64) ([]ListSharedProjectsFromOthersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSharedProjectsFromOthers, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSharedProjectsFromOthersRow
+	for rows.Next() {
+		var i ListSharedProjectsFromOthersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Status,
+			&i.UpdatedAt,
+			&i.OwnerName,
 		); err != nil {
 			return nil, err
 		}

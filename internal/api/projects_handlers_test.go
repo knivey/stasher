@@ -2,8 +2,30 @@ package api
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
+
+// mkItem creates an item with the user's default visibility.
+// mkItemS creates one explicitly shared. Neither sets extra fields.
+func mkItem(t *testing.T, ts *httptest.Server, cookie *http.Cookie, name string) int64 {
+	resp := doJSON(t, ts, "POST", "/api/v1/items", map[string]any{"name": name}, cookie)
+	var item struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &item)
+	return item.ID
+}
+
+func mkItemS(t *testing.T, ts *httptest.Server, cookie *http.Cookie, name string) int64 {
+	resp := doJSON(t, ts, "POST", "/api/v1/items",
+		map[string]any{"name": name, "visibility": "shared"}, cookie)
+	var item struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &item)
+	return item.ID
+}
 
 func TestProjectVisibility(t *testing.T) {
 	_, ts := newTestServer(t, nil)
@@ -65,6 +87,103 @@ func TestProjectVisibility(t *testing.T) {
 	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/projects", nil, cookie), &list)
 	if len(list.Data) != 2 {
 		t.Fatalf("list len = %d, want 2", len(list.Data))
+	}
+}
+
+func TestProjectShareeAccessAndBOMMasking(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	owner := registerUser(t, ts, "pom@test.dev", "longpassword1")
+	sharee := registerUser(t, ts, "psh@test.dev", "longpassword1")
+
+	// owner: two items (one private, one shared), a project with both, shared
+	itPriv := mkItem(t, ts, owner, "Priv part")
+	itSh := mkItemS(t, ts, owner, "Shared part") // helper sets visibility shared
+	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "Bench PSU", "visibility": "shared"}, owner)
+	var proj struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &proj)
+	doJSON(t, ts, "POST", "/api/v1/projects/"+fmtInt64(proj.ID)+"/items", map[string]any{"item_id": itPriv, "qty_used": 2}, owner)
+	doJSON(t, ts, "POST", "/api/v1/projects/"+fmtInt64(proj.ID)+"/items", map[string]any{"item_id": itSh, "qty_used": 1, "notes": "secret link note"}, owner)
+
+	// sharee GET: 200, masked rows, owner_view false
+	resp = doJSON(t, ts, "GET", "/api/v1/projects/"+fmtInt64(proj.ID), nil, sharee)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sharee GET = %d", resp.StatusCode)
+	}
+	var detail map[string]any
+	decodeBody(t, resp, &detail)
+	if detail["owner_view"] != false {
+		t.Fatalf("owner_view = %v", detail["owner_view"])
+	}
+	rows := detail["items"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	for _, r := range rows {
+		m := r.(map[string]any)
+		for _, banned := range []string{"item_id", "item_qty", "item_unit", "notes", "added_at"} {
+			if _, has := m[banned]; has {
+				t.Fatalf("sharee row leaks %q: %v", banned, m)
+			}
+		}
+		if m["item_name"] == "" {
+			t.Fatalf("row missing item_name: %v", m)
+		}
+	}
+
+	// owner GET: full rows with shared flags, owner_view true
+	resp = doJSON(t, ts, "GET", "/api/v1/projects/"+fmtInt64(proj.ID), nil, owner)
+	decodeBody(t, resp, &detail)
+	if detail["owner_view"] != true {
+		t.Fatalf("owner owner_view = %v", detail["owner_view"])
+	}
+	for _, r := range detail["items"].([]any) {
+		m := r.(map[string]any)
+		if _, has := m["item_id"]; !has {
+			t.Fatalf("owner row missing item_id: %v", m)
+		}
+	}
+}
+
+func TestProjectShareePrivate404(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	owner := registerUser(t, ts, "pom2@test.dev", "longpassword1")
+	sharee := registerUser(t, ts, "psh2@test.dev", "longpassword1")
+	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "Secret"}, owner)
+	var proj struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &proj)
+	if r := doJSON(t, ts, "GET", "/api/v1/projects/"+fmtInt64(proj.ID), nil, sharee); r.StatusCode != http.StatusNotFound {
+		t.Fatalf("sharee GET private = %d, want 404", r.StatusCode)
+	}
+}
+
+func TestListSharedProjects(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	owner := registerUser(t, ts, "pom3@test.dev", "longpassword1")
+	other := registerUser(t, ts, "psh3@test.dev", "longpassword1")
+	doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "Public", "visibility": "shared"}, owner)
+	doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "Hidden"}, owner)
+	doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "Mine shared", "visibility": "shared"}, other)
+
+	var list struct {
+		Data []struct {
+			Name      string `json:"name"`
+			OwnerName string `json:"owner_name"`
+		} `json:"data"`
+		Total int64 `json:"total"`
+	}
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/shared/projects", nil, other), &list)
+	if len(list.Data) != 1 || list.Data[0].Name != "Public" || list.Data[0].OwnerName == "" {
+		t.Fatalf("shared projects = %+v, want only Public with owner name", list.Data)
+	}
+	// owner's own view: also only others' projects — his own shared
+	// "Public" must never appear (but other's "Mine shared" must)
+	decodeBody(t, doJSON(t, ts, "GET", "/api/v1/shared/projects", nil, owner), &list)
+	if len(list.Data) != 1 || list.Data[0].Name != "Mine shared" {
+		t.Fatalf("owner's shared list = %+v, want only other's 'Mine shared'", list.Data)
 	}
 }
 

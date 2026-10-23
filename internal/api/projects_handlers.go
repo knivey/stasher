@@ -102,9 +102,30 @@ func (s *Server) requireOwnedProject(w http.ResponseWriter, r *http.Request, u d
 	return p, true
 }
 
+// requireViewableProject writes 404 unless the project is the user's own or
+// another user's shared project. isOwner tells handlers which projection to
+// build; mutating routes use requireOwnedProject instead.
+func (s *Server) requireViewableProject(w http.ResponseWriter, r *http.Request, u dbpkg.User) (p dbpkg.Project, isOwner bool, ok bool) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_id", "invalid project id")
+		return dbpkg.Project{}, false, false
+	}
+	p, err = s.q.GetProjectAnyOwner(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "project not found")
+		return dbpkg.Project{}, false, false
+	}
+	if p.UserID != u.ID && p.Visibility != "shared" {
+		writeErr(w, http.StatusNotFound, "not_found", "project not found")
+		return dbpkg.Project{}, false, false
+	}
+	return p, p.UserID == u.ID, true
+}
+
 func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
-	p, ok := s.requireOwnedProject(w, r, u)
+	p, isOwner, ok := s.requireViewableProject(w, r, u)
 	if !ok {
 		return
 	}
@@ -119,14 +140,24 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		if pi.QtyUsed.Valid {
 			qtyUsed = pi.QtyUsed.Float64
 		}
-		itemList = append(itemList, map[string]any{
-			"item_id": pi.ItemID, "item_name": pi.ItemName,
-			"item_qty": pi.ItemQty, "item_unit": pi.ItemUnit,
-			"qty_used": qtyUsed, "notes": pi.Notes, "added_at": pi.AddedAt,
-		})
+		if isOwner {
+			itemList = append(itemList, map[string]any{
+				"item_id": pi.ItemID, "item_name": pi.ItemName,
+				"item_qty": pi.ItemQty, "item_unit": pi.ItemUnit,
+				"qty_used": qtyUsed, "notes": pi.Notes, "added_at": pi.AddedAt,
+				"shared": pi.ItemVisibility == "shared",
+			})
+		} else {
+			// sharee BOM: name + qty used + shared flag only (spec §2) —
+			// item identity, link notes, and added_at stay owner-private.
+			itemList = append(itemList, map[string]any{
+				"item_name": pi.ItemName, "qty_used": qtyUsed,
+				"shared": pi.ItemVisibility == "shared",
+			})
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"project": projectJSON(p), "items": itemList,
+		"project": projectJSON(p), "owner_view": isOwner, "items": itemList,
 	})
 }
 

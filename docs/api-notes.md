@@ -428,3 +428,32 @@ Facts discovered by the frontend round, kept here so they survive:
 - `shared` currently has **no viewer semantics** — sharing/viewing by
   other users lands with the upcoming shared-projects endpoints; the
   flag is stored and echoed only until then.
+
+## Shared projects: sharee read access (2026-10-23)
+
+- **`GET /projects/{id}` is now owner-or-sharee** (was owner-only). A
+  sharee is any logged-in user when the project's `visibility` is
+  `shared`; everyone else (and every private project) still gets `404`
+  (no existence leak). The response gains `"owner_view": bool`:
+  - **Owner** (`owner_view: true`): `project` carries everything
+    (including `notes`); each `items[]` row is
+    `{item_id, item_name, item_qty, item_unit, qty_used, notes, added_at, shared}`
+    — plus `project_id` context server-side. `shared` mirrors the
+    **item's** `visibility` (not the project's).
+  - **Sharee** (`owner_view: false`): `project` is the standard project
+    JSON (it contains no secrets — notes are project-level and visible),
+    but each `items[]` row is masked to exactly
+    `{item_name, qty_used, shared}`. The keys `item_id`, `item_qty`,
+    `item_unit`, `notes`, `added_at` are **absent**, not null — the BOM
+    is a parts list, not an inventory view. Note the asymmetry: the
+    link row's `notes` (owner's per-BOM-line note) is hidden, while the
+    project's top-level `notes` field is not.
+- **`GET /api/v1/shared/projects`** lists **other users'** shared
+  projects: `{data: [{id, name, status, owner_name, updated_at}], total}`.
+  The caller's own projects never appear, even when `shared`. No
+  pagination (projects-list ruling applies); order is `updated_at DESC`.
+  It carries no BOM contents — fetch the project for the masked view.
+- **Mutating project routes stay owner-only**: `PATCH`/`DELETE`
+  `/projects/{id}` and all `/projects/{id}/items[/...]` routes still
+  answer `404` for sharees **even on shared projects**. `visibility`
+  itself is only changeable by the owner.

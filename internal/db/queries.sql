@@ -298,8 +298,19 @@ VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *;
 -- name: GetProject :one
 SELECT * FROM projects WHERE id = ? AND user_id = ?;
 
+-- name: GetProjectAnyOwner :one
+-- Ownership is checked in Go (requireViewableProject): the row is needed
+-- even when it belongs to another user, as long as it is shared.
+SELECT * FROM projects WHERE id = ?;
+
 -- name: ListProjects :many
 SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC;
+
+-- name: ListSharedProjectsFromOthers :many
+SELECT p.id, p.name, p.status, p.updated_at, u.display_name AS owner_name
+FROM projects p JOIN users u ON u.id = p.user_id
+WHERE p.user_id != ? AND p.visibility = 'shared'
+ORDER BY p.updated_at DESC;
 
 -- name: UpdateProject :exec
 UPDATE projects SET name = ?, status = ?, notes = ?, visibility = ?, updated_at = ? WHERE id = ? AND user_id = ?;
@@ -318,7 +329,8 @@ DELETE FROM project_items WHERE project_id = ? AND item_id = ?;
 
 -- name: ListProjectItems :many
 SELECT pi.project_id, pi.item_id, pi.qty_used, pi.notes, pi.added_at,
-       i.name AS item_name, i.qty AS item_qty, i.unit AS item_unit
+       i.name AS item_name, i.qty AS item_qty, i.unit AS item_unit,
+       i.visibility AS item_visibility
 FROM project_items pi JOIN items i ON i.id = pi.item_id
 WHERE pi.project_id = ?;
 

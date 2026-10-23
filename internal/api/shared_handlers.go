@@ -57,6 +57,26 @@ func (s *Server) handleListShared(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, listEnvelope{Data: out, Total: total})
 }
 
+// handleListSharedProjects lists other users' shared projects (never the
+// caller's own, even when shared). BOM contents are NOT included; fetch the
+// individual project for the masked projection.
+func (s *Server) handleListSharedProjects(w http.ResponseWriter, r *http.Request) {
+	u, _ := currentUser(r.Context())
+	rows, err := s.q.ListSharedProjectsFromOthers(r.Context(), u.ID)
+	if err != nil {
+		s.internalErr(w, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, map[string]any{
+			"id": p.ID, "name": p.Name, "status": p.Status,
+			"owner_name": p.OwnerName, "updated_at": p.UpdatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, listEnvelope{Data: out, Total: int64(len(out))})
+}
+
 // handleCopyItem copies an owned item (duplicate) or another user's shared
 // item into the caller's inventory.
 func (s *Server) handleCopyItem(w http.ResponseWriter, r *http.Request) {
