@@ -38,7 +38,12 @@ export interface LedgerEntry {
   project_name?: string | null
   note: string; created_at: string
 }
-export interface Location { id: number; name: string; parent_id: number | null; notes: string; created_at: string; updated_at: string }
+export interface Location {
+  id: number; name: string; parent_id: number | null; notes: string
+  // single optional picture; thumb is the derived file (null when generation failed)
+  photo_key: string | null; photo_thumb_key: string | null
+  created_at: string; updated_at: string
+}
 export interface Breadcrumb { id: number; name: string }
 export interface Project { id: number; name: string; status: 'planned' | 'active' | 'done' | 'archived'; notes: string; created_at: string; updated_at: string }
 export interface ProjectItem { item_id: number; item_name: string; item_qty: number; item_unit: string; qty_used: number | null; notes: string; added_at: string }

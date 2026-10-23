@@ -657,3 +657,186 @@ describe('LocationsView', () => {
     expect(calls.some(c => c.method === 'POST')).toBe(false)
   })
 })
+
+// ---- Location pictures ----
+
+const PHOTO_LOCS = [
+  { id: 1, name: 'House', parent_id: null, notes: '', photo_key: '2026/01/full.jpg', photo_thumb_key: '2026/01/thumb.jpg', created_at: '', updated_at: '' },
+  { id: 2, name: 'Cabinet', parent_id: 1, notes: '', photo_key: '2026/02/full2.png', photo_thumb_key: null, created_at: '', updated_at: '' },
+  { id: 3, name: 'Bin', parent_id: 2, notes: '', photo_key: null, photo_thumb_key: null, created_at: '', updated_at: '' },
+] as Location[]
+
+interface PhotoCall { method: string; url: string; body?: unknown }
+
+// Fetch mock for the picture tests: real locations list, configurable
+// photo endpoints. `onPost`/`onDelete` hooks run before the response is
+// returned; `deferPost` (when given) receives the resolve function instead
+// of resolving immediately, so a test can observe the in-flight state.
+function mockPhotoFetch(opts: {
+  locs?: Location[]; postStatus?: number; postBody?: unknown
+  deferPost?: boolean
+} = {}) {
+  const locs = opts.locs ?? PHOTO_LOCS
+  const calls: PhotoCall[] = []
+  let resolvePost: ((r: Response) => void) | null = null
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET'
+    calls.push({ method, url, body: init?.body })
+    if (method === 'GET')
+      return new Response(JSON.stringify({ data: locs, total: locs.length }), { status: 200 })
+    if (method === 'POST') {
+      const resp = new Response(JSON.stringify(opts.postBody ?? { photo_key: '2026/03/new.jpg', thumb_key: null }), { status: opts.postStatus ?? 200 })
+      if (opts.deferPost) return new Promise<Response>(resolve => { resolvePost = resolve })
+      return resp
+    }
+    if (method === 'DELETE') return new Response('', { status: 204 })
+    return new Response(JSON.stringify({}), { status: 200 }) // PATCH
+  }))
+  return {
+    calls,
+    resolvePost: (r: Response) => resolvePost?.(r),
+    grow: (loc: Location) => locs.push(loc),
+  }
+}
+
+async function mountPhotoView(calls: PhotoCall[]) {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/:pathMatch(.*)*', component: { template: '<div />' } }],
+  })
+  const w = mount(LocationsView, { global: { plugins: [router] } })
+  await flushPromises()
+  expect(calls.length).toBeGreaterThan(0)
+  return w
+}
+
+const rowOf = (w: ReturnType<typeof mount>, name: string) =>
+  w.findAll('li').find(li => li.find('[data-loc-name]').text() === name)!
+
+describe('LocationsView pictures', () => {
+  it('renders a row thumbnail using thumb ?? photo, absent rows get none', async () => {
+    const m = mockPhotoFetch()
+    const w = await mountPhotoView(m.calls)
+    await expandAll(w)
+    const house = rowOf(w, 'House')
+    const cabinet = rowOf(w, 'Cabinet')
+    const bin = rowOf(w, 'Bin')
+    // House: thumb preferred for the img, FULL photo for the link target
+    const houseThumb = house.find('[data-loc-thumb]')
+    expect(houseThumb.exists()).toBe(true)
+    expect(houseThumb.find('img').attributes('src')).toBe('/files/2026/01/thumb.jpg')
+    expect(houseThumb.attributes('href')).toBe('/files/2026/01/full.jpg')
+    // Cabinet: no derived thumb — the full image is both preview and target
+    const cabinetThumb = cabinet.find('[data-loc-thumb]')
+    expect(cabinetThumb.exists()).toBe(true)
+    expect(cabinetThumb.find('img').attributes('src')).toBe('/files/2026/02/full2.png')
+    expect(cabinetThumb.attributes('href')).toBe('/files/2026/02/full2.png')
+    // Bin: no picture, no thumbnail
+    expect(bin.find('[data-loc-thumb]').exists()).toBe(false)
+    // alt text is the location name
+    expect(houseThumb.find('img').attributes('alt')).toBe('House')
+  })
+
+  it('thumbnail anchor opens the FULL image in a new tab (target/rel pinned)', async () => {
+    const m = mockPhotoFetch()
+    const w = await mountPhotoView(m.calls)
+    const anchor = rowOf(w, 'House').find('[data-loc-thumb]')
+    expect(anchor.attributes('target')).toBe('_blank')
+    expect(anchor.attributes('rel')).toBe('noopener')
+  })
+
+  it('the add form has no picture control (pictures come after creation)', async () => {
+    const m = mockPhotoFetch()
+    const w = await mountPhotoView(m.calls)
+    expect(w.find('form [data-photo-input]').exists()).toBe(false)
+    expect(w.find('form [data-photo-upload]').exists()).toBe(false)
+  })
+
+  it('edit mode: choosing a file uploads it immediately, then the list refreshes', async () => {
+    const m = mockPhotoFetch()
+    const w = await mountPhotoView(m.calls)
+    await expandAll(w)
+    await rowOf(w, 'House').find('[data-edit]').trigger('click')
+    const controls = w.find('[data-photo-controls]')
+    expect(controls.exists()).toBe(true)
+    const input = controls.find('[data-photo-input]')
+    expect(input.attributes('accept')).toBe('image/*')
+    const file = new File(['x'], 'bin.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+    const post = m.calls.find(c => c.method === 'POST')
+    expect(post?.url).toBe('/api/v1/locations/1/photo')
+    expect(post?.body).toBeInstanceOf(FormData)
+    expect((post!.body as FormData).get('file')).toBeTruthy()
+    // list refetched after the upload
+    expect(m.calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
+    // still in edit mode, no error line
+    expect(w.find('[data-photo-controls]').exists()).toBe(true)
+    expect(w.find('[data-edit-name]').exists()).toBe(true)
+  })
+
+  it('upload disables the controls while in flight and re-enables after', async () => {
+    const m = mockPhotoFetch({ deferPost: true })
+    const w = await mountPhotoView(m.calls)
+    await expandAll(w)
+    await rowOf(w, 'House').find('[data-edit]').trigger('click')
+    const input = w.find('[data-photo-input]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['x'], 'bin.jpg', { type: 'image/jpeg' })] })
+    await input.trigger('change')
+    // in flight: both controls disabled
+    expect(w.find('[data-photo-upload]').attributes('disabled')).toBeDefined()
+    expect(w.find('[data-photo-remove]').attributes('disabled')).toBeDefined()
+    m.resolvePost(new Response(JSON.stringify({ photo_key: 'k', thumb_key: null }), { status: 200 }))
+    await flushPromises()
+    expect(w.find('[data-photo-upload]').attributes('disabled')).toBeUndefined()
+    expect(w.find('[data-photo-remove]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('upload errors surface in the editError line (no toast assertion needed)', async () => {
+    const m = mockPhotoFetch({
+      postStatus: 415,
+      postBody: { error: { code: 'unsupported_type', message: 'photos must be jpeg, png, webp, or gif' } },
+    })
+    const w = await mountPhotoView(m.calls)
+    await expandAll(w)
+    await rowOf(w, 'House').find('[data-edit]').trigger('click')
+    const input = w.find('[data-photo-input]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['x'], 'bin.txt', { type: 'text/plain' })] })
+    await input.trigger('change')
+    await flushPromises()
+    const err = w.find('[data-edit-error]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('photos must be jpeg, png, webp, or gif')
+    expect(w.find('[data-photo-upload]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('remove posts DELETE, refetches, confirm-free; hidden when no picture', async () => {
+    const m = mockPhotoFetch()
+    const w = await mountPhotoView(m.calls)
+    await expandAll(w)
+    // Bin has no picture: no Remove button in its edit row
+    await rowOf(w, 'Bin').find('[data-edit]').trigger('click')
+    expect(w.find('[data-photo-remove]').exists()).toBe(false)
+    const cancel = w.findAll('button').find(b => b.text() === 'Cancel')!
+    await cancel.trigger('click')
+    // House has a picture: Remove is confirm-free (no dialog) and calls DELETE
+    await rowOf(w, 'House').find('[data-edit]').trigger('click')
+    expect(w.find('[data-photo-remove]').exists()).toBe(true)
+    expect(w.find('[role="dialog"]').exists()).toBe(false)
+    await w.find('[data-photo-remove]').trigger('click')
+    await flushPromises()
+    expect(m.calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/locations/1/photo')).toBe(true)
+    expect(m.calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('edit preview shows the current picture thumbnail', async () => {
+    const m = mockPhotoFetch()
+    const w = await mountPhotoView(m.calls)
+    await expandAll(w)
+    await rowOf(w, 'House').find('[data-edit]').trigger('click')
+    const preview = w.find('[data-photo-controls] img')
+    expect(preview.exists()).toBe(true)
+    expect(preview.attributes('src')).toBe('/files/2026/01/thumb.jpg')
+  })
+})

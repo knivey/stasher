@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../api/client'
+import { addLocationPhoto, api, removeLocationPhoto } from '../api/client'
 import type { ListResponse, Location } from '../api/types'
 import { toast } from '../utils/toast'
 import { useItemsStore } from '../stores/items'
@@ -289,6 +289,52 @@ async function saveEdit(loc: Location) {
   }
 }
 
+// ---- Picture (single optional photo, managed from the edit row) ----
+const photoBusy = ref(false)
+// Function ref (not a template ref): the input renders inside the v-for,
+// but only for the one row in edit mode. The upload fires immediately on
+// choose; replacing = just upload again (the server swaps the files).
+let photoInputEl: HTMLInputElement | null = null
+function setPhotoInput(el: unknown) { photoInputEl = el as HTMLInputElement | null }
+function pickPhoto() { photoInputEl?.click() }
+
+// The picture actually displayed: the derived thumb, falling back to the
+// full image when generation failed.
+function locPhoto(loc: Location): string | null {
+  return loc.photo_thumb_key ?? loc.photo_key
+}
+
+async function onPhotoChosen(loc: Location, e: Event) {
+  const el = e.target as HTMLInputElement
+  const file = el.files?.[0]
+  el.value = '' // allow re-picking the same file
+  if (!file || photoBusy.value) return
+  photoBusy.value = true
+  editError.value = ''
+  try {
+    await addLocationPhoto(loc.id, file)
+    await fetchLocations() // row + preview pick up the new picture
+  } catch (err) {
+    editError.value = (err as Error).message
+  } finally {
+    photoBusy.value = false
+  }
+}
+
+async function removePhoto(loc: Location) {
+  if (photoBusy.value) return
+  photoBusy.value = true
+  editError.value = ''
+  try {
+    await removeLocationPhoto(loc.id)
+    await fetchLocations()
+  } catch (err) {
+    editError.value = (err as Error).message
+  } finally {
+    photoBusy.value = false
+  }
+}
+
 // ---- Delete ----
 const deleteTarget = ref<Location | null>(null)
 
@@ -384,7 +430,7 @@ async function deleteLocation() {
           <div class="max-w-xs">
             <LocationSelect v-model="copySource" data-copy-source :locations="locations" none-label="— choose a layout —" />
           </div>
-          <p class="text-xs text-slate-500 dark:text-slate-400">Copies names and shape only — items are not copied.</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Copies names and shape only — items and pictures are not copied.</p>
         </div>
       </div>
       <button type="submit" :disabled="adding"
@@ -406,6 +452,14 @@ async function deleteLocation() {
               class="shrink-0 w-8 min-h-8 inline-flex items-center justify-center rounded text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
               @click.stop="toggleExpand(r.loc.id)">{{ expanded.has(r.loc.id) ? '▼' : '▶' }}</button>
             <span v-else data-expand-spacer aria-hidden="true" class="shrink-0 inline-block w-8"></span>
+            <!-- Picture thumbnail (thumb ?? full): links to the FULL image
+                 in a new tab — never inside the SPA's own origin context. -->
+            <a v-if="locPhoto(r.loc)" data-loc-thumb :href="`/files/${r.loc.photo_key}`"
+              target="_blank" rel="noopener" class="shrink-0 mr-2"
+              :aria-label="`Open picture of ${r.loc.name}`">
+              <img :src="`/files/${locPhoto(r.loc)}`" :alt="r.loc.name" loading="lazy"
+                class="h-8 w-8 object-cover rounded" />
+            </a>
             <div class="min-w-0">
               <!-- A real button (keyboard-focusable) styled like a link; it
                    cannot fire in edit mode because this whole branch is
@@ -438,7 +492,19 @@ async function deleteLocation() {
           </div>
           <textarea v-model="editNotes" data-edit-notes rows="2" maxlength="10000" placeholder="Notes"
             class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm"></textarea>
-          <p v-if="editError" class="text-xs text-red-600 dark:text-red-400">{{ editError }}</p>
+          <div data-photo-controls class="flex flex-wrap items-center gap-2">
+            <img v-if="locPhoto(r.loc)" :src="`/files/${locPhoto(r.loc)}`" :alt="r.loc.name"
+              class="h-8 w-8 object-cover rounded" />
+            <input :ref="setPhotoInput" data-photo-input type="file" accept="image/*" class="hidden"
+              :disabled="photoBusy" @change="onPhotoChosen(r.loc, $event)" />
+            <button type="button" data-photo-upload :disabled="photoBusy"
+              class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm disabled:opacity-50"
+              @click="pickPhoto">Upload photo</button>
+            <button v-if="locPhoto(r.loc)" type="button" data-photo-remove :disabled="photoBusy"
+              class="text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+              @click="removePhoto(r.loc)">Remove</button>
+          </div>
+          <p v-if="editError" data-edit-error class="text-xs text-red-600 dark:text-red-400">{{ editError }}</p>
           <div class="flex gap-2">
             <button data-save :disabled="saving"
               class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50" @click="saveEdit(r.loc)">Save</button>

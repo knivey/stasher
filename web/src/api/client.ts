@@ -38,3 +38,12 @@ export const api = {
     return handle<T>(await fetch(path, { method: 'POST', body: fd }))
   },
 }
+
+// Location pictures: a location has at most one picture and an upload
+// REPLACES it server-side (api-notes "Location pictures").
+export const addLocationPhoto = (id: number, file: File) =>
+  api.upload<{ photo_key: string; thumb_key: string | null }>(
+    `/api/v1/locations/${id}/photo`, 'file', file, file.name)
+
+export const removeLocationPhoto = (id: number) =>
+  api.del(`/api/v1/locations/${id}/photo`)

@@ -3,7 +3,7 @@ import { locationDepthOptions, locationTreeRows } from './locations'
 import type { Location } from '../api/types'
 
 function loc(id: number, name: string, parent_id: number | null): Location {
-  return { id, name, parent_id, notes: '', created_at: '', updated_at: '' }
+  return { id, name, parent_id, notes: '', photo_key: null, photo_thumb_key: null, created_at: '', updated_at: '' }
 }
 
 describe('locationDepthOptions', () => {
