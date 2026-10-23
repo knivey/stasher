@@ -22,6 +22,13 @@ export interface FetchJob {
   error?: string
   document_id?: number
 }
+// Document finder (api-notes "Document search"): results contain ONLY
+// candidates the server verified as downloadable PDFs; `size` is ABSENT
+// when the candidate server didn't report a length (never -1). `rejected`
+// counts candidates dropped by verification. Picking one downloads it via
+// the ordinary fetch flow.
+export interface DocSearchResult { title: string; url: string; host: string; size?: number }
+export interface DocSearchResponse { results: DocSearchResult[]; rejected: number }
 export interface LedgerEntry {
   id: number; delta: number; resulting_qty: number
   kind: 'used' | 'sold' | 'lost' | 'found' | 'restock' | 'disposed' | 'adjustment'

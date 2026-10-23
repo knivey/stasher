@@ -677,12 +677,23 @@ describe('ItemDetailView product url & fetch', () => {
   // Mock that understands the detail-view surface plus the fetch/job endpoints;
   // every request lands in `calls`. `jobs` is a queue of poll responses — once
   // empty, every poll answers {"status":"running"} forever.
-  function fetchMock(opts: { item?: unknown; jobs?: unknown[]; jobStatus?: number; postStatus?: number } = {}) {
+  function fetchMock(opts: {
+    item?: unknown; jobs?: unknown[]; jobStatus?: number; postStatus?: number
+    search?: unknown; searchStatus?: number; searchCode?: string; searchMessage?: string
+    holdSearch?: (release: (r: Response) => void) => void
+  } = {}) {
     const calls: { method: string; url: string; body?: string }[] = []
     const jobs = [...(opts.jobs ?? [])]
     const shown = opts.item ?? item
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ method: init?.method ?? 'GET', url, body: init?.body as string | undefined })
+      if (url.includes('/items/9/search-documents')) {
+        if (opts.searchStatus)
+          return new Response(JSON.stringify({ error: { code: opts.searchCode ?? 'search_disabled', message: opts.searchMessage ?? 'set brave_api_key in config to enable document search' } }), { status: opts.searchStatus })
+        if (opts.holdSearch)
+          return new Promise<Response>(res => opts.holdSearch!(res))
+        return new Response(JSON.stringify(opts.search ?? { results: [], rejected: 0 }), { status: 200 })
+      }
       if (url.includes('/items/9/fetch')) {
         if (opts.postStatus) return new Response(JSON.stringify({ error: { code: 'validation_error', message: 'url must be an http(s) URL' } }), { status: opts.postStatus })
         return new Response(JSON.stringify({ job_id: 'j1' }), { status: 202 })
@@ -893,5 +904,119 @@ describe('ItemDetailView product url & fetch', () => {
     await flushPromises()
     expect(jobCalls(calls)).toHaveLength(1) // cancelled: no further polls
     expect(toasts.some(t => t.message.includes('timed out'))).toBe(false)
+  })
+
+  // ---- Find document (Brave search → verified PDFs) ----
+
+  async function openFindDialog(w: VueWrapper) {
+    const docs = w.findAll('section').find(s => s.text().includes('Documents'))
+    expect(docs!.findAll('button').some(b => b.text() === 'Find document…')).toBe(true)
+    await docs!.findAll('button').find(b => b.text() === 'Find document…')!.trigger('click')
+    return w.find('[data-find-dialog]')
+  }
+
+  it('find dialog opens from the Documents header with the query prefilled from the item name', async () => {
+    fetchMock()
+    const { w } = await mountView()
+    const dlg = await openFindDialog(w)
+    expect(dlg.exists()).toBe(true)
+    expect((dlg.find('[data-find-query]').element as HTMLInputElement).value).toBe('M3 screws')
+    // Escape closes, same dup-dialog pattern as the fetch dialog
+    await dlg.trigger('keydown.escape')
+    expect(w.find('[data-find-dialog]').exists()).toBe(false)
+  })
+
+  it('search button is disabled while the query is empty and while a search is in flight', async () => {
+    let release!: (r: Response) => void
+    fetchMock({ holdSearch: res => { release = res } })
+    const { w } = await mountView()
+    const dlg = await openFindDialog(w)
+    const search = dlg.find('[data-find-search]')
+    expect((search.element as HTMLButtonElement).disabled).toBe(false) // prefilled
+    await dlg.find('[data-find-query]').setValue('   ')
+    expect((search.element as HTMLButtonElement).disabled).toBe(true) // blank
+    await dlg.find('[data-find-query]').setValue('lm358 datasheet')
+    expect((search.element as HTMLButtonElement).disabled).toBe(false)
+    await dlg.find('form').trigger('submit')
+    await flushPromises() // search POST still held open
+    expect((w.find('[data-find-search]').element as HTMLButtonElement).disabled).toBe(true) // busy
+    release(new Response(JSON.stringify({ results: [], rejected: 0 }), { status: 200 }))
+    await flushPromises()
+    expect((w.find('[data-find-search]').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('search POSTs the trimmed query and renders verified candidates with title, host and humanized size', async () => {
+    const calls = fetchMock({
+      search: {
+        results: [
+          { title: 'LM358 datasheet (Rev. H)', url: 'https://www.ti.com/lit/lm358.pdf', host: 'www.ti.com', size: 1_572_864 },
+          { title: 'LM358 clone', url: 'https://pdf1.alldatasheet.com/datasheet.pdf', host: 'pdf1.alldatasheet.com' },
+        ],
+        rejected: 3,
+      },
+    })
+    const { w } = await mountView()
+    const dlg = await openFindDialog(w)
+    await dlg.find('[data-find-query]').setValue('  lm358 datasheet  ')
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    const post = calls.find(c => c.method === 'POST' && c.url === '/api/v1/items/9/search-documents')
+    expect(JSON.parse(post!.body!)).toEqual({ query: 'lm358 datasheet' })
+    const results = w.findAll('[data-find-result]')
+    expect(results).toHaveLength(2)
+    expect(results[0].text()).toContain('LM358 datasheet (Rev. H)')
+    expect(results[0].text()).toContain('www.ti.com')
+    expect(results[0].text()).toContain('1.5 MB')
+    expect(results[1].text()).toContain('pdf1.alldatasheet.com')
+    expect(results[1].text()).toContain('—') // unknown size
+    // rejected line is muted and present next to results
+    expect(w.find('[data-find-dialog]').text()).toContain('3 results skipped')
+  })
+
+  it('candidate click closes the dialog and downloads via the fetch flow (direct mode + polling)', async () => {
+    vi.useFakeTimers()
+    const calls = fetchMock({
+      search: {
+        results: [{ title: 'LM358 datasheet', url: 'https://www.ti.com/lit/lm358.pdf', host: 'www.ti.com', size: 1000 }],
+        rejected: 0,
+      },
+      jobs: [{ status: 'done', document_id: 55 }],
+    })
+    const { w } = await mountView()
+    const dlg = await openFindDialog(w)
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    await w.find('[data-find-result]').trigger('click')
+    await flushPromises()
+    // find dialog closed, fetch job started with the chosen URL
+    expect(w.find('[data-find-dialog]').exists()).toBe(false)
+    const post = calls.find(c => c.method === 'POST' && c.url === '/api/v1/items/9/fetch')
+    expect(JSON.parse(post!.body!)).toEqual({ url: 'https://www.ti.com/lit/lm358.pdf', mode: 'direct' })
+    expect(toasts.some(t => t.message === 'Fetching…' && t.type === 'info')).toBe(true)
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'Added document' && t.type === 'success')).toBe(true)
+    expect(calls.filter(c => c.method === 'GET' && c.url === '/api/v1/items/9')).toHaveLength(2) // refetched
+  })
+
+  it('search_disabled (400) toasts the configure hint instead of the raw message', async () => {
+    fetchMock({ searchStatus: 400, searchCode: 'search_disabled' })
+    const { w } = await mountView()
+    const dlg = await openFindDialog(w)
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    expect(toasts.some(t => t.message === 'Configure brave_api_key to enable search' && t.type === 'error')).toBe(true)
+  })
+
+  it('empty results show the no-PDFs message', async () => {
+    fetchMock({ search: { results: [], rejected: 5 } })
+    const { w } = await mountView()
+    const dlg = await openFindDialog(w)
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    expect(w.find('[data-find-dialog]').text())
+      .toContain('No downloadable PDFs found — try a more specific part number.')
+    // the skipped-count line is intentionally withheld when nothing verified
+    expect(w.find('[data-find-dialog]').text()).not.toContain('skipped')
   })
 })

@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, ApiError } from '../api/client'
-import type { Breadcrumb, Doc, FetchJob, Item, LedgerEntry, ListResponse, Location, Note, Photo, Project } from '../api/types'
+import type { Breadcrumb, DocSearchResult, DocSearchResponse, Doc, FetchJob, Item, LedgerEntry, ListResponse, Location, Note, Photo, Project } from '../api/types'
 import { useItemsStore } from '../stores/items'
 import { toast } from '../utils/toast'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -338,6 +338,54 @@ async function runFetchJob(url: string, mode: 'direct' | 'archive') {
     fetchBusy.value = false
   }
 }
+// ---- Document finder (Brave search → server-verified PDFs) ----
+
+// The search response is synchronous (15s server budget) — no job polling
+// here; picking a result hands the URL to runFetchJob above.
+const showFindDoc = ref(false)
+const findQuery = ref('')
+const findBusy = ref(false)
+const findResults = ref<DocSearchResult[] | null>(null)
+const findRejected = ref(0)
+
+function openFindDoc() {
+  // prefill: the item name is usually the part number
+  findQuery.value = item.value?.name ?? ''
+  findResults.value = null
+  findRejected.value = 0
+  showFindDoc.value = true
+}
+
+async function submitFindDoc() {
+  const query = findQuery.value.trim()
+  if (!query || findBusy.value) return
+  findBusy.value = true
+  try {
+    const res = await api.post<DocSearchResponse>(`/api/v1/items/${route.params.id}/search-documents`, { query })
+    findResults.value = res.results ?? []
+    findRejected.value = res.rejected ?? 0
+  } catch (e) {
+    if (e instanceof ApiError && e.code === 'search_disabled') {
+      toast('Configure brave_api_key to enable search', 'error')
+    } else {
+      toast((e as Error).message, 'error')
+    }
+  } finally {
+    findBusy.value = false
+  }
+}
+
+function chooseDoc(c: DocSearchResult) {
+  showFindDoc.value = false
+  void runFetchJob(c.url, 'direct')
+}
+
+// unknown size (absent key, or a defensive negative) renders as "—"
+function fmtDocSize(size?: number): string {
+  if (size == null || size < 0) return '—'
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  return `${Math.ceil(size / 1024)} KB`
+}
 </script>
 <template>
   <div v-if="item" class="space-y-6">
@@ -456,6 +504,8 @@ async function runFetchJob(url: string, mode: 'direct' | 'archive') {
       <div class="flex items-center justify-between mb-2">
         <h2 class="font-semibold dark:text-slate-100">Documents</h2>
         <div class="flex gap-2">
+          <button type="button" @click="openFindDoc"
+            class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm">Find document…</button>
           <button type="button" @click="openFetch"
             class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm">Fetch from URL…</button>
           <FileUpload kind="doc" :item-id="item.id" @uploaded="fetchItem" />
@@ -528,6 +578,46 @@ async function runFetchJob(url: string, mode: 'direct' | 'archive') {
             {{ fetchBusy ? 'Fetching…' : 'Fetch' }}</button>
         </div>
       </form>
+    </div>
+
+    <!-- Find-document dialog (Brave search; overlay click / Escape close,
+         same dup-dialog pattern). Results are server-verified PDFs only;
+         picking one closes this dialog and runs the normal fetch flow. -->
+    <div v-if="showFindDoc" data-find-dialog class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      @click="showFindDoc = false" @keydown.escape="showFindDoc = false">
+      <div class="bg-white dark:bg-slate-800 rounded-xl shadow-lg w-full max-w-sm p-5" role="dialog" aria-modal="true" @click.stop>
+        <h2 class="text-lg font-bold mb-2 dark:text-slate-100">Find document</h2>
+        <form @submit.prevent="submitFindDoc">
+          <label class="block text-sm font-medium dark:text-slate-100">Query
+            <input v-model="findQuery" data-find-query maxlength="200" placeholder="part number + datasheet"
+              class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
+          </label>
+          <div class="flex justify-end gap-2 mt-3">
+            <button type="button" class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm"
+              @click="showFindDoc = false">Cancel</button>
+            <button type="submit" data-find-search :disabled="findBusy || !findQuery.trim()"
+              class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm disabled:opacity-50">
+              {{ findBusy ? 'Searching…' : 'Search' }}</button>
+          </div>
+        </form>
+        <div v-if="findResults !== null" class="mt-3 border-t dark:border-slate-700 pt-3">
+          <ul v-if="findResults.length" class="space-y-1">
+            <li v-for="c in findResults" :key="c.url">
+              <button type="button" data-find-result @click="chooseDoc(c)"
+                class="w-full text-left rounded-lg px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-sm">
+                <span class="font-medium dark:text-slate-100 break-all">{{ c.title }}</span>
+                <span class="block text-xs text-slate-400 dark:text-slate-500">{{ c.host }} · {{ fmtDocSize(c.size) }}</span>
+              </button>
+            </li>
+          </ul>
+          <p v-else class="text-sm text-slate-500 dark:text-slate-400">
+            No downloadable PDFs found — try a more specific part number.
+          </p>
+          <p v-if="findRejected > 0 && findResults.length" class="mt-2 text-xs text-slate-400 dark:text-slate-500">
+            {{ findRejected }} result{{ findRejected === 1 ? '' : 's' }} skipped (not a downloadable PDF).
+          </p>
+        </div>
+      </div>
     </div>
 
     <ConfirmDialog :open="confirmDelete" :title="`Delete '${item.name}'`"
