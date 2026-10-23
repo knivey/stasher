@@ -4,12 +4,31 @@ import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import ProjectDetailView from './ProjectDetailView.vue'
 import { toasts } from '../utils/toast'
 
-const DETAIL = {
-  project: { id: 1, name: 'NAS', status: 'active', notes: 'big rebuild', created_at: '', updated_at: '' },
+// Owner projection of GET /projects/1 — full ProjectDetail shape.
+const ownerDetail = {
+  project: { id: 1, name: 'NAS', status: 'active', notes: 'big rebuild', visibility: 'private', created_at: '', updated_at: '' },
+  owner_view: true,
   items: [
-    { item_id: 5, item_name: '8TB HDD', qty_used: 4, item_qty: 6, item_unit: '', notes: '', added_at: '' },
-    { item_id: 7, item_name: 'RAM stick', qty_used: null, item_qty: 2, item_unit: 'pcs', notes: '', added_at: '' },
+    { item_id: 5, item_name: '8TB HDD', qty_used: 4, item_qty: 6, item_unit: '', notes: '', added_at: '', shared: false },
+    { item_id: 7, item_name: 'RAM stick', qty_used: null, item_qty: 2, item_unit: 'pcs', notes: '', added_at: '', shared: true },
   ],
+  notes_log: [],
+  comments: [],
+  files: [],
+  bookmarks: [],
+}
+
+// Sharee projection: masked BOM rows (no item_id/item_qty), no notes_log key.
+const shareeDetail = {
+  project: { id: 1, name: 'NAS', status: 'active', notes: 'big rebuild', visibility: 'shared', created_at: '', updated_at: '' },
+  owner_view: false,
+  items: [
+    { item_name: 'Priv part', qty_used: 2, shared: false },
+    { item_name: '8TB HDD', qty_used: null, shared: true },
+  ],
+  comments: [],
+  files: [],
+  bookmarks: [],
 }
 
 // Items available to the add-picker (GET /items?page_size=200).
@@ -27,13 +46,14 @@ function mockFetch(opts: { detailStatus?: number; detailBody?: unknown } = {}) {
     const method = init?.method ?? 'GET'
     calls.push({ method, url, body: init?.body as string | undefined })
     if (url.includes('/projects/1') && method === 'GET')
-      return new Response(JSON.stringify(opts.detailBody ?? DETAIL), { status: opts.detailStatus ?? 200 })
+      return new Response(JSON.stringify(opts.detailBody ?? ownerDetail), { status: opts.detailStatus ?? 200 })
     if (url.includes('/items?'))
       return new Response(JSON.stringify(ITEMS), { status: 200 })
     if (method === 'PATCH' && url.includes('/projects/1/items/'))
       return new Response('', { status: 204 })
     if (method === 'PATCH')
-      return new Response(JSON.stringify({ ...DETAIL.project, status: 'done' }), { status: 200 })
+      // 200 returns the updated project — echo the PATCH body back.
+      return new Response(JSON.stringify({ ...ownerDetail.project, ...JSON.parse(init?.body as string ?? '{}') }), { status: 200 })
     if (method === 'POST')
       return new Response('', { status: 201 })
     return new Response('', { status: 204 }) // DELETE
@@ -76,6 +96,39 @@ describe('ProjectDetailView', () => {
     expect((inputs[1].element as HTMLInputElement).value).toBe('')
     // item name links to the item page
     expect(w.find('a[href="/items/5"]').exists()).toBe(true)
+  })
+
+  it('hides owner controls and links in the sharee view', async () => {
+    mockFetch({ detailBody: shareeDetail })
+    const { w } = await mountView()
+    expect(w.find('[data-status]').exists()).toBe(false)
+    expect(w.find('[data-edit]').exists()).toBe(false)
+    expect(w.find('[data-delete]').exists()).toBe(false)
+    expect(w.find('[data-add-item]').exists()).toBe(false)
+    expect(w.find('[data-qty-used]').exists()).toBe(false)
+    expect(w.find('[data-item-name]').exists()).toBe(false) // plain text, no router-link
+    expect(w.find('[data-visibility-badge]').exists()).toBe(false) // badge-is-toggle is owner-only
+    expect(w.text()).toContain('Priv part') // masked row: name still shown
+    expect(w.text()).not.toContain('No items linked yet')
+    // masked rows: no stock value, '—' placeholders for hidden columns
+    expect(w.findAll('tbody tr').length).toBe(2)
+    expect(w.findAll('tbody tr')[0].text()).toContain('—')
+  })
+
+  it('toggles visibility from the badge (owner)', async () => {
+    const calls = mockFetch()
+    const { w } = await mountView()
+    const badge = w.find('[data-visibility-badge]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('private')
+    await badge.trigger('click')
+    await flushPromises()
+    const patch = calls.find(c => c.method === 'PATCH' && c.url === '/api/v1/projects/1')
+    expect(patch).toBeTruthy()
+    expect(JSON.parse(patch!.body!)).toEqual({ visibility: 'shared' })
+    // badge text follows the server's answer
+    expect(w.find('[data-visibility-badge]').text()).toBe('shared')
+    expect(toasts.some(t => t.type === 'success')).toBe(true)
   })
 
   it('editing qty_used PATCHes /projects/1/items/5 with {qty_used: 6} and refetches', async () => {

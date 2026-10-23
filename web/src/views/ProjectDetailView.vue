@@ -2,22 +2,29 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, ApiError } from '../api/client'
-import type { Item, ListResponse, Project, ProjectItem } from '../api/types'
+import type { Item, ListResponse, Project, ProjectDetail, ProjectItem, ProjectNote } from '../api/types'
 import { toast } from '../utils/toast'
-import { PROJECT_STATUSES, statusBadgeClass } from '../utils/projects'
+import { PROJECT_STATUSES, statusBadgeClass, visibilityBadgeClass } from '../utils/projects'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
 
+const detail = ref<ProjectDetail | null>(null)
 const project = ref<Project | null>(null)
+// Owner rows only (viewer rows are masked and have no ids). Kept separate so
+// qty edits / the add-picker stay typed; rendering iterates detail.items.
 const items = ref<ProjectItem[]>([])
+// Owner-only notes log — held here for the notes-log section to mount.
+const notes = ref<ProjectNote[]>([])
 
 async function fetchDetail() {
   try {
-    const res = await api.get<{ project: Project; items: ProjectItem[] }>(`/api/v1/projects/${route.params.id}`)
+    const res = await api.get<ProjectDetail>(`/api/v1/projects/${route.params.id}`)
+    detail.value = res
     project.value = res.project
-    items.value = res.items ?? []
+    items.value = res.items.filter((i): i is ProjectItem => 'item_id' in i)
+    notes.value = res.notes_log ?? []
     origStatus.value = res.project.status
     editOrig = { name: res.project.name, notes: res.project.notes ?? '' }
     seedQtyEdits()
@@ -68,6 +75,25 @@ async function onStatusChange() {
     toast((e as Error).message, 'error')
   } finally {
     statusSaving.value = false
+  }
+}
+
+// ---- Visibility badge-is-toggle (owner only, like ItemDetailView) ----
+// PATCH the flipped value and adopt the returned project — badge text
+// follows the server's answer.
+const visibilitySaving = ref(false)
+
+async function toggleVisibility() {
+  if (!project.value || !detail.value?.owner_view || visibilitySaving.value) return
+  visibilitySaving.value = true
+  const next = project.value.visibility === 'shared' ? 'private' : 'shared'
+  try {
+    project.value = await api.patch<Project>(`/api/v1/projects/${project.value.id}`, { visibility: next })
+    toast(next === 'shared' ? 'Project shared' : 'Project private', 'success')
+  } catch (e) {
+    toast((e as Error).message, 'error') // badge keeps its current state
+  } finally {
+    visibilitySaving.value = false
   }
 }
 
@@ -232,10 +258,14 @@ async function addProjectItem() {
             <span>{{ project.name }}</span>
             <span data-status-badge class="rounded-full px-2 py-0.5 text-xs font-medium"
               :class="statusBadgeClass(project.status)">{{ project.status }}</span>
+            <button v-if="detail?.owner_view" data-visibility-badge type="button" :disabled="visibilitySaving"
+              class="rounded-full px-2 py-0.5 text-xs font-medium" :class="visibilityBadgeClass(project.visibility)"
+              :title="project.visibility === 'shared' ? 'Visible to every user — click to make private' : 'Only you — click to share'"
+              @click="toggleVisibility">{{ project.visibility }}</button>
           </h1>
           <p v-if="project.notes" class="mt-1 text-sm text-slate-500 dark:text-slate-400 whitespace-pre-wrap">{{ project.notes }}</p>
         </div>
-        <div class="flex items-center gap-3 shrink-0">
+        <div v-if="detail?.owner_view" class="flex items-center gap-3 shrink-0">
           <label class="text-sm text-slate-600 dark:text-slate-300">Status
             <select v-model="project.status" data-status :disabled="statusSaving"
               class="mt-1 ml-1 border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1 text-sm" @change="onStatusChange">
@@ -249,7 +279,7 @@ async function addProjectItem() {
       <div v-else class="space-y-2">
         <input v-model="editName" data-edit-name maxlength="200" aria-label="Name"
           class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-lg font-bold" />
-        <textarea v-model="editNotes" data-edit-notes rows="2" maxlength="10000" placeholder="Notes"
+        <textarea v-model="editNotes" data-edit-notes rows="2" maxlength="10000" placeholder="Description" aria-label="Description"
           class="w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm"></textarea>
         <p v-if="editError" class="text-xs text-red-600 dark:text-red-400">{{ editError }}</p>
         <div class="flex gap-2">
@@ -263,7 +293,7 @@ async function addProjectItem() {
     <div class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3">
       <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Items</h2>
 
-      <p v-if="!items.length" class="text-slate-400 dark:text-slate-500 text-sm">No items linked yet.</p>
+      <p v-if="detail && !detail.items.length" class="text-slate-400 dark:text-slate-500 text-sm">No items linked yet.</p>
       <table v-else class="w-full text-sm">
         <thead>
           <tr class="text-left text-xs text-slate-500 dark:text-slate-400 border-b dark:border-slate-700">
@@ -274,28 +304,38 @@ async function addProjectItem() {
           </tr>
         </thead>
         <tbody class="divide-y dark:divide-slate-700">
-          <tr v-for="pi in items" :key="pi.item_id">
-            <td class="py-2 pr-2">
-              <router-link :to="`/items/${pi.item_id}`" data-item-name class="hover:underline dark:text-slate-100">{{ pi.item_name }}</router-link>
-            </td>
-            <td class="py-2 pr-2 text-slate-500 dark:text-slate-400">{{ pi.item_qty }}{{ pi.item_unit ? ' ' + pi.item_unit : '' }}</td>
-            <td class="py-2 pr-2">
-              <span class="flex items-center gap-1">
-                <input v-model="qtyEdits[pi.item_id]" data-qty-used type="number" step="any" min="0"
-                  class="w-20 border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1" :aria-label="`Qty used for ${pi.item_name}`" />
-                <button data-qty-save :disabled="qtySaving > 0"
-                  class="text-slate-600 dark:text-slate-300 hover:underline disabled:opacity-50" @click="saveQty(pi)">Save</button>
-              </span>
-            </td>
-            <td class="py-2 text-right">
-              <button data-remove :disabled="removing > 0"
-                class="text-red-600 dark:text-red-400 hover:underline disabled:opacity-50" @click="removeItem(pi)">Remove</button>
-            </td>
-          </tr>
+          <template v-for="pi in detail?.items" :key="'item_id' in pi ? pi.item_id : pi.item_name">
+            <!-- Owner row: link + stock + editable qty_used + remove. -->
+            <tr v-if="detail?.owner_view && 'item_id' in pi">
+              <td class="py-2 pr-2">
+                <router-link :to="`/items/${pi.item_id}`" data-item-name class="hover:underline dark:text-slate-100">{{ pi.item_name }}</router-link>
+              </td>
+              <td class="py-2 pr-2 text-slate-500 dark:text-slate-400">{{ pi.item_qty }}{{ pi.item_unit ? ' ' + pi.item_unit : '' }}</td>
+              <td class="py-2 pr-2">
+                <span class="flex items-center gap-1">
+                  <input v-model="qtyEdits[pi.item_id]" data-qty-used type="number" step="any" min="0"
+                    class="w-20 border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1" :aria-label="`Qty used for ${pi.item_name}`" />
+                  <button data-qty-save :disabled="qtySaving > 0"
+                    class="text-slate-600 dark:text-slate-300 hover:underline disabled:opacity-50" @click="saveQty(pi)">Save</button>
+                </span>
+              </td>
+              <td class="py-2 text-right">
+                <button data-remove :disabled="removing > 0"
+                  class="text-red-600 dark:text-red-400 hover:underline disabled:opacity-50" @click="removeItem(pi)">Remove</button>
+              </td>
+            </tr>
+            <!-- Sharee row: masked — plain text only, no ids/stock/inputs. -->
+            <tr v-else-if="!detail?.owner_view">
+              <td class="py-2 pr-2 dark:text-slate-100">{{ pi.item_name }}</td>
+              <td class="py-2 pr-2 text-slate-500 dark:text-slate-400">—</td>
+              <td class="py-2 pr-2 dark:text-slate-100">{{ pi.qty_used ?? '—' }}</td>
+              <td class="py-2"></td>
+            </tr>
+          </template>
         </tbody>
       </table>
 
-      <form class="flex flex-wrap items-end gap-2 border-t dark:border-slate-700 pt-3" @submit.prevent="addProjectItem">
+      <form v-if="detail?.owner_view" class="flex flex-wrap items-end gap-2 border-t dark:border-slate-700 pt-3" @submit.prevent="addProjectItem">
         <label class="text-sm font-medium dark:text-slate-100">Add item
           <select v-model="addItem" data-add-item :disabled="adding"
             class="mt-1 block border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal">
