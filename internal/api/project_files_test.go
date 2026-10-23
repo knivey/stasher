@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -83,6 +85,47 @@ func TestProjectFilesLifecycle(t *testing.T) {
 	}
 	if r := getURL(t, ts, key, owner); r.StatusCode != http.StatusNotFound {
 		t.Fatalf("deleted file still served: %d", r.StatusCode)
+	}
+}
+
+// Ported from TestUploadPhotoCorruptStillSavesOriginal (item photos): a
+// sniffable-but-undecodable image still stores the original bytes on a
+// project; thumb generation degrades to null thumb_key (never fails the
+// upload), and lists COALESCE back to the original.
+func TestUploadProjectFileCorruptStillSavesOriginal(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	owner := registerUser(t, ts, "pf4@test.dev", "longpassword1")
+	resp := doJSON(t, ts, "POST", "/api/v1/projects", map[string]any{"name": "Corrupt"}, owner)
+	var proj struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, resp, &proj)
+	pid := fmtInt64(proj.ID)
+
+	// Sniffable-as-jpeg bytes that fail full decode: a valid JPEG prefix
+	// followed by truncation.
+	full := jpegBytes(t, 100, 100)
+	trunc := full[:len(full)/2]
+	r := uploadRawProjectFile(t, ts, owner, pid, "trunc.jpg", trunc)
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("corrupt project file upload = %d, want 201", r.StatusCode)
+	}
+	var row map[string]any
+	decodeBody(t, r, &row)
+	// generation failure degrades to null thumb
+	if row["thumb_key"] != nil {
+		t.Fatalf("thumb_key = %v, want null", row["thumb_key"])
+	}
+
+	// the original (corrupt-but-sniffable) file must be stored byte-identical
+	f, err := s.Storage().Open(row["storage_key"].(string))
+	if err != nil {
+		t.Fatalf("original missing after failed thumb generation: %v", err)
+	}
+	defer f.Close()
+	orig, err := io.ReadAll(f)
+	if err != nil || !bytes.Equal(orig, trunc) {
+		t.Fatalf("stored original mismatch: %v (%d vs %d bytes)", err, len(orig), len(trunc))
 	}
 }
 
