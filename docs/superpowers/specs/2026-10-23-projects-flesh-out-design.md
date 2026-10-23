@@ -46,21 +46,25 @@ Success criteria:
   - Read materials and download them via `/files`.
   - Nothing else: no edit, no notes, no upload, no bookmark management, no
     archiving.
-- **Private or foreign project** → 404 on every project endpoint, before
+- Private or foreign project → 404 on every project endpoint, before
   any validation (error precedence: ownership first).
+- `GET /projects/{id}` includes `"owner_view": true|false"` so the SPA
+  renders owner controls vs the read-only sharee view from one response.
 - **SharedView** gains a Projects section: shared projects from others
   (`ListSharedProjectsFromOthers`), showing name, owner display name,
   status, linking to the detail view.
 
 ### BOM projection (`GET /projects/{id}` items list)
 
-Per linked item, visibility of the **item** governs its row:
+Item detail pages are owner-only today (sharees browse shared items via
+Shared + copy), so rows are never clickable for sharees:
 
-- Item `shared` → full row: `{item_id, name, qty, qty_used, notes,
-  shared: true}` — clickable through to the item view.
-- Item `private` → `{name, qty_used, shared: false}` — no item_id, no qty,
-  no link notes, not clickable. (Name + qty used is the point of sharing a
-  BOM; the inventory behind it stays closed.)
+- **Owner** — full rows: `{item_id, name, qty, unit, qty_used, notes,
+  added_at, shared}` — clickable through to the item view.
+- **Sharee** — uniform masked rows: `{name, qty_used, shared}` — no
+  item_id, no qty, no link notes, not clickable. Name + qty used is the
+  point of sharing a BOM; the inventory behind it stays closed. (`shared`
+  flags which items are themselves publicly shared — informative only.)
 
 ## 3. Notes — owner-only log
 
@@ -72,8 +76,9 @@ Mirrors `item_notes` (migration 00006) exactly:
   /projects/{id}/notes/{noteId}` → 204 (404 when absent).
 - Included in `GET /projects/{id}` **owner projection only** — entirely
   absent from the sharee response (not an empty array: the key is omitted).
-- Body cap matches item notes (10,000 bytes, byte-count semantics,
-  documented CJK maxlength mismatch). Timestamped, append-only, no edit.
+- Body cap matches item notes exactly: trimmed, 1–2000 characters
+  (byte-count check, documented CJK maxlength mismatch). Timestamped,
+  append-only, no edit.
 - The pre-existing `projects.notes` blob stays as-is in the schema; the UI
   relabels it **Description** (edit form + detail header) so "notes" means
   the log, matching the items vocabulary (description + notes thread).
@@ -89,7 +94,8 @@ Mirrors `item_notes` (migration 00006) exactly:
   project owner deletes any; otherwise 404.
 - Entries render `author` (display name via users join, never email),
   `created_at`, and a `mine` flag for the delete-own affordance.
-- Same 10,000-byte body cap. No threading, no editing, no reactions.
+- Same 1–2000-character body cap as notes. No threading, no editing, no
+  reactions.
 
 ## 5. Reference materials — one unified attachments list
 
@@ -99,12 +105,12 @@ pile, not a photo album.
 - `project_files(id, project_id → projects CASCADE, storage_key NOT NULL,
   thumb_key NULL, filename, mime_type, size_bytes, created_at)`.
 - `POST /projects/{id}/files` — multipart `file`, owner only. Mirrors the
-  item document upload rules: size cap, mime sniffed from bytes (client
-  content-type ignored), filename sanitized. Images (`image/*` after
-  sniff) additionally get an EXIF-aware thumbnail via `thumbs.Generate`;
-  thumb failure degrades to null + warn log. Save order: files first, row
-  second, warn-log orphan cleanup on row failure (the established
-  crash-safe pattern).
+  item document upload rules: 50 MB cap (`maxDocBytes`), mime sniffed from
+  bytes (client content-type ignored), filename sanitized. Images
+  (`image/*` after sniff) additionally get an EXIF-aware thumbnail via
+  `thumbs.Generate`; thumb failure degrades to null + warn log. Save
+  order: files first, row second, warn-log orphan cleanup on row failure
+  (the established crash-safe pattern).
 - `DELETE /projects/{id}/files/{fid}` → 204; row first, then bytes.
 - Response rows: `{id, filename, mime_type, size_bytes, thumb_key,
   storage_key, created_at}`. Frontend: `thumb_key ?? storage_key` for
@@ -120,8 +126,8 @@ pile, not a photo album.
 - `project_bookmarks(id, project_id → projects CASCADE, url, title,
   archived_file_id → project_files ON DELETE SET NULL, created_at)`.
 - `POST /projects/{id}/bookmarks {url, title?}` → 201, owner only.
-  - `url`: absolute `http`/`https`, host required, length ≤ 2048,
-    scheme-relative/rejecting everything else.
+  - `url`: the shared external-URL contract (`validExternalURL`: absolute
+    `http`/`https`, host required, ≤ 2000 chars).
   - `title`: optional; when absent, best-effort auto-title: a
     **title-fetch** through the fetcher package's policy/pinning machinery
     — like the direct engine but permitting `text/html`, 5s timeout, 256KB
