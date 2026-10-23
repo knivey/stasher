@@ -3,11 +3,20 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	dbpkg "stasher/internal/db"
 )
+
+// uniqueTagViolation reports whether err is SQLite's UNIQUE(user_id, name)
+// backstop on tags. modernc surfaces the constraint text in Error(), so the
+// match is the same string style as the users.email check in
+// auth_handlers.go.
+func uniqueTagViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed: tags.user_id, tags.name")
+}
 
 func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 	u, _ := currentUser(r.Context())
@@ -37,12 +46,15 @@ func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "validation_error", "tag name must be 1-100 chars")
 		return
 	}
-	if _, err := s.q.GetTagByName(r.Context(), dbpkg.GetTagByNameParams{UserID: u.ID, Name: req.Name}); err == nil {
-		writeErr(w, http.StatusConflict, "tag_exists", "tag already exists")
-		return
-	}
+	// No check-then-insert pre-select: the UNIQUE(user_id, name) constraint
+	// is the single source of truth, so a duplicate — including one inserted
+	// between a check and the write — maps to 409 instead of a 500.
 	tg, err := s.q.CreateTag(r.Context(), dbpkg.CreateTagParams{UserID: u.ID, Name: req.Name})
 	if err != nil {
+		if uniqueTagViolation(err) {
+			writeErr(w, http.StatusConflict, "duplicate_tag", "tag already exists")
+			return
+		}
 		s.internalErr(w, err)
 		return
 	}
@@ -64,17 +76,21 @@ func (s *Server) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "validation_error", "tag name must be 1-100 chars")
 		return
 	}
-	if existing, err := s.q.GetTagByName(r.Context(), dbpkg.GetTagByNameParams{UserID: u.ID, Name: req.Name}); err == nil && existing.ID != id {
-		writeErr(w, http.StatusConflict, "tag_exists", "another tag already has this name")
-		return
-	}
-	n, err := s.q.UpdateTag(r.Context(), dbpkg.UpdateTagParams{Name: req.Name, ID: id, UserID: u.ID})
-	if err != nil {
-		s.internalErr(w, err)
-		return
-	}
-	if n == 0 {
+	// Ownership BEFORE collision: a foreign/absent id is 404 not_found even
+	// when the new name collides with one of the caller's own tags (the old
+	// collision-first order answered 409 before existence). The rename
+	// itself carries the collision check via the UNIQUE backstop; renaming a
+	// tag to its own current name does not violate UNIQUE and stays a 200.
+	if _, err := s.q.GetTag(r.Context(), dbpkg.GetTagParams{ID: id, UserID: u.ID}); err != nil {
 		writeErr(w, http.StatusNotFound, "not_found", "tag not found")
+		return
+	}
+	if _, err := s.q.UpdateTag(r.Context(), dbpkg.UpdateTagParams{Name: req.Name, ID: id, UserID: u.ID}); err != nil {
+		if uniqueTagViolation(err) {
+			writeErr(w, http.StatusConflict, "tag_exists", "another tag already has this name")
+			return
+		}
+		s.internalErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "name": req.Name})

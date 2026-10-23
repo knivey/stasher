@@ -1578,6 +1578,22 @@ func (q *Queries) GetSessionWithUser(ctx context.Context, tokenHash string) (Get
 	return i, err
 }
 
+const getTag = `-- name: GetTag :one
+SELECT id, user_id, name FROM tags WHERE id = ? AND user_id = ?
+`
+
+type GetTagParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) GetTag(ctx context.Context, arg GetTagParams) (Tag, error) {
+	row := q.db.QueryRowContext(ctx, getTag, arg.ID, arg.UserID)
+	var i Tag
+	err := row.Scan(&i.ID, &i.UserID, &i.Name)
+	return i, err
+}
+
 const getTagByName = `-- name: GetTagByName :one
 SELECT id, user_id, name FROM tags WHERE user_id = ? AND name = ?
 `

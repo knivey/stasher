@@ -174,6 +174,9 @@ SELECT * FROM locations WHERE user_id = ? AND name = ? AND parent_id IS ?;
 -- name: CreateTag :one
 INSERT INTO tags (user_id, name) VALUES (?, ?) RETURNING *;
 
+-- name: GetTag :one
+SELECT * FROM tags WHERE id = ? AND user_id = ?;
+
 -- name: GetTagByName :one
 SELECT * FROM tags WHERE user_id = ? AND name = ?;
 

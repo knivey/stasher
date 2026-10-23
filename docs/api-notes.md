@@ -76,16 +76,18 @@ Note the asymmetry: for an item's location you clear with `0`, not `null`.
   stored as `application/pdf`); photos are sniffed at serve time.
 - `Cache-Control: private, max-age=86400`.
 
-## 409 vs 404 on colliding tag renames (`PATCH /tags/{id}`)
+## 409 vs 404 on tag create + rename (`/tags`)
 
-The name-collision check runs **before** the tag-existence/ownership
-check, so:
+Existence/ownership is checked **before** name-collision:
 
-- Renaming to a name another of **your** tags holds → `409 tag_exists`
-  (even before anything else is validated).
-- `PATCH` on a **nonexistent or foreign** tag id whose new name collides
-  with one of your own tags → `409`, not `404`. Only a non-colliding
-  rename of a bad id yields `404 not_found`.
+- `POST /tags` with a duplicate name → `409 duplicate_tag`, mapped straight
+  from the `UNIQUE(user_id, name)` constraint (no check-then-insert window).
+- `PATCH /tags/{id}` on a **nonexistent or foreign** tag id → `404
+  not_found`, even when the new name collides with one of your own tags.
+- Renaming your own tag to a name another of **your** tags holds →
+  `409 tag_exists` (UNIQUE backstop on the rename itself). Renaming a tag
+  to its **own current name** is a no-op `200` (UNIQUE does not flag the
+  row against itself).
 - Name collisions with *other users'* tags are invisible (tags are
   per-user) and never block a rename.
 
