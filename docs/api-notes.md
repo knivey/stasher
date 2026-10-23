@@ -457,3 +457,24 @@ Facts discovered by the frontend round, kept here so they survive:
   `/projects/{id}` and all `/projects/{id}/items[/...]` routes still
   answer `404` for sharees **even on shared projects**. `visibility`
   itself is only changeable by the owner.
+
+## Project notes (2026-10-23)
+
+- `POST /api/v1/projects/{id}/notes` `{body}` — **owner only** (sharees
+  and strangers get `404`, even on shared projects). The body is
+  **trimmed** and must be **1-2000 bytes after the trim** — identical
+  byte-cap semantics to item notes (whitespace-only = empty → `400
+  validation_error`, message `note must be 1-2000 characters`). 201
+  returns `{id, body, created_at}` with the TRIMMED body and an RFC3339
+  UTC `created_at` set by the server.
+- `DELETE /api/v1/projects/{id}/notes/{noteId}` — owner only. 204 on
+  success; a non-numeric `noteId` → `400 invalid_id`; an absent,
+  already-deleted, or other-project note → `404 not_found` (execrows,
+  `project_id` bound in the WHERE). No edit endpoint — notes are add +
+  delete only.
+- **`GET /api/v1/projects/{id}`**: the **owner** projection gains a
+  `notes_log` array, **newest first** (`ORDER BY created_at DESC, id
+  DESC` — same-second notes tie-break by id, newest first). Rows:
+  `{id, body, created_at}`. The **sharee projection OMITS `notes_log`
+  entirely** (absent, not empty/null) — the log is owner-private,
+  unlike the project's top-level `notes` field.

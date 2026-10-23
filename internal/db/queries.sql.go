@@ -106,6 +106,29 @@ func (q *Queries) AddItemPhoto(ctx context.Context, arg AddItemPhotoParams) (Ite
 	return i, err
 }
 
+const addProjectNote = `-- name: AddProjectNote :one
+INSERT INTO project_notes (project_id, body, created_at) VALUES (?, ?, ?)
+RETURNING id, project_id, body, created_at
+`
+
+type AddProjectNoteParams struct {
+	ProjectID int64  `json:"project_id"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (q *Queries) AddProjectNote(ctx context.Context, arg AddProjectNoteParams) (ProjectNote, error) {
+	row := q.db.QueryRowContext(ctx, addProjectNote, arg.ProjectID, arg.Body, arg.CreatedAt)
+	var i ProjectNote
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Body,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const attachItemTag = `-- name: AttachItemTag :exec
 INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)
 `
@@ -773,6 +796,24 @@ type DeleteProjectItemParams struct {
 // execrows so the handler can 404 on absent rows (tags' post-fix semantics)
 func (q *Queries) DeleteProjectItem(ctx context.Context, arg DeleteProjectItemParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteProjectItem, arg.ProjectID, arg.ItemID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteProjectNote = `-- name: DeleteProjectNote :execrows
+DELETE FROM project_notes WHERE id = ? AND project_id = ?
+`
+
+type DeleteProjectNoteParams struct {
+	ID        int64 `json:"id"`
+	ProjectID int64 `json:"project_id"`
+}
+
+// execrows so the handler can 404 an absent note (item-notes semantics)
+func (q *Queries) DeleteProjectNote(ctx context.Context, arg DeleteProjectNoteParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProjectNote, arg.ID, arg.ProjectID)
 	if err != nil {
 		return 0, err
 	}
@@ -1710,6 +1751,39 @@ func (q *Queries) ListProjectItems(ctx context.Context, projectID int64) ([]List
 			&i.ItemQty,
 			&i.ItemUnit,
 			&i.ItemVisibility,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectNotes = `-- name: ListProjectNotes :many
+SELECT id, project_id, body, created_at FROM project_notes
+WHERE project_id = ? ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListProjectNotes(ctx context.Context, projectID int64) ([]ProjectNote, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectNotes, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ProjectNote
+	for rows.Next() {
+		var i ProjectNote
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Body,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

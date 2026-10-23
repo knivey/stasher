@@ -156,9 +156,23 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"project": projectJSON(p), "owner_view": isOwner, "items": itemList,
-	})
+	}
+	if isOwner {
+		// notes_log is owner-only: sharee responses OMIT the key entirely.
+		notes, err := s.q.ListProjectNotes(r.Context(), p.ID)
+		if err != nil {
+			s.internalErr(w, err)
+			return
+		}
+		noteList := make([]map[string]any, 0, len(notes))
+		for _, n := range notes {
+			noteList = append(noteList, map[string]any{"id": n.ID, "body": n.Body, "created_at": n.CreatedAt})
+		}
+		body["notes_log"] = noteList
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {

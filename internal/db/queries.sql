@@ -339,6 +339,18 @@ SELECT p.id, p.name, p.status, pi.qty_used
 FROM project_items pi JOIN projects p ON p.id = pi.project_id
 WHERE pi.item_id = ?;
 
+-- name: AddProjectNote :one
+INSERT INTO project_notes (project_id, body, created_at) VALUES (?, ?, ?)
+RETURNING id, project_id, body, created_at;
+
+-- name: ListProjectNotes :many
+SELECT id, project_id, body, created_at FROM project_notes
+WHERE project_id = ? ORDER BY created_at DESC, id DESC;
+
+-- name: DeleteProjectNote :execrows
+-- execrows so the handler can 404 an absent note (item-notes semantics)
+DELETE FROM project_notes WHERE id = ? AND project_id = ?;
+
 -- name: CreateItemLedger :one
 INSERT INTO item_ledger (item_id, user_id, delta, resulting_qty, kind, project_id, note, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
