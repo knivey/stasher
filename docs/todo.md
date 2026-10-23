@@ -11,7 +11,7 @@ the headless chrome can be used for the datasheet fetcher as well if we need to 
 
 ~~* item page sharing visibility can be a toggle on the page instead of inside edit page~~ done 2026-10-22
 ~~* item delete should explain that "Log usage" is probably what they want instead~~ done 2026-10-22
-* should Log usage be named something else?
+* ~~should Log usage be named something else?~~ resolved 2026-10-23: renamed to "Adjust stock"
 ~~* adding new items, maybe this can be streamlined for the location, like maybe add item from the locations page fills that in~~ done 2026-10-22 ("Add item" per location row prefills the form; "save and add another" variant not done)
 ~~* moving items: from the items list we should be able to select multiple items to be able to change the location on~~ done 2026-10-22: checkbox selection + select-all-on-page + bulk-move endpoint (200/call, 0 clears)
 ~~* search should do partial matches maybe use that trigraph thing idr what its called~~ done 2026-10-22 (FTS5 trigram tokenizer; needs ≥3 chars)
@@ -20,5 +20,5 @@ the headless chrome can be used for the datasheet fetcher as well if we need to 
 ~~* include a systemd user service file and a openrc script and instructions on how to use each~~ done 2026-10-22: scripts/systemd/, scripts/openrc/
 * include a docker build or something? i have no idea how to deploy docker but people will probably appreciate it
 ~~* on desktop hover over a item thumb can open a larger version in a tooltip like popup~~ done 2026-10-22
-* deleting a location with sublocations should have the option to delete all sublocations
+* ~~deleting a location with sublocations should have the option to delete all sublocations~~ done 2026-10-23: DELETE ?subtree=true + two-choice dialog
 * ~~add ability to add a picture of locations, same thumbnail behaviour as items, but we only need the 1 pic not multiple~~ done 2026-10-23
