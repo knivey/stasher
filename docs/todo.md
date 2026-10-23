@@ -1,6 +1,6 @@
-* flesh out projects more, ability to share projects, add notes to projects, add reference materials, url bookmarks, user comments
+~~* flesh out projects more, ability to share projects, add notes to projects, add reference materials, url bookmarks, user comments~~ done 2026-10-23: spec docs/superpowers/specs/2026-10-23-projects-flesh-out-design.md
 * for items like ICs / electronic components we should have a automated datasheet fetcher
-* the projects reference urls should include something that can try to archive the page, even if its just a headless chrome making a pdf or full page screenshot, we don't want to be archiving something like youtube videos though. should be opt in per url.
+~~* the projects reference urls should include something that can try to archive the page, even if its just a headless chrome making a pdf or full page screenshot, we don't want to be archiving something like youtube videos though. should be opt in per url.~~ done 2026-10-23: opt-in Archive per bookmark via the chromium PDF engine
 * AI integration for faster adding, we can configure an AI service to use in a config, the AI can look at the image and autofill the fields for adding new items
 ~~* items should have a product page field, also archivable~~ done 2026-10-22: `product_url` + archive (chromium PDF) in the external-content round
 

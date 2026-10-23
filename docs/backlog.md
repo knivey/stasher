@@ -136,3 +136,24 @@ File references are to the state at commit `60c61fe`.
 - No cap on notes per item (scale target: fine).
 - Fetch-in-flight at ItemsView unmount repopulates the cleared list (narrow
   stale-flash window; needs request cancellation to fully fix).
+
+## Projects flesh-out (2026-10-23, final review)
+
+- Bookmark PATCH `title: ""` clears while POST blank auto-titles — asymmetry
+  undocumented in api-notes.
+- Explicit bookmark titles may contain newlines → the archived-PDF filename
+  can break its own Content-Disposition download; strip control chars in
+  clampBookmarkTitle/sanitizeFilename.
+- Sharee BOM rows keyed by `item_name` — duplicate Vue keys possible with
+  same-named items.
+- Sharee detail fires an unused /items?page_size=200 picker load; one-line
+  `owner_view` gate when the view is next touched.
+- SharedView empty-state flash while the projects fetch is in flight.
+- Multi-file upload: one refetch per file; batch error toasts don't name the
+  failing file.
+- Owner deleting others' comments has no UI (API allows; `mine`-flag-driven
+  affordance by design).
+- Bookmark PATCH-title UI deferred past v1 (ruling: auto-title suffices —
+  Task 11 ruling).
+- No committed thumb-degradation test for project files (live-verified during
+  review); byte-200 title cap can split a rune (harmless U+FFFD).

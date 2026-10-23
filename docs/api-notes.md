@@ -425,9 +425,11 @@ Facts discovered by the frontend round, kept here so they survive:
   rule: `visibility` absent = keep; a provided value must be `private`
   or `shared` (else `400`).
 - All project JSON (create/detail/list) carries `"visibility"`.
-- `shared` currently has **no viewer semantics** — sharing/viewing by
-  other users lands with the upcoming shared-projects endpoints; the
-  flag is stored and echoed only until then.
+- `shared` **has landed sharee semantics** — see the sections below:
+  `GET /projects/{id}` is owner-or-sharee and returns `owner_view`
+  (sharees get the masked BOM — rows cut to `{item_name, qty_used,
+  shared}`), and `GET /api/v1/shared/projects` lists other users'
+  shared projects.
 
 ## Shared projects: sharee read access (2026-10-23)
 
