@@ -611,7 +611,9 @@ function fmtDocSize(size?: number): string {
             </li>
           </ul>
           <p v-else class="text-sm text-slate-500 dark:text-slate-400">
-            No downloadable PDFs found — try a more specific part number.
+            {{ findRejected > 0
+              ? `No downloadable PDFs found (${findRejected} candidates checked).`
+              : 'No downloadable PDFs found — try a more specific part number.' }}
           </p>
           <p v-if="findRejected > 0 && findResults.length" class="mt-2 text-xs text-slate-400 dark:text-slate-500">
             {{ findRejected }} result{{ findRejected === 1 ? '' : 's' }} skipped (not a downloadable PDF).

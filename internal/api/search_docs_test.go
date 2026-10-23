@@ -160,6 +160,8 @@ func TestSearchDocsValidatesQuery(t *testing.T) {
 		"empty":      "",
 		"whitespace": "   ",
 		"over 200":   strings.Repeat("a", 201),
+		// 201 runes but 402 bytes: must still 400 under rune counting
+		"over 200 multibyte runes": strings.Repeat("é", 201),
 	} {
 		resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/search-documents",
 			map[string]any{"query": q}, cookie)
@@ -176,6 +178,16 @@ func TestSearchDocsValidatesQuery(t *testing.T) {
 		if body.Error.Code != "validation_error" {
 			t.Errorf("%s: code = %q, want validation_error", name, body.Error.Code)
 		}
+	}
+
+	// Exactly 200 runes passes even though it is 400 bytes: the limit
+	// counts characters (runes), matching the error message and the
+	// client-side maxlength semantics.
+	exactly := strings.Repeat("é", 200)
+	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/search-documents",
+		map[string]any{"query": exactly}, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("200-rune query: status = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -201,6 +213,31 @@ func TestSearchDocsRateLimit(t *testing.T) {
 	decodeBody(t, second, &body)
 	if body.Error.Code != "rate_limited" {
 		t.Errorf("code = %q, want rate_limited", body.Error.Code)
+	}
+}
+
+func TestSearchDocsNilFetchDirect503(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	// Hand-built wiring: a searcher without the direct engine must 503,
+	// not nil-panic inside the verification fan-out.
+	s.fetchDirect = nil
+	s.searcher = &fakeSearcher{cands: []fetcher.SearchCandidate{
+		{Title: "x", URL: "https://example.com/x.pdf", Host: "example.com"},
+	}}
+	cookie, id := createSearchItem(t, ts, "search-nilfd@test.dev")
+	resp := doJSON(t, ts, "POST", "/api/v1/items/"+fmtInt64(id)+"/search-documents",
+		map[string]any{"query": "q"}, cookie)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("nil fetchDirect = %d, want 503", resp.StatusCode)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeBody(t, resp, &body)
+	if body.Error.Code != "fetching_disabled" {
+		t.Errorf("code = %q, want fetching_disabled", body.Error.Code)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"stasher/internal/fetcher"
 )
@@ -58,7 +59,7 @@ func (s *Server) handleItemSearchDocuments(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	query := strings.TrimSpace(req.Query)
-	if query == "" || len(query) > 200 {
+	if query == "" || utf8.RuneCountInString(query) > 200 {
 		writeErr(w, http.StatusBadRequest, "validation_error",
 			"query must be 1-200 characters")
 		return
@@ -79,6 +80,15 @@ func (s *Server) handleItemSearchDocuments(w http.ResponseWriter, r *http.Reques
 	}
 	if len(cands) > searchTopCandidates {
 		cands = cands[:searchTopCandidates]
+	}
+
+	// Defensive: Verify below needs the direct engine. Production wiring
+	// always sets it alongside the searcher, but a hand-built Server must
+	// 503 here rather than nil-panic in the fan-out.
+	if s.fetchDirect == nil {
+		writeErr(w, http.StatusServiceUnavailable, "fetching_disabled",
+			"fetching is not available on this server")
+		return
 	}
 
 	// Verify in parallel; results keep the ranked candidate order. A

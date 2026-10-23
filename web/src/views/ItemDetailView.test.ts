@@ -1008,15 +1008,26 @@ describe('ItemDetailView product url & fetch', () => {
     expect(toasts.some(t => t.message === 'Configure brave_api_key to enable search' && t.type === 'error')).toBe(true)
   })
 
-  it('empty results show the no-PDFs message', async () => {
+  it('empty results with rejected candidates show the counted no-PDFs message', async () => {
     fetchMock({ search: { results: [], rejected: 5 } })
     const { w } = await mountView()
     const dlg = await openFindDialog(w)
     await dlg.find('form').trigger('submit')
     await flushPromises()
     expect(w.find('[data-find-dialog]').text())
-      .toContain('No downloadable PDFs found — try a more specific part number.')
+      .toContain('No downloadable PDFs found (5 candidates checked).')
     // the skipped-count line is intentionally withheld when nothing verified
     expect(w.find('[data-find-dialog]').text()).not.toContain('skipped')
+  })
+
+  it('empty results with zero rejected keep the plain no-PDFs message', async () => {
+    fetchMock({ search: { results: [], rejected: 0 } })
+    const { w } = await mountView()
+    const dlg = await openFindDialog(w)
+    await dlg.find('form').trigger('submit')
+    await flushPromises()
+    expect(w.find('[data-find-dialog]').text())
+      .toContain('No downloadable PDFs found — try a more specific part number.')
+    expect(w.find('[data-find-dialog]').text()).not.toContain('candidates checked')
   })
 })
