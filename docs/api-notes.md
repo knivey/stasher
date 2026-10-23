@@ -578,10 +578,13 @@ polling, 90s deadline, single-flight, in-memory-only, owner-scoped jobs).
 - **Owner-only**: sharees and strangers get `404 not_found`, even on shared
   projects (spec §6) — same as every other bookmark mutation. Non-numeric
   `bid` → `400 invalid_id`; absent/foreign bookmark → `404 not_found`.
-- **Chromium required**: with no archive engine wired (no chromium found or
-  configured) → `503 fetching_disabled`. The check runs AFTER the bookmark
-  lookup, so a missing bookmark 404s regardless of server config (feature
-  state is not probeable through someone else's bookmark).
+- **Chromium required** (`chrome_path` / `STASHER_CHROME_PATH`): with
+  chromium missing the **JOB fails** with the actionable chromium error —
+  exactly like item archive fetches. The shipped binary wires the archive
+  engine unconditionally, so `503 fetching_disabled` is reachable only on
+  hand-built wirings that pass a nil engine; that (unshipped) check runs
+  AFTER the bookmark lookup, so a missing bookmark 404s regardless
+  (feature state is not probeable through someone else's bookmark).
 - **`202 {job_id}`** on success. Done bookmark jobs carry **no
   `document_id`** (that key is item-fetch only) — re-fetch the project to
   see the archive.
