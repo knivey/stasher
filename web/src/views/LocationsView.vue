@@ -337,14 +337,41 @@ async function removePhoto(loc: Location) {
 
 // ---- Delete ----
 const deleteTarget = ref<Location | null>(null)
+// A target with children gets the two-choice dialog ("only this" vs the
+// whole subtree); leaves keep the plain single confirm.
+const deleteHasChildren = computed(() =>
+  deleteTarget.value !== null && (childCounts.value.get(deleteTarget.value.id) ?? 0) > 0)
+// TOTAL descendant count for the message (a deep tree dies whole, so the
+// count must include grandchildren) — same children-map walk as
+// excludedParentIds, cycle-guarded the same way.
+const deleteDescendantCount = computed(() => {
+  const t = deleteTarget.value
+  if (t === null || !deleteHasChildren.value) return 0
+  const childrenOf = new Map<number, number[]>()
+  for (const l of locations.value) {
+    if (l.parent_id !== null) childrenOf.set(l.parent_id, [...(childrenOf.get(l.parent_id) ?? []), l.id])
+  }
+  let n = 0
+  const queue = [t.id]
+  const seen = new Set(queue)
+  while (queue.length) {
+    for (const c of childrenOf.get(queue.shift()!) ?? []) {
+      if (seen.has(c)) continue
+      seen.add(c)
+      n++
+      queue.push(c)
+    }
+  }
+  return n
+})
 
-async function deleteLocation() {
+async function deleteLocation(subtree: boolean) {
   const target = deleteTarget.value
   if (!target) return
   deleteTarget.value = null
   try {
-    await api.del(`/api/v1/locations/${target.id}`)
-    toast('Location deleted', 'success')
+    await api.del(subtree ? `/api/v1/locations/${target.id}?subtree=true` : `/api/v1/locations/${target.id}`)
+    toast(subtree ? `Deleted '${target.name}' and everything below it` : 'Location deleted', 'success')
     if (editingId.value === target.id) cancelEdit()
     await fetchLocations()
   } catch (e) {
@@ -516,9 +543,13 @@ async function deleteLocation() {
 
     <ConfirmDialog :open="deleteTarget !== null" title="Delete location"
       :message="deleteTarget
-        ? `Delete '${deleteTarget.name}'? Children move up to this location's parent; items here become unlocated.`
+        ? (deleteHasChildren
+          ? `Delete '${deleteTarget.name}' and its ${deleteDescendantCount} sublocation${deleteDescendantCount === 1 ? '' : 's'}? 'Delete only this' keeps them (they move up to this location's parent); 'Delete everything below' removes the whole branch. Items in deleted locations become unlocated.`
+          : `Delete '${deleteTarget.name}'? Children move up to this location's parent; items here become unlocated.`)
         : ''"
-      confirm-label="Delete" @confirm="deleteLocation" @cancel="deleteTarget = null" />
+      :confirm-label="deleteHasChildren ? 'Delete only this' : 'Delete'"
+      :alt-label="deleteHasChildren ? 'Delete everything below' : undefined"
+      @confirm="deleteLocation(false)" @alt-confirm="deleteLocation(true)" @cancel="deleteTarget = null" />
 
     <div v-if="dupTarget" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
       @click="dupTarget = null" @keydown.escape="dupTarget = null">

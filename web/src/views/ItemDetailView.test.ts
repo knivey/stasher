@@ -282,7 +282,7 @@ describe('ItemDetailView', () => {
     expect(hint.exists()).toBe(true)
     expect(hint.classes()).toContain('font-bold')
     expect(hint.classes()).toContain('dark:text-red-400')
-    expect(hint.text()).toBe("If you just used some up, 'Log usage' is probably what you want — deleting is for mistakes.")
+    expect(hint.text()).toBe("If you just used some up, 'Adjust stock' is probably what you want — deleting is for mistakes.")
     await overlay.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
     await flushPromises()
     expect(calls).toContain('DELETE /api/v1/items/9')
@@ -399,7 +399,7 @@ describe('ItemDetailView', () => {
   }
 
   async function openLogForm(w: VueWrapper) {
-    await w.findAll('button').find(b => b.text() === 'Log usage')!.trigger('click')
+    await w.findAll('button').find(b => b.text() === 'Adjust stock')!.trigger('click')
     await flushPromises() // projects select loads
     return w.find('[data-log-form]')
   }

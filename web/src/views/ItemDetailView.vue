@@ -203,7 +203,7 @@ function projectName(id: number): string {
     ?? `project #${id}`
 }
 
-// ---- Log usage form (inline card, not a route) ----
+// ---- Adjust stock form (inline card, not a route) ----
 
 const showLogForm = ref(false)
 const logSaving = ref(false)
@@ -393,7 +393,7 @@ function fmtDocSize(size?: number): string {
       <h1 class="text-2xl font-bold dark:text-slate-100">{{ item.name }}</h1>
       <div class="flex gap-2">
         <router-link :to="`/items/${item.id}/edit`" class="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1.5 text-sm">Edit</router-link>
-        <button @click="openLogForm" class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm">Log usage</button>
+        <button @click="openLogForm" class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm">Adjust stock</button>
         <button @click="confirmDelete = true" class="rounded-lg bg-red-600 text-white px-3 py-1.5 text-sm">Delete</button>
       </div>
     </div>
@@ -427,7 +427,7 @@ function fmtDocSize(size?: number): string {
 
     <!-- Inline usage log form (not a route) -->
     <form v-if="showLogForm" data-log-form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3" @submit.prevent="submitUsage">
-      <h2 class="text-sm font-semibold dark:text-slate-100">Log usage</h2>
+      <h2 class="text-sm font-semibold dark:text-slate-100">Adjust stock</h2>
       <div class="flex gap-4">
         <label class="flex-1 block text-sm font-medium dark:text-slate-100">Kind
           <select v-model="logForm.kind" data-log-kind class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal bg-white">
@@ -624,7 +624,7 @@ function fmtDocSize(size?: number): string {
 
     <ConfirmDialog :open="confirmDelete" :title="`Delete '${item.name}'`"
       message="The item will be moved to trash. You can restore it from Trash before it is permanently purged."
-      hint="If you just used some up, 'Log usage' is probably what you want — deleting is for mistakes."
+      hint="If you just used some up, 'Adjust stock' is probably what you want — deleting is for mistakes."
       confirm-label="Delete" @confirm="deleteItem" @cancel="confirmDelete = false" />
   </div>
   <p v-else class="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>

@@ -193,18 +193,62 @@ describe('LocationsView', () => {
     expect(JSON.parse(patch!.body!)).toEqual({ notes: 'Small parts' })
   })
 
-  it('delete confirms, calls DELETE, toasts success and refetches', async () => {
+  it('leaf delete keeps the single-confirm flow: bare DELETE, toast, refetch', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await expandAll(w)
+    await w.findAll('[data-delete]')[2].trigger('click') // Bin: no children
+    const dialog = w.find('[role="dialog"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('Children move up')
+    const buttons = dialog.findAll('button').map(b => b.text())
+    expect(buttons).not.toContain('Delete everything below') // no subtree choice for a leaf
+    await dialog.findAll('button').at(-1)!.trigger('click') // confirm Delete
+    await flushPromises()
+    expect(calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/locations/3')).toBe(true)
+    expect(toasts.some(t => t.message === 'Location deleted' && t.type === 'success')).toBe(true)
+    expect(calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('a location with children gets a two-choice dialog naming it and its sublocation count', async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.findAll('[data-delete]')[0].trigger('click') // House: Cabinet + Bin below it
+    const dialog = w.find('[role="dialog"]')
+    expect(dialog.exists()).toBe(true)
+    const buttons = dialog.findAll('button').map(b => b.text())
+    expect(buttons).toContain('Delete only this')
+    expect(buttons).toContain('Delete everything below')
+    expect(dialog.text()).toContain("'House'")
+    expect(dialog.text()).toContain('2 sublocations')
+  })
+
+  it("'Delete only this' fires the bare DELETE (children reparent server-side)", async () => {
     const calls = mockFetch()
     const w = await mountView(calls)
     await w.findAll('[data-delete]')[0].trigger('click') // House
     const dialog = w.find('[role="dialog"]')
-    expect(dialog.exists()).toBe(true)
-    expect(dialog.text()).toContain('Children move up')
-    await dialog.findAll('button').at(-1)!.trigger('click') // confirm Delete
+    await dialog.findAll('button').find(b => b.text() === 'Delete only this')!.trigger('click')
     await flushPromises()
     expect(calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/locations/1')).toBe(true)
+    expect(calls.some(c => c.method === 'DELETE' && c.url.includes('subtree'))).toBe(false)
     expect(toasts.some(t => t.message === 'Location deleted' && t.type === 'success')).toBe(true)
     expect(calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
+    expect(w.find('[role="dialog"]').exists()).toBe(false)
+  })
+
+  it("'Delete everything below' fires DELETE ?subtree=true, toasts and refreshes the list", async () => {
+    const calls = mockFetch()
+    const w = await mountView(calls)
+    await w.findAll('[data-delete]')[0].trigger('click') // House
+    const alt = w.find('[role="dialog"] [data-alt-confirm]')
+    expect(alt.exists()).toBe(true)
+    await alt.trigger('click')
+    await flushPromises()
+    expect(calls.some(c => c.method === 'DELETE' && c.url === '/api/v1/locations/1?subtree=true')).toBe(true)
+    expect(toasts.some(t => t.type === 'success' && t.message.includes('House'))).toBe(true)
+    expect(calls.filter(c => c.method === 'GET').length).toBeGreaterThanOrEqual(2)
+    expect(w.find('[role="dialog"]').exists()).toBe(false)
   })
 
   // ---- Collapsible tree (collapsed by default) ----
