@@ -8,8 +8,10 @@ import { toast } from '../utils/toast'
 // the client fns, then the parent refetches via `refresh` (no internal
 // fetching, no props mutation). Comments arrive oldest-first — rendered in
 // the delivered order, no sorting. `mine` is computed per viewer by the
-// server, so delete buttons show only on the viewer's own entries.
-const props = defineProps<{ projectId: number; comments: ProjectComment[]; canPost: boolean }>()
+// server, so delete buttons show on the viewer's own entries — plus on ALL
+// entries for the project owner (`owner`), whom the API lets moderate any
+// comment.
+const props = defineProps<{ projectId: number; comments: ProjectComment[]; canPost: boolean; owner: boolean }>()
 const emit = defineEmits<{ refresh: [] }>()
 
 const body = ref('')
@@ -60,7 +62,7 @@ async function deleteComment(c: ProjectComment) {
         <p class="whitespace-pre-line dark:text-slate-100">{{ c.body }}</p>
         <div class="flex items-center justify-between gap-2 mt-1">
           <span class="text-xs text-slate-400 dark:text-slate-500">{{ c.author }} · {{ c.created_at.slice(0, 10) }}</span>
-          <button v-if="c.mine" data-comment-delete @click="deleteComment(c)"
+          <button v-if="c.mine || owner" data-comment-delete @click="deleteComment(c)"
             class="text-red-600 dark:text-red-400">Delete</button>
         </div>
       </li>

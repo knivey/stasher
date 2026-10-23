@@ -119,6 +119,20 @@ describe('SharedView', () => {
     expect(w.text()).toContain('No shared items found.')
   })
 
+  it('does not flash the empty state while the projects fetch is still in flight', async () => {
+    let releaseProjects!: (r: Response) => void
+    const pendingProjects = new Promise<Response>(res => { releaseProjects = res })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/shared/projects')) return pendingProjects // held until released
+      return new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 }) // items: empty
+    }))
+    const { w } = await mountView() // items settled empty; projects still pending
+    expect(w.text()).not.toContain('No shared items found.')
+    releaseProjects(new Response(JSON.stringify({ data: [], total: 0 }), { status: 200 }))
+    await flushPromises()
+    expect(w.text()).toContain('No shared items found.')
+  })
+
   it('shows a thumbnail image on cards when thumb_key is present', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [{ id: 9, name: 'solder tips', owner_name: 'Alice', qty: 8, photo_count: 1, thumb_key: '2026/10/x.webp' }],

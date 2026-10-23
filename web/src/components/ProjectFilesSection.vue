@@ -39,14 +39,19 @@ async function onChange(e: Event) {
   if (!files.length) return
   uploading.value = true
   try {
+    // Per-file isolation: one failure toasts with the file's name but the
+    // rest of the batch still uploads. The parent refetches ONCE for the
+    // whole batch — and only when something actually landed.
+    let uploaded = false
     for (const file of files) {
       try {
         await uploadProjectFile(props.projectId, file)
-        emit('refresh')
+        uploaded = true
       } catch (err) {
-        toast((err as Error).message, 'error')
+        toast(`${file.name}: ${(err as Error).message}`, 'error')
       }
     }
+    if (uploaded) emit('refresh')
   } finally {
     uploading.value = false
   }

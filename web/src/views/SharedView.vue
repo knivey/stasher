@@ -60,8 +60,11 @@ async function fetch() {
 }
 
 // Projects shared with you — an independent dataset loaded alongside the
-// item list; item search/pagination never refetches it.
+// item list; item search/pagination never refetches it. `projectsLoaded`
+// lets the empty state wait until BOTH fetches settled (items gate on
+// `loading`), so an in-flight projects fetch can't flash it.
 const projects = ref<SharedProject[]>([])
+const projectsLoaded = ref(false)
 
 async function fetchProjects() {
   try {
@@ -69,6 +72,8 @@ async function fetchProjects() {
     projects.value = res.data
   } catch (e) {
     toast((e as Error).message, 'error')
+  } finally {
+    projectsLoaded.value = true
   }
 }
 
@@ -121,7 +126,7 @@ async function copy(item: SharedItem) {
       </div>
     </div>
 
-    <p v-else-if="!projects.length" class="bg-white dark:bg-slate-800 rounded-xl shadow p-6 text-center text-slate-400 dark:text-slate-500 text-sm">No shared items found.</p>
+    <p v-else-if="projectsLoaded && !projects.length" class="bg-white dark:bg-slate-800 rounded-xl shadow p-6 text-center text-slate-400 dark:text-slate-500 text-sm">No shared items found.</p>
 
     <h2 v-if="projects.length" class="text-lg font-semibold dark:text-slate-100">Projects</h2>
     <div v-if="projects.length" data-shared-projects class="space-y-2">

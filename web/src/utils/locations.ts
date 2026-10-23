@@ -6,11 +6,10 @@ export interface LocationRow { loc: Location; depth: number }
 // Flattened tree rows for the locations management view: each root in name
 // order, immediately followed by its descendants in name order (path-name
 // order). The visited set keeps a corrupt parent chain from recursing
-// forever — but where corrupt members land depends on reachability: a pure
-// cycle (no path from any root) is appended at the end by the final pass
-// (first member at depth 0, the rest nested beneath it), while a cycle
-// reached through a tail under a real root is walked in place. Either way
-// every location renders exactly once.
+// forever — and a cycle is necessarily a detached one (no path from any
+// root: a parent chain that enters a cycle never terminates at a root), so
+// the final pass appends it (first member at depth 0, the rest nested
+// beneath it) and every location still renders exactly once.
 //
 // `expanded` (optional) collapses the management list: a node whose id is
 // NOT in the set contributes its row but none of its descendants — they are
@@ -46,8 +45,7 @@ export function locationTreeRows(locations: Location[], expanded?: Set<number>):
 // followed by its own descendants (same walk as locationTreeRows), so the
 // select mirrors the tree instead of a depth-major alphabet that files
 // children under the wrong parent visually. Detached corrupt-cycle members
-// (no path from any root) surface at the end, exactly once; ones reached
-// through a tail render in place.
+// (no path from any root) surface at the end, exactly once.
 export function locationDepthOptions(locations: Location[]): LocationOption[] {
   return locationTreeRows(locations).map(r => ({ id: r.loc.id, name: r.loc.name, depth: r.depth }))
 }

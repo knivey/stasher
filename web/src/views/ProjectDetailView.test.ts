@@ -115,6 +115,60 @@ describe('ProjectDetailView', () => {
     expect(w.findAll('tbody tr')[0].text()).toContain('—')
   })
 
+  it('renders two masked sharee rows with the same item_name (no duplicate-key warning)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      // Rows are keyed by name for sharees, so the duplicate only bites on a
+      // keyed RE-render: the first detail load has distinct names, and the
+      // refetch after deleting the sharee's own comment returns two rows
+      // sharing one name.
+      const firstLoad = {
+        ...shareeDetail,
+        comments: [{ id: 3, author: 'You', mine: true, body: 'hi', created_at: '' }],
+      }
+      const secondLoad = {
+        ...shareeDetail,
+        items: [
+          { item_name: 'Dup part', qty_used: 1, shared: false },
+          { item_name: 'Dup part', qty_used: null, shared: true },
+        ],
+        comments: firstLoad.comments,
+      }
+      let detailGets = 0
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        if (url.includes('/projects/1') && method === 'GET') {
+          detailGets++
+          return new Response(JSON.stringify(detailGets === 1 ? firstLoad : secondLoad), { status: 200 })
+        }
+        return new Response('', { status: 204 }) // DELETE the comment
+      }))
+      const { w } = await mountView()
+      expect(w.findAll('tbody tr').length).toBe(2)
+      await w.find('[data-comment-delete]').trigger('click')
+      await flushPromises()
+      const rows = w.findAll('tbody tr')
+      expect(rows).toHaveLength(2)
+      expect(rows[0].text()).toContain('Dup part')
+      expect(rows[1].text()).toContain('Dup part')
+      expect(warn.mock.calls.some(args => args.join(' ').includes('Duplicate keys'))).toBe(false)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('sharee view does not fetch the add-picker items (owner-only UI)', async () => {
+    const calls = mockFetch({ detailBody: shareeDetail })
+    await mountView()
+    expect(calls.some(c => c.url.includes('/items?page_size=200'))).toBe(false)
+  })
+
+  it('owner view fetches the add-picker items', async () => {
+    const calls = mockFetch()
+    await mountView()
+    expect(calls.some(c => c.url.includes('/items?page_size=200'))).toBe(true)
+  })
+
   it('toggles visibility from the badge (owner)', async () => {
     const calls = mockFetch()
     const { w } = await mountView()

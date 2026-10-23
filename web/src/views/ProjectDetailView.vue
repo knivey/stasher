@@ -22,7 +22,7 @@ const items = ref<ProjectItem[]>([])
 // Owner-only notes log — held here for the notes-log section to mount.
 const notes = ref<ProjectNote[]>([])
 
-async function fetchDetail() {
+async function fetchDetail(): Promise<ProjectDetail | undefined> {
   try {
     const res = await api.get<ProjectDetail>(`/api/v1/projects/${route.params.id}`)
     detail.value = res
@@ -32,10 +32,12 @@ async function fetchDetail() {
     origStatus.value = res.project.status
     editOrig = { name: res.project.name, notes: res.project.notes ?? '' }
     seedQtyEdits()
+    return res
   } catch (e) {
     toast((e as Error).message, 'error')
     // Foreign/deleted projects 404 — bounce back to the list.
     if (e instanceof ApiError && e.code === 'not_found') router.push('/projects')
+    return undefined
   }
 }
 
@@ -53,9 +55,10 @@ async function loadPickerItems() {
   }
 }
 
-onMounted(() => {
-  void fetchDetail()
-  void loadPickerItems()
+onMounted(async () => {
+  const res = await fetchDetail()
+  // The add-picker is owner-only UI — sharees never hit /items here.
+  if (res?.owner_view) void loadPickerItems()
 })
 
 // ---- Status select ----
@@ -308,7 +311,7 @@ async function addProjectItem() {
           </tr>
         </thead>
         <tbody class="divide-y dark:divide-slate-700">
-          <template v-for="pi in detail?.items" :key="'item_id' in pi ? pi.item_id : pi.item_name">
+          <template v-for="(pi, index) in detail?.items" :key="'item_id' in pi ? pi.item_id : pi.item_name + '-' + index">
             <!-- Owner row: link + stock + editable qty_used + remove. -->
             <tr v-if="detail?.owner_view && 'item_id' in pi">
               <td class="py-2 pr-2">
@@ -363,7 +366,8 @@ async function addProjectItem() {
          sections that refetch the whole detail after each mutation. -->
     <ProjectNotesSection v-if="detail?.owner_view" :project-id="project.id" :notes="notes" @refresh="fetchDetail" />
     <ProjectCommentsSection :project-id="project.id" :comments="detail?.comments ?? []"
-      :can-post="!!detail?.owner_view || project.visibility === 'shared'" @refresh="fetchDetail" />
+      :can-post="!!detail?.owner_view || project.visibility === 'shared'" :owner="!!detail?.owner_view"
+      @refresh="fetchDetail" />
 
     <!-- Materials + bookmarks (presentational sections, same refresh
          contract; owner controls gated on owner_view via the owner prop). -->

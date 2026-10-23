@@ -2,8 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ProjectFilesSection from './ProjectFilesSection.vue'
 import type { ProjectFile } from '../api/types'
+import { toasts } from '../utils/toast'
 
-beforeEach(() => { vi.unstubAllGlobals() })
+beforeEach(() => { vi.unstubAllGlobals(); toasts.splice(0) })
+
+// A 201 upload response echoing the picked filename.
+function uploadOk(f: File): Response {
+  return new Response(JSON.stringify(
+    { id: 3, storage_key: 'k3', thumb_key: null, filename: f.name, mime_type: 'application/pdf', size_bytes: 10, created_at: '' }),
+    { status: 201 })
+}
 
 describe('ProjectFilesSection', () => {
   it('renders image thumbs and file rows; owner can upload/delete', async () => {
@@ -54,5 +62,52 @@ describe('ProjectFilesSection', () => {
     expect(w.find('[data-file-upload]').exists()).toBe(false)
     expect(w.find('[data-file-delete]').exists()).toBe(false)
     expect(w.find('a[href="/files/k2"]').exists()).toBe(true) // download still available
+  })
+
+  it('a two-file pick POSTs each file but emits exactly ONE refresh', async () => {
+    const posted: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const f = (init.body as FormData).get('file') as File
+        posted.push(f.name)
+        return uploadOk(f)
+      }
+      return new Response(null, { status: 204 })
+    }))
+    const w = mount(ProjectFilesSection, { props: { projectId: 1, owner: true, files: [] } })
+    const input = w.find('[data-file-upload]')
+    Object.defineProperty(input.element, 'files', { value: [
+      new File(['x'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['y'], 'b.pdf', { type: 'application/pdf' }),
+    ] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(posted).toEqual(['a.pdf', 'b.pdf'])
+    expect(w.emitted('refresh')).toHaveLength(1)
+  })
+
+  it('a failing file toasts with its filename and does not abort the rest of the batch', async () => {
+    const posts: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const f = (init.body as FormData).get('file') as File
+        posts.push(f.name)
+        if (f.name === 'bad.pdf')
+          return new Response(JSON.stringify({ error: { code: 'file_too_large', message: 'file too large' } }), { status: 413 })
+        return uploadOk(f)
+      }
+      return new Response(null, { status: 204 })
+    }))
+    const w = mount(ProjectFilesSection, { props: { projectId: 1, owner: true, files: [] } })
+    const input = w.find('[data-file-upload]')
+    Object.defineProperty(input.element, 'files', { value: [
+      new File(['x'], 'bad.pdf', { type: 'application/pdf' }),
+      new File(['y'], 'good.pdf', { type: 'application/pdf' }),
+    ] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(posts).toEqual(['bad.pdf', 'good.pdf']) // failure didn't abort the rest
+    expect(toasts.some(t => t.type === 'error' && t.message === 'bad.pdf: file too large')).toBe(true)
+    expect(w.emitted('refresh')).toHaveLength(1) // good.pdf landed → one batch refresh
   })
 })
