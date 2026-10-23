@@ -88,11 +88,18 @@ func main() {
 		fatal(err)
 	}
 	// engines are wired unconditionally: with no chromium found, archive
-	// jobs fail with an actionable message and direct fetch is unaffected
+	// jobs fail with an actionable message and direct fetch is unaffected.
+	// The searcher is wired only with a key configured (nil → the search
+	// endpoint answers 400 search_disabled).
 	chrome := fetcher.ChromePath(cfg.ChromePath)
+	var searcher fetcher.Searcher
+	if cfg.BraveAPIKey != "" {
+		searcher = &fetcher.BraveSearcher{Key: cfg.BraveAPIKey}
+	}
 	srv := api.New(&cfg, sqlDB, storage,
 		fetcher.NewDirectEngine(fetcher.PublicPolicy()),
-		fetcher.NewArchiveEngine(fetcher.PublicPolicy(), chrome))
+		fetcher.NewArchiveEngine(fetcher.PublicPolicy(), chrome),
+		searcher)
 
 	// sweep trash whose retention window closed while the server was down
 	// (entries trashed while running are swept on GET /trash)

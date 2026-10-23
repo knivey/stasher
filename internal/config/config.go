@@ -20,6 +20,9 @@ type Config struct {
 	// google-chrome on PATH); archive fetches fail with an actionable
 	// error when no browser is found.
 	ChromePath string `yaml:"chrome_path"`
+	// BraveAPIKey is the Brave Search API key for the document finder.
+	// Empty disables document search (the endpoint answers search_disabled).
+	BraveAPIKey string `yaml:"brave_api_key"`
 	// TrashRetentionDays is how long trash entries (and their files)
 	// survive before auto-purge. 0 or negative = keep forever.
 	TrashRetentionDays int `yaml:"trash_retention_days"`
@@ -48,12 +51,13 @@ func Load(path string) (Config, error) {
 		}
 	}
 	env := map[string]*string{
-		"STASHER_LISTEN_ADDR":  &cfg.ListenAddr,
-		"STASHER_BASE_URL":     &cfg.BaseURL,
-		"STASHER_DATA_DIR":     &cfg.DataDir,
-		"STASHER_REGISTRATION": &cfg.Registration,
-		"STASHER_LOG_LEVEL":    &cfg.LogLevel,
-		"STASHER_CHROME_PATH":  &cfg.ChromePath,
+		"STASHER_LISTEN_ADDR":   &cfg.ListenAddr,
+		"STASHER_BASE_URL":      &cfg.BaseURL,
+		"STASHER_DATA_DIR":      &cfg.DataDir,
+		"STASHER_REGISTRATION":  &cfg.Registration,
+		"STASHER_LOG_LEVEL":     &cfg.LogLevel,
+		"STASHER_CHROME_PATH":   &cfg.ChromePath,
+		"STASHER_BRAVE_API_KEY": &cfg.BraveAPIKey,
 	}
 	for k, dst := range env {
 		if v, ok := os.LookupEnv(k); ok && v != "" {

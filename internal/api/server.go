@@ -25,9 +25,11 @@ type Server struct {
 	loginIP    *auth.Limiter // 10 attempts/min per IP
 	loginAcct  *auth.Limiter // 5 attempts/min per account
 	registerIP *auth.Limiter // 10 registrations/min per IP
+	searchRate *auth.Limiter // 1 document search / 3s per user
 
-	fetchDirect  fetcher.Engine // plain HTTP downloads (nil = fetching disabled)
-	fetchArchive fetcher.Engine // chromium page->PDF (nil = archive disabled)
+	fetchDirect  *fetcher.DirectEngine // plain HTTP downloads; also verifies search candidates
+	fetchArchive fetcher.Engine        // chromium page->PDF (nil = archive disabled)
+	searcher     fetcher.Searcher      // Brave web search (nil = search disabled)
 
 	jobs     map[string]*jobState // in-memory fetch jobs (never persisted)
 	jobsMu   sync.Mutex
@@ -35,15 +37,19 @@ type Server struct {
 }
 
 // New wires the server. fetchDirect/fetchArchive may be nil in principle
-// (the fetch endpoint then answers 503) but main always wires both.
-func New(cfg *config.Config, raw *sql.DB, st *files.Storage, fetchDirect, fetchArchive fetcher.Engine) *Server {
+// (the fetch endpoint then answers 503) but main always wires both;
+// searcher is nil unless brave_api_key is configured (search → 400
+// search_disabled).
+func New(cfg *config.Config, raw *sql.DB, st *files.Storage, fetchDirect *fetcher.DirectEngine, fetchArchive fetcher.Engine, searcher fetcher.Searcher) *Server {
 	return &Server{
 		cfg: cfg, q: dbpkg.New(raw), st: st, raw: raw,
 		loginIP:      auth.NewLimiter(10, 10),
 		loginAcct:    auth.NewLimiter(5, 5),
 		registerIP:   auth.NewLimiter(10, 10),
+		searchRate:   auth.NewLimiter(20, 1), // 1 search / 3s per user, no burst
 		fetchDirect:  fetchDirect,
 		fetchArchive: fetchArchive,
+		searcher:     searcher,
 		jobs:         map[string]*jobState{},
 		fetchSem:     make(chan struct{}, 1),
 	}
@@ -98,6 +104,7 @@ func (s *Server) Router() chi.Router {
 			r.Patch("/items/{id}", s.handleUpdateItem)
 			r.Delete("/items/{id}", s.handleDeleteItem)
 			r.Post("/items/{id}/fetch", s.handleItemFetch)
+			r.Post("/items/{id}/search-documents", s.handleItemSearchDocuments)
 			r.Get("/jobs/{id}", s.handleGetJob)
 			r.Post("/items/{id}/photos", s.handleUploadPhoto)
 			r.Patch("/items/{id}/photos/{photoId}", s.handlePatchPhoto)

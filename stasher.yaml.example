@@ -5,7 +5,7 @@
 # Every key can be overridden by environment variables:
 #   STASHER_LISTEN_ADDR, STASHER_BASE_URL, STASHER_DATA_DIR,
 #   STASHER_REGISTRATION, STASHER_LOG_LEVEL, STASHER_TRASH_RETENTION_DAYS,
-#   STASHER_CHROME_PATH
+#   STASHER_CHROME_PATH, STASHER_BRAVE_API_KEY
 
 # Address the server listens on. Behind a reverse proxy (Caddy/nginx),
 # keep this on localhost and proxy to it.
@@ -38,3 +38,10 @@ trash_retention_days: 30
 # chromium-browser, or google-chrome on PATH. Without it, direct URL
 # fetching still works; archiving returns a helpful error.
 chrome_path: ""
+
+# Optional: Brave Search API key for the document finder
+# (free tier: https://api-dashboard.search.brave.com). Empty disables
+# search. With a key, "Find document…" on an item searches the web for
+# candidate datasheets and returns only URLs that verify as downloadable
+# PDFs; picking one downloads it through the normal fetch endpoint.
+brave_api_key: ""

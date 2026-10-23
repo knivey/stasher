@@ -87,7 +87,8 @@ func newTestServer(t *testing.T, mutate func(*config.Config)) (*Server, *httptes
 	}
 	s := New(cfg, sqlDB, st,
 		fetcher.NewDirectEngine(fetcher.LoopbackPolicy()),
-		fetcher.NewArchiveEngine(fetcher.LoopbackPolicy(), stubChromePath()))
+		fetcher.NewArchiveEngine(fetcher.LoopbackPolicy(), stubChromePath()),
+		nil) // searcher: tests install a fake on s.searcher when needed
 	ts := httptest.NewServer(s.Router())
 	t.Cleanup(ts.Close)
 	return s, ts

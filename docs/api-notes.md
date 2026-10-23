@@ -250,6 +250,45 @@ GET  /api/v1/jobs/{id}
   (`null` when unset); **list rows never carry it** (detail-only field).
   Same table as the other nullable PATCH fields above.
 
+## Document search (2026-10-23)
+
+Brave-powered "find datasheets for this item". Requires `brave_api_key`
+(yaml) / `STASHER_BRAVE_API_KEY`; **empty key disables the feature**.
+
+```
+POST /api/v1/items/{id}/search-documents  { "query": "lm358 datasheet" }
+→ 200 { "results": [ { "title", "url", "host", "size"? }, … ],
+        "rejected": <int> }
+```
+
+- **Owner-only** like every owned-item route: foreign/absent item → `404`,
+  **before** the search-disabled check (config state is not probeable
+  through someone else's item).
+- **No key configured** → `400 search_disabled` (`set brave_api_key in
+  config to enable document search`). Query must trim to **1-200 chars**
+  (else `400 validation_error`). Per-user rate limit **1 search / 3s** →
+  `429 rate_limited` on the second immediate call.
+- **The response is SYNCHRONOUS** (15s overall budget) — no job, no
+  polling (unlike `/fetch`). `results` contains ONLY candidates that
+  verified as downloadable PDFs server-side (Brave web results, top 6
+  ranked `.pdf`-suffix first, each fetched by the server through the same
+  SSRF policy/pinning path as direct fetch — a Range read of the first
+  512 bytes must show the `%PDF-` magic). `rejected` counts the
+  candidates dropped by verification; zero verified → `results: []` (the
+  UI shows "no downloadable PDFs found").
+- **`size` is OPTIONAL**: present with the PDF's total bytes when the
+  candidate server reported a Content-Range total, **absent** when unknown
+  (plain 200 or unparseable Content-Range). Don't assume the key exists.
+  `size: -1` is never sent.
+- Brave-side failures (key rejected, network) → `502 search_failed`.
+- **Picking a result uses the EXISTING fetch flow**: `POST
+  /items/{id}/fetch` with `{url: <result.url>, mode: "direct"}` → 202
+  `{job_id}` → poll `/jobs/{id}`. The search endpoint itself never stores
+  anything.
+- Brave API key handling: 401/422 from Brave surface as "Brave API
+  rejected the key" (in the 502 message); 10 results per query are
+  requested (cap 10 kept server-side), non-http(s) URLs are dropped.
+
 ## Frontend notes
 
 Facts discovered by the frontend round, kept here so they survive:

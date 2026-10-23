@@ -118,6 +118,39 @@ func TestLoadChromePath(t *testing.T) {
 	}
 }
 
+func TestLoadBraveAPIKey(t *testing.T) {
+	// default empty (search disabled)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BraveAPIKey != "" {
+		t.Errorf("BraveAPIKey = %q, want empty default", cfg.BraveAPIKey)
+	}
+
+	// YAML sets, env overrides
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stasher.yaml")
+	os.WriteFile(path, []byte("brave_api_key: yaml-key\n"), 0o644)
+	t.Setenv("STASHER_BRAVE_API_KEY", "env-key")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BraveAPIKey != "env-key" {
+		t.Errorf("BraveAPIKey = %q, want env override", cfg.BraveAPIKey)
+	}
+
+	t.Setenv("STASHER_BRAVE_API_KEY", "")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BraveAPIKey != "yaml-key" {
+		t.Errorf("BraveAPIKey = %q, want YAML value", cfg.BraveAPIKey)
+	}
+}
+
 func TestPurgeAfter(t *testing.T) {
 	trashed := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 

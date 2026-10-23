@@ -73,6 +73,13 @@ func (s *Server) handleItemFetch(w http.ResponseWriter, r *http.Request) {
 	var eng fetcher.Engine
 	switch req.Mode {
 	case "direct":
+		// compare the CONCRETE pointer: a nil *DirectEngine tucked into
+		// the Engine interface would look non-nil and crash the job
+		if s.fetchDirect == nil {
+			writeErr(w, http.StatusServiceUnavailable, "fetching_disabled",
+				"fetching is not available on this server")
+			return
+		}
 		eng = s.fetchDirect
 	case "archive":
 		eng = s.fetchArchive
