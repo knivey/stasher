@@ -382,6 +382,40 @@ defineExpose({ form, save, tagsEqual })
   <div class="max-w-xl space-y-4">
     <h1 class="text-2xl font-bold dark:text-slate-100">{{ editing ? 'Edit item' : 'New item' }}</h1>
     <form class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-4" @submit.prevent="save(false)">
+      <!-- Photos & documents lead the create form so the snap-photos →
+           autofill → review-fields flow reads top-down. Create only —
+           the edit form's AI picker (below) fills this role instead. -->
+      <div v-if="!editing" class="block text-sm font-medium dark:text-slate-100">Photos & documents
+        <div class="mt-1 flex gap-2">
+          <!-- :disabled blocks label-click activation too; the labels dim and
+               go inert so a pick can't START mid-save and miss the encode
+               drain (backlog: residual upload race). -->
+          <label class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm font-normal cursor-pointer"
+            :class="saving && 'opacity-50 pointer-events-none'">Add photo 📷
+            <input type="file" accept="image/*" capture="environment" multiple class="hidden"
+              :disabled="saving" @change="onPickPhotos" />
+          </label>
+          <label class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm font-normal cursor-pointer"
+            :class="saving && 'opacity-50 pointer-events-none'">Add document
+            <input type="file" multiple class="hidden" :disabled="saving" @change="onPickDocs" />
+          </label>
+        </div>
+        <!-- AI autofill (spec §5): analyze queued photos → prefill the form
+             for review. Autofill never saves; only the first 4 queued blobs
+             are sent (endpoint cap). Create form only — the edit form gets
+             its own photo picker (the block below). -->
+        <div v-if="queuedPhotos.length" class="mt-2 flex flex-wrap items-center gap-2">
+          <button type="button" :disabled="analyzing || saving" @click="autofillFromPhotos"
+            class="rounded-lg border border-slate-900 dark:border-slate-100 text-slate-900 dark:text-slate-100 px-3 py-1.5 text-sm font-medium disabled:opacity-50">
+            <span v-if="analyzing" class="animate-spin inline-block" aria-hidden="true">⟳</span>{{ analyzing ? 'Analyzing…' : '✨ Autofill from photos' }}</button>
+          <span class="text-xs text-slate-500 dark:text-slate-400 font-normal">
+            {{ analyzing ? 'reading your photos…' : autofillHint }}</span>
+        </div>
+        <p v-if="queuedPhotos.length || queuedDocs.length" class="mt-1 text-xs text-slate-500 dark:text-slate-400 font-normal">
+          {{ queuedPhotos.length }} photo{{ queuedPhotos.length === 1 ? '' : 's' }},
+          {{ queuedDocs.length }} document{{ queuedDocs.length === 1 ? '' : 's' }} will be added after saving
+        </p>
+      </div>
       <label class="block text-sm font-medium dark:text-slate-100" :data-ai-hint="aiTouched.has('name') || undefined">Name<span v-if="aiTouched.has('name')" class="ml-1" aria-hidden="true">✨</span>
         <input ref="nameInput" v-model="form.name" required @input="aiTouched.delete('name')" class="mt-1 w-full border dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 text-sm font-normal" />
       </label>
@@ -452,37 +486,6 @@ defineExpose({ form, save, tagsEqual })
             <span data-ai-count class="text-xs text-slate-500 dark:text-slate-400 font-normal">{{ aiSelected.size }}/4 selected</span>
           </div>
         </div>
-      </div>
-      <div v-if="!editing" class="block text-sm font-medium dark:text-slate-100">Photos & documents
-        <div class="mt-1 flex gap-2">
-          <!-- :disabled blocks label-click activation too; the labels dim and
-               go inert so a pick can't START mid-save and miss the encode
-               drain (backlog: residual upload race). -->
-          <label class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm font-normal cursor-pointer"
-            :class="saving && 'opacity-50 pointer-events-none'">Add photo 📷
-            <input type="file" accept="image/*" capture="environment" multiple class="hidden"
-              :disabled="saving" @change="onPickPhotos" />
-          </label>
-          <label class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm font-normal cursor-pointer"
-            :class="saving && 'opacity-50 pointer-events-none'">Add document
-            <input type="file" multiple class="hidden" :disabled="saving" @change="onPickDocs" />
-          </label>
-        </div>
-        <!-- AI autofill (spec §5): analyze queued photos → prefill the form
-             for review. Autofill never saves; only the first 4 queued blobs
-             are sent (endpoint cap). Create form only — the edit form gets
-             its own photo picker (the block below). -->
-        <div v-if="queuedPhotos.length" class="mt-2 flex flex-wrap items-center gap-2">
-          <button type="button" :disabled="analyzing || saving" @click="autofillFromPhotos"
-            class="rounded-lg border border-slate-900 dark:border-slate-100 text-slate-900 dark:text-slate-100 px-3 py-1.5 text-sm font-medium disabled:opacity-50">
-            <span v-if="analyzing" class="animate-spin inline-block" aria-hidden="true">⟳</span>{{ analyzing ? 'Analyzing…' : '✨ Autofill from photos' }}</button>
-          <span class="text-xs text-slate-500 dark:text-slate-400 font-normal">
-            {{ analyzing ? 'reading your photos…' : autofillHint }}</span>
-        </div>
-        <p v-if="queuedPhotos.length || queuedDocs.length" class="mt-1 text-xs text-slate-500 dark:text-slate-400 font-normal">
-          {{ queuedPhotos.length }} photo{{ queuedPhotos.length === 1 ? '' : 's' }},
-          {{ queuedDocs.length }} document{{ queuedDocs.length === 1 ? '' : 's' }} will be added after saving
-        </p>
       </div>
       <div class="flex justify-end gap-2">
         <button type="button" class="rounded-lg border dark:border-slate-700 dark:text-slate-100 px-3 py-1.5 text-sm" @click="cancel">Cancel</button>

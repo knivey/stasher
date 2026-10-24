@@ -326,7 +326,7 @@ describe('ItemFormView create', () => {
     vm.form.qty = 3 // would be reset to 1 if a save actually ran
     // focus (not document.activeElement): VTU mounts detached from the
     // document, so happy-dom treats focus() on it as a no-op.
-    const focusSpy = vi.spyOn(w.find('input').element, 'focus')
+    const focusSpy = vi.spyOn(w.find('input[required]').element as HTMLInputElement, 'focus')
     await vm.save()
     await flushPromises()
     expect(posts).toBe(0) // nothing to save: no POST
@@ -494,7 +494,7 @@ describe('ItemFormView save & add another', () => {
     vm.form.qty = 3 // would be reset to 1 if a save actually ran
     // focus (not document.activeElement): VTU mounts detached from the
     // document, so happy-dom treats focus() on it as a no-op.
-    const focusSpy = vi.spyOn(w.find('input').element, 'focus')
+    const focusSpy = vi.spyOn(w.find('input[required]').element as HTMLInputElement, 'focus')
     await againButton(w).trigger('click') // type="button": native required-validation never runs
     await flushPromises()
     expect(posts).toBe(0) // nothing to save: no POST
@@ -808,7 +808,7 @@ describe('ItemFormView AI autofill (add form)', () => {
     expect(w.findAll('[data-ai-hint]')).toHaveLength(5) // name description qty unit tags
     expect(toasts.some(t => t.message === 'Filled: name, description, qty, unit, tags' && t.type === 'success')).toBe(true)
     // a manual edit clears just that field's marker
-    await w.find('input').setValue('My own name') // first input in the form = Name
+    await w.find('input[required]').setValue('My own name') // the required input = Name (the photos block now leads the form)
     expect(w.findAll('[data-ai-hint]')).toHaveLength(4)
   })
 
