@@ -14,6 +14,8 @@
 //   - web/node_modules with puppeteer-core installed (make web-setup).
 //   - A system Chromium: discovered via CHROME_PATH, else the first of
 //     chromium / chromium-browser / google-chrome found on PATH.
+//   - An emoji font (the UI uses emoji icons): e.g. Arch `noto-fonts-emoji`,
+//     Debian `fonts-noto-color-emoji` — without it the shots render tofu.
 //
 // Run from the repo root:  node scripts/screenshots.mjs
 // Every shot asserts its key DOM content BEFORE capturing, fails loudly
