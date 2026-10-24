@@ -353,8 +353,15 @@ returns AI-PROPOSED item fields for the form to prefill. Nothing is stored.
 
 ```
 POST /api/v1/autofill — multipart, each image one "files" FILE part
-→ 200 { "name"?, "description"?, "qty"?, "unit"?, "tags"? }
+→ 200 { "name"?, "description"?, "qty"?, "unit"? }
 ```
+
+- **Tags are no longer suggested or returned** (disabled 2026-10-24 by
+  operator feedback — the suggestions were noisy/meaningless): the prompt
+  doesn't request them and the server strips the key, so **`tags` never
+  appears in an autofill response**, even when the provider volunteers
+  one. (The AI client still parses them, so a future re-enable would be a
+  prompt change plus removing the strip.)
 
 - **Every response key is optional** — present only when the model
   effectively returned a usable value; don't assume any key exists.
@@ -385,10 +392,9 @@ POST /api/v1/autofill — multipart, each image one "files" FILE part
   never in client responses.
 - **Clamps, not rejections** (AI output is clamped, never a 4xx): caps are
   measured in bytes, and truncation never splits a UTF-8 character. The
-  name (200) and tags (100/entry) caps match the item validator so a
-  clamped prefill always survives item create; description (10,000) and
-  unit (50) are the spec's own numbers — item create enforces no length
-  on those fields.
+  name (200) cap matches the item validator so a clamped prefill always
+  survives item create; description (10,000) and unit (50) are the spec's
+  own numbers — item create enforces no length on those fields.
 
   | Field | Rule |
   |---|---|
@@ -396,7 +402,7 @@ POST /api/v1/autofill — multipart, each image one "files" FILE part
   | `description` | truncated to 10,000; empty → omitted |
   | `qty` | kept only when finite and within 0..1e12, else omitted |
   | `unit` | truncated to 50; empty → omitted |
-  | `tags` | each trimmed; entries outside 1–100 chars are DROPPED (not truncated); case-insensitive dedup keeps the first-seen casing; capped at 10; empty list → omitted |
+  | `tags` | never present (disabled 2026-10-24 — see above) |
 
 - **Privacy**: off by default (`ai_api_key` empty). Enabling it means the
   photos in an autofill request are sent to the configured AI service

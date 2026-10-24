@@ -28,7 +28,12 @@ type Fields struct {
 	Description string
 	Qty         *float64 // nil = not estimated
 	Unit        string
-	Tags        []string
+	// Tags is still parsed when a provider volunteers tags (models
+	// hallucinate unrequested fields), but tag suggestions are disabled
+	// since 2026-10-24: the prompt no longer requests them and the API
+	// layer strips the key from responses. Kept as plumbing so a future
+	// re-enable is prompt + strip only, no client change.
+	Tags []string
 }
 
 // DefaultBaseURL is the stock OpenAI endpoint, used when no ai_base_url
@@ -85,15 +90,20 @@ const (
 // systemPrompt and userPrompt are fixed server-side instruction text.
 // No response_format is sent — not universal across OpenAI-compatible
 // providers — so the prompt itself demands strict JSON with no markdown.
+// Tags are NOT requested: tag suggestions were disabled on 2026-10-24
+// after operator feedback (they came back noisy/meaningless). The prompt
+// explicitly forbids them because models volunteer unrequested fields;
+// the API layer additionally strips any tags the provider returns
+// anyway (see clampAIFields in internal/api).
 const systemPrompt = `You extract inventory field values from photos of a single item.
 Reply with ONLY one JSON object and nothing else: no markdown, no code fences, no commentary.
 Every field is optional: include a key only when the photos support an estimate.
-Shape: {"name": string, "description": string, "qty": number, "unit": string, "tags": [string]}
+Shape: {"name": string, "description": string, "qty": number, "unit": string}
 name: short human-readable label; include part numbers when markings are legible.
 description: one or two sentences.
 qty: a plain number (the count), never a string.
 unit: a short unit such as "pcs", "m", "kg".
-tags: at most 10 short lowercase tags.`
+Do not suggest tags.`
 
 const userPrompt = `Identify the item shown in these photos and reply with the JSON object only.`
 

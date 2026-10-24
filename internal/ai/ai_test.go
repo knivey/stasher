@@ -106,6 +106,24 @@ func TestNew(t *testing.T) {
 	}
 }
 
+// Tag suggestions are disabled (2026-10-24, operator feedback: they came
+// back noisy/meaningless). The prompt must not request a tags key — and
+// must explicitly forbid them, because models volunteer unrequested
+// fields anyway. The API layer additionally strips the key (see
+// clampAIFields); this client keeps parsing tags so a future re-enable
+// is prompt + strip only.
+func TestSystemPromptDoesNotRequestTags(t *testing.T) {
+	if !strings.Contains(systemPrompt, "Do not suggest tags") {
+		t.Errorf("system prompt lacks an explicit do-not-suggest-tags instruction:\n%s", systemPrompt)
+	}
+	if strings.Contains(systemPrompt, `"tags": [string]`) {
+		t.Errorf("system prompt still advertises a tags key in the JSON shape:\n%s", systemPrompt)
+	}
+	if strings.Contains(systemPrompt, "lowercase tags") {
+		t.Errorf("system prompt still carries the old tags field instruction:\n%s", systemPrompt)
+	}
+}
+
 func TestAutofillHappyPath(t *testing.T) {
 	img1 := testPNG(1, 2, 3)
 	img2 := testPNG(9, 9)
@@ -152,6 +170,9 @@ func TestAutofillHappyPath(t *testing.T) {
 	if fields.Unit != "pcs" {
 		t.Errorf("Unit = %q", fields.Unit)
 	}
+	// Tags still parse into Fields even though suggestions are disabled:
+	// the client is unchanged (models volunteer unrequested fields); the
+	// drop happens at the API layer.
 	if len(fields.Tags) != 2 || fields.Tags[0] != "op-amp" || fields.Tags[1] != "dip-8" {
 		t.Errorf("Tags = %v, want [op-amp dip-8]", fields.Tags)
 	}

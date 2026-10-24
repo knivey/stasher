@@ -149,10 +149,11 @@ func aiNotConfiguredMessage(c *ai.Client) string {
 // clampAIFields applies the spec §4 clamps — AI output is clamped, never
 // rejected — and omits every key without a usable value: the response only
 // carries fields the model effectively returned. Caps are measured in
-// bytes; the name/tags caps match the item validator (so a clamped prefill
+// bytes; the name cap matches the item validator (so a clamped prefill
 // always survives item create), while description (10,000) and unit (50)
 // follow the spec's numbers — item create enforces no length on those.
 // Truncation never splits a UTF-8 rune.
+// Tags are NOT clamped but dropped wholesale — see below.
 func clampAIFields(f ai.Fields) map[string]any {
 	out := map[string]any{}
 	if name := strings.TrimSpace(f.Name); name != "" {
@@ -170,26 +171,14 @@ func clampAIFields(f ai.Fields) map[string]any {
 	if u := truncateUTF8(f.Unit, 50); u != "" {
 		out["unit"] = u
 	}
-	seen := make(map[string]bool, len(f.Tags))
-	tags := make([]string, 0, min(len(f.Tags), 10))
-	for _, tag := range f.Tags {
-		tag = strings.TrimSpace(tag)
-		if tag == "" || len(tag) > 100 {
-			continue // invalid entries are dropped, not truncated
-		}
-		key := strings.ToLower(tag)
-		if seen[key] {
-			continue // case-insensitive dupe; first-seen casing wins
-		}
-		seen[key] = true
-		tags = append(tags, tag)
-		if len(tags) == 10 {
-			break
-		}
-	}
-	if len(tags) > 0 {
-		out["tags"] = tags
-	}
+	// Tags are dropped unconditionally: tag suggestions were disabled by
+	// operator feedback on 2026-10-24 (they came back noisy/meaningless).
+	// Models volunteer unrequested fields, so even though the prompt no
+	// longer asks for tags, anything the provider returns in f.Tags never
+	// reaches the response — the key is absent, not empty. Re-enable =
+	// restore the tags request in the ai system prompt AND remove this
+	// strip.
+	_ = f.Tags
 	return out
 }
 

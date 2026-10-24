@@ -158,8 +158,39 @@ type autofillResp struct {
 	Tags        []string `json:"tags"`
 }
 
-// 1. Happy: 2 PNG parts → 200 with the fields forwarded; both images
-// actually reach the provider.
+// decodeAutofillBody decodes the 200 body into dst and also returns the
+// raw key map, so tests can assert a key's ABSENCE (struct decoding
+// cannot distinguish an absent key from an empty one).
+func decodeAutofillBody(t *testing.T, resp *http.Response, dst any) map[string]json.RawMessage {
+	t.Helper()
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if err := json.Unmarshal(body, dst); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("decode response as raw map: %v", err)
+	}
+	return raw
+}
+
+// assertNoTagsKey fails when an autofill response carries the tags key.
+// Tag suggestions are disabled (operator feedback 2026-10-24): the
+// response never carries the key, even when the provider returns tags.
+func assertNoTagsKey(t *testing.T, raw map[string]json.RawMessage) {
+	t.Helper()
+	if v, ok := raw["tags"]; ok {
+		t.Errorf("response carries tags = %s, want the key absent (tag suggestions disabled)", v)
+	}
+}
+
+// 1. Happy: 2 PNG parts → 200 with the fields forwarded (minus tags,
+// which are stripped — the provider fake returns them anyway to prove
+// the response never carries the key); both images reach the provider.
 func TestAutofillHappy(t *testing.T) {
 	s, ts := newTestServer(t, nil)
 	var imageParts atomic.Int32
@@ -210,7 +241,7 @@ func TestAutofillHappy(t *testing.T) {
 		t.Fatalf("autofill = %d, want 200", resp.StatusCode)
 	}
 	var got autofillResp
-	decodeBody(t, resp, &got)
+	raw := decodeAutofillBody(t, resp, &got)
 	if got.Name != "LM358 op-amp" {
 		t.Errorf("name = %q", got.Name)
 	}
@@ -223,15 +254,39 @@ func TestAutofillHappy(t *testing.T) {
 	if got.Unit != "pcs" {
 		t.Errorf("unit = %q", got.Unit)
 	}
-	if len(got.Tags) != 2 || got.Tags[0] != "op-amp" || got.Tags[1] != "dip-8" {
-		t.Errorf("tags = %v", got.Tags)
-	}
+	// The fake provider returned tags; tag suggestions are disabled, so
+	// the response must not carry the key at all.
+	assertNoTagsKey(t, raw)
 	if n := imageParts.Load(); n != 2 {
 		t.Errorf("provider received %d image parts, want 2 (both parts forwarded whole)", n)
 	}
 }
 
+// 1b. Tags are dropped unconditionally (disabled by operator feedback
+// 2026-10-24): whatever the provider volunteers never reaches the
+// response. Re-enable = restore the tags request in the ai prompt AND
+// remove the strip in clampAIFields.
+func TestAutofillTagsDropped(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	wireAI(s, fakeAIProvider(t, http.StatusOK,
+		`{"name":"bolt","tags":["hardware","m6","M6"]}`))
+	cookie := registerUser(t, ts, "ai-tags@test.dev", "longpassword1")
+
+	resp := doAutofill(t, ts, cookie, aiPNG(1))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("autofill = %d, want 200", resp.StatusCode)
+	}
+	var got autofillResp
+	raw := decodeAutofillBody(t, resp, &got)
+	if got.Name != "bolt" {
+		t.Errorf("name = %q, want bolt", got.Name)
+	}
+	assertNoTagsKey(t, raw)
+}
+
 // 2. Clamps: over-limit values come back clamped or omitted, never 5xx.
+// The provider content still carries tags (they'd exercise the old
+// clamp rules) — now they're dropped wholesale like any other tags.
 func TestAutofillClamps(t *testing.T) {
 	s, ts := newTestServer(t, nil)
 	content := fmt.Sprintf(`{"name":%s,"description":%s,"qty":2e12,"unit":%s,"tags":["ok","",%s,"Ok","Ok"]}`,
@@ -247,7 +302,7 @@ func TestAutofillClamps(t *testing.T) {
 		t.Fatalf("autofill = %d, want 200", resp.StatusCode)
 	}
 	var got autofillResp
-	decodeBody(t, resp, &got)
+	raw := decodeAutofillBody(t, resp, &got)
 	if len(got.Name) != 200 {
 		t.Errorf("name len = %d, want 200 (truncated)", len(got.Name))
 	}
@@ -263,11 +318,8 @@ func TestAutofillClamps(t *testing.T) {
 	if len(got.Unit) != 50 {
 		t.Errorf("unit len = %d, want 50 (truncated)", len(got.Unit))
 	}
-	// "" and the 101-char tag are dropped; "Ok"/"Ok" fold into "ok"
-	// (case-insensitive dedup keeps the first-seen casing).
-	if len(got.Tags) != 1 || got.Tags[0] != "ok" {
-		t.Errorf("tags = %v, want [ok]", got.Tags)
-	}
+	// Tag clamping is gone with the feature: tags never appear at all.
+	assertNoTagsKey(t, raw)
 }
 
 // 3. Part-count guards: zero parts and more than four are 400s that fire
