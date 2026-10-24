@@ -545,6 +545,29 @@ async function capture(name, page, { fullPage = false } = {}) {
   await page.close()
 }
 
+// shared.png kept showing the search input's focus-state border even with
+// capture()'s blur — something re-focuses after it, and Tailwind's ring is
+// border/box-shadow based, not outline. So that ONE capture goes nuclear:
+// blur, neutralize every focus style with an injected <style> (id-tagged,
+// so a re-run replaces rather than stacks), and click the page's <h1> to
+// park focus in non-focusable space. The other five shots keep the plain
+// blur path.
+async function suppressFocusState(page) {
+  await page.evaluate(() => {
+    document.activeElement?.blur()
+    document.getElementById('shot-focus-suppress')?.remove()
+    const style = document.createElement('style')
+    style.id = 'shot-focus-suppress'
+    style.textContent =
+      '*:focus{outline:none!important}' +
+      'input:focus,textarea:focus,select:focus,button:focus' +
+      '{border-color:inherit!important;box-shadow:none!important}'
+    document.head.appendChild(style)
+    document.querySelector('h1')?.click()
+  })
+  await sleep(150)
+}
+
 async function run() {
   const bin = process.env.STASHER_BIN ?? join(rootDir, 'stasher')
   if (!existsSync(bin)) {
@@ -627,6 +650,7 @@ async function run() {
     await page.waitForSelector('input[placeholder="Search shared items…"]', { timeout: 15000 })
     await assertText(page, ['Shared with you', 'Raspberry Pi 4', `from ${SAM.name}`, 'Bench PSU Build'])
     await loadAllImages(page)
+    await suppressFocusState(page)
     await capture('shared', page)
   }
 
